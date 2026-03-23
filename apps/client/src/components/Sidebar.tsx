@@ -1,103 +1,133 @@
-import type { SidebarNavItem, SidebarNavItemId, WorkspaceProject } from "../types";
+import type {
+  SidebarNavItem,
+  SidebarNavItemId,
+  WorkspaceProject,
+  WorkspaceThread
+} from "../types";
 
 type SidebarProps = {
   projects: WorkspaceProject[];
+  threads: WorkspaceThread[];
   navItems: SidebarNavItem[];
   activeProjectId: string;
+  activeThreadId: string | null;
   activeNav: SidebarNavItemId;
+  filterValue: string;
   runtimeTone: "ready" | "busy" | "offline";
   runtimeLabel: string;
   onSelectProject: (projectId: string) => void;
+  onSelectThread: (threadId: string) => void;
+  onFilterChange: (value: string) => void;
+  onCreateThread: () => void;
   onSelectNav: (navId: SidebarNavItemId) => void;
 };
 
 export function Sidebar({
   projects,
+  threads,
   navItems,
   activeProjectId,
+  activeThreadId,
   activeNav,
+  filterValue,
   runtimeTone,
   runtimeLabel,
   onSelectProject,
+  onSelectThread,
+  onFilterChange,
+  onCreateThread,
   onSelectNav
 }: SidebarProps) {
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <div className="sidebar__brand-mark">SY</div>
+        <div className="sidebar__brand-mark">S</div>
         <div>
-          <p className="sidebar__eyebrow">Coding Agent</p>
           <h1>Shipyard</h1>
+          <p className="sidebar__eyebrow">Coding agent workspace</p>
         </div>
+        <span className={`tone-badge tone-badge--${runtimeTone}`}>{runtimeLabel}</span>
       </div>
 
-      <section className="panel sidebar__section">
-        <div className="panel__header">
+      <label className="sidebar__workspace-picker">
+        <span className="sidebar__label">Workspace</span>
+        <select
+          value={activeProjectId}
+          onChange={(event) => onSelectProject(event.target.value)}
+          aria-label="Select workspace"
+        >
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name} · {project.environment}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <button type="button" className="sidebar__action sidebar__action--primary" onClick={onCreateThread}>
+        + New thread
+      </button>
+
+      <nav className="sidebar-nav">
+        {navItems.map((item) => {
+          const isActive = item.id === activeNav;
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`sidebar__action sidebar-nav__item ${isActive ? "is-active" : ""}`}
+              onClick={() => onSelectNav(item.id)}
+            >
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="sidebar__threads">
+        <div className="sidebar__threads-header">
           <div>
-            <p className="panel__eyebrow">Workspace Switcher</p>
-            <h2>Projects</h2>
+            <strong>Threads</strong>
+            <small>{activeProject.name}</small>
           </div>
+          <span>{threads.length}</span>
         </div>
-        <div className="project-switcher">
-          {projects.map((project) => {
-            const isActive = project.id === activeProjectId;
 
-            return (
-              <button
-                key={project.id}
-                type="button"
-                className={`project-switcher__item ${isActive ? "is-active" : ""}`}
-                onClick={() => onSelectProject(project.id)}
-              >
-                <span className="project-switcher__badge">{project.code}</span>
-                <span className="project-switcher__meta">
-                  <strong>{project.name}</strong>
-                  <span>{project.environment}</span>
-                </span>
-              </button>
-            );
-          })}
+        <input
+          className="sidebar__search"
+          type="search"
+          value={filterValue}
+          onChange={(event) => onFilterChange(event.target.value)}
+          placeholder="Search threads"
+        />
+
+        <div className="sidebar__thread-list">
+          {threads.length > 0 ? (
+            threads.map((thread) => {
+              const isActive = thread.id === activeThreadId;
+
+              return (
+                <button
+                  key={thread.id}
+                  type="button"
+                  className={`sidebar__thread ${isActive ? "is-active" : ""}`}
+                  onClick={() => onSelectThread(thread.id)}
+                >
+                  <span className={`status-dot status-dot--${thread.status}`} />
+                  <span className="sidebar__thread-copy">
+                    <strong>{thread.title}</strong>
+                    <small>{thread.summary}</small>
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="sidebar__empty">No threads match this filter.</div>
+          )}
         </div>
-      </section>
-
-      <section className="panel sidebar__section">
-        <div className="panel__header">
-          <div>
-            <p className="panel__eyebrow">Navigation</p>
-            <h2>Surfaces</h2>
-          </div>
-        </div>
-        <nav className="sidebar-nav">
-          {navItems.map((item) => {
-            const isActive = item.id === activeNav;
-
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`sidebar-nav__item ${isActive ? "is-active" : ""}`}
-                onClick={() => onSelectNav(item.id)}
-              >
-                <span>{item.label}</span>
-                <small>{item.hint}</small>
-              </button>
-            );
-          })}
-        </nav>
-      </section>
-
-      <section className="panel sidebar__section sidebar__runtime">
-        <div className="panel__header">
-          <div>
-            <p className="panel__eyebrow">Runtime</p>
-            <h2>Health</h2>
-          </div>
-          <span className={`tone-badge tone-badge--${runtimeTone}`}>{runtimeLabel}</span>
-        </div>
-        <p className="sidebar__runtime-copy">
-          Live runtime status is wired from the backend. Skills, automations, and Git surfaces
-          stay visible even when the API is offline.
-        </p>
       </section>
     </aside>
   );

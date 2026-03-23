@@ -11,7 +11,6 @@ import {
 } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
-import { ThreadListPane } from "./components/ThreadListPane";
 import { UtilityDock } from "./components/UtilityDock";
 import {
   buildGitPreview,
@@ -64,7 +63,6 @@ function App() {
     tone: "success" | "danger" | "info";
     text: string;
   } | null>(null);
-  const [initializing, setInitializing] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   async function loadProjectData(cancelled?: { value: boolean }) {
@@ -140,11 +138,7 @@ function App() {
   useEffect(() => {
     const cancelled = { value: false };
 
-    void Promise.all([loadProjectData(cancelled), loadInstructionRuntime(cancelled)]).finally(() => {
-      if (!cancelled.value) {
-        setInitializing(false);
-      }
-    });
+    void Promise.all([loadProjectData(cancelled), loadInstructionRuntime(cancelled)]);
 
     return () => {
       cancelled.value = true;
@@ -310,25 +304,20 @@ function App() {
     <main className="workspace-shell">
       <Sidebar
         projects={workspaceProjects}
+        threads={filteredThreads}
         navItems={sidebarNavigation}
         activeProjectId={selectedProjectId}
+        activeThreadId={selectedThreadId}
         activeNav={activeNav}
+        filterValue={threadFilter}
         runtimeTone={runtimeTone}
         runtimeLabel={runtimeLabel}
         onSelectProject={(projectId) => {
           setSelectedProjectId(projectId);
           setActiveNav("projects");
         }}
-        onSelectNav={handleNavSelect}
-      />
-
-      <ThreadListPane
-        project={activeProject}
-        threads={filteredThreads}
-        activeThreadId={selectedThreadId}
-        filterValue={threadFilter}
-        onFilterChange={setThreadFilter}
         onSelectThread={setSelectedThreadId}
+        onFilterChange={setThreadFilter}
         onCreateThread={() => {
           setSelectedProjectId("shipyard-runtime");
           setActiveNav("projects");
@@ -339,6 +328,7 @@ function App() {
             text: "Compose a new task below and send it to the live runtime."
           });
         }}
+        onSelectNav={handleNavSelect}
       />
 
       <TaskWorkspace
@@ -349,12 +339,18 @@ function App() {
         composerTitle={composerTitle}
         composerValue={composerValue}
         feedback={
-          runtimeError && !submissionFeedback
+          submissionFeedback ??
+          (projectError
+            ? {
+                tone: "info" as const,
+                text: projectError
+              }
+            : runtimeError
             ? {
                 tone: "danger",
                 text: runtimeError
               }
-            : submissionFeedback
+            : null)
         }
         submitting={submitting}
         simulateFailure={simulateFailure}
@@ -404,19 +400,6 @@ function App() {
           setActiveTab("automations");
         }}
       />
-
-      <div className="workspace-banner">
-        <div className="workspace-banner__copy">
-          <strong>{initializing ? "Loading workspace shell..." : project.name}</strong>
-          <span>{projectError ?? runtimeError ?? project.nextStep}</span>
-        </div>
-        <div className="workspace-banner__meta">
-          <span className={`tone-badge tone-badge--${runtimeTone}`}>{runtimeLabel}</span>
-          <span className="source-pill source-pill--guide">
-            {runtimeTasks.length} live thread{runtimeTasks.length === 1 ? "" : "s"}
-          </span>
-        </div>
-      </div>
     </main>
   );
 }
