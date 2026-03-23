@@ -43,3 +43,16 @@ export { parseFrontmatter } from "./instructions/parseFrontmatter";
 export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
 export { selectSkillSections } from "./context/selectSkillSections";
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
+export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
+export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
+export type {
+  AgentRunRecord,
+  AgentRunResult,
+  AgentRunStatus,
+  AgentRunStore,
+  AgentRuntimeStatus,
+  ExecuteRun,
+  PersistentAgentRuntimeService,
+  RuntimeWorkerState,
+  SubmitTaskInput
+} from "./runtime/types";
