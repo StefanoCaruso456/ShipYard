@@ -28,3 +28,18 @@ export const starterDecisionBoard: ArchitectureDecision[] = [
     note: "The initial monorepo shape supports parallel agents, but the coordination model is still open."
   }
 ];
+
+export type {
+  AgentInstructionRuntime,
+  AgentRole,
+  InstructionPrecedenceLayer,
+  InstructionSection,
+  ParsedSkill,
+  RoleSkillView,
+  SkillMeta
+} from "./instructions/types";
+export { loadSkill } from "./instructions/loadSkill";
+export { parseFrontmatter } from "./instructions/parseFrontmatter";
+export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
+export { selectSkillSections } from "./context/selectSkillSections";
+export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";

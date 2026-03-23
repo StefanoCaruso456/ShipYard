@@ -1,3 +1,16 @@
+---
+id: coding-agent
+kind: skill
+name: Coding Agent Execution Workflow
+version: 1
+target: product-agent
+applies_to:
+  - planner
+  - executor
+  - verifier
+format: markdown-sectioned
+---
+
 # Skill: Coding Agent Execution Workflow
 
 ## Purpose
@@ -268,7 +281,6 @@ System A:
 System B:
 
 - the product AI harness
-- receives prompts shaped by `task-prompt-template.md`
 - uses `skill.md`
 - runs the agent loop
 - executes tools

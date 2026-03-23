@@ -2,7 +2,7 @@
 
 Shipyard is the workspace for building an autonomous coding agent that can make surgical code edits, accept runtime context, coordinate multiple agents, and eventually rebuild the Ship app as its real integration test.
 
-The future product agent's execution behavior is defined in `skill.md`, and its per-task assignment format is defined in `task-prompt-template.md`. Both are intended for the AI harness we are building rather than the current builder agent.
+The future product agent's execution behavior is defined in `skill.md`. The builder agent's per-task assignment format lives in `task-prompt-template.md`.
 
 ## What
 
