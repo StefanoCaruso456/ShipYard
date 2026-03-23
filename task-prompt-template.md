@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file defines the assignment format you give the future product agent each time it works on a feature, bug, or refactor.
+This file defines the assignment format you give the builder agent each time it works on a feature, bug, or refactor while building the harness.
 
 It does not replace permanent repo rules or workflow logic. It gives the agent a clean, scoped mission for a single task.
 
@@ -135,20 +135,19 @@ Outcome:
 
 ## System Placement
 
-This file belongs to System B: the AI harness product.
+This file belongs to System A: the builder agent.
 
 System A:
 
 - the builder agent
 - uses project rules
-- uses task prompts to build the harness
+- uses this task prompt template for implementation work
+- builds the harness
 
 System B:
 
 - the product AI harness
-- receives prompts based on this template
 - uses `skill.md`
 - runs the agent loop
 - executes tools
 - handles context injection
-
