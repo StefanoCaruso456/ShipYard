@@ -11,19 +11,14 @@ import {
 } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
-import { UtilityDock } from "./components/UtilityDock";
 import {
-  buildGitPreview,
   buildGuideThread,
   buildPreviewThreads,
   buildRuntimeThread,
   buildSkillCatalog,
-  buildTerminalPreview,
   emptyProjectBrief,
   modeOptions,
   seededAutomations,
-  sidebarNavigation,
-  utilityTabs,
   workspaceProjects
 } from "./mockData";
 import type {
@@ -35,10 +30,11 @@ import type {
   RuntimeStatusResponse,
   RuntimeTask,
   SidebarNavItemId,
-  UtilityTab,
   WorkspaceProject,
   WorkspaceThread
 } from "./types";
+
+const repositoryUrl = "https://github.com/StefanoCaruso456/ShipYard";
 
 function App() {
   const [project, setProject] = useState<ProjectPayload>(emptyProjectBrief);
@@ -49,10 +45,7 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState("shipyard-runtime");
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
-  const [activeTab, setActiveTab] = useState<UtilityTab>("run");
   const [mode, setMode] = useState<ModeOption>("worktree");
-  const [threadFilter, setThreadFilter] = useState("");
-  const [composerTitle, setComposerTitle] = useState("");
   const [composerValue, setComposerValue] = useState("");
   const [simulateFailure, setSimulateFailure] = useState(false);
   const [automations, setAutomations] = useState<AutomationItem[]>(seededAutomations);
@@ -131,7 +124,7 @@ function App() {
     }
 
     setRuntimeError(
-      "Runtime API not reachable. The live Shipyard workspace will reconnect when the server comes back."
+      "Runtime API not reachable. Start the server or point VITE_API_URL at the live backend."
     );
   }
 
@@ -174,45 +167,26 @@ function App() {
 
   const activeProject =
     workspaceProjects.find((candidate) => candidate.id === selectedProjectId) ?? workspaceProjects[0];
-
-  const allThreads = buildThreads(activeProject, project, runtimeHealth, runtimeStatus, instructions, runtimeTasks);
-  const filteredThreads = allThreads.filter((thread) => {
-    const query = threadFilter.trim().toLowerCase();
-
-    if (!query) {
-      return true;
-    }
-
-    return `${thread.title} ${thread.summary} ${thread.tags.join(" ")}`.toLowerCase().includes(query);
-  });
+  const threads = buildThreads(activeProject, project, runtimeHealth, runtimeStatus, instructions, runtimeTasks);
 
   useEffect(() => {
-    const candidateThreads = filteredThreads.length > 0 ? filteredThreads : allThreads;
-
-    if (candidateThreads.length === 0) {
+    if (threads.length === 0) {
       setSelectedThreadId(null);
       return;
     }
 
-    if (!selectedThreadId || !candidateThreads.some((thread) => thread.id === selectedThreadId)) {
-      setSelectedThreadId(candidateThreads[0].id);
+    if (!selectedThreadId || !threads.some((thread) => thread.id === selectedThreadId)) {
+      setSelectedThreadId(threads[0].id);
     }
-  }, [
-    selectedThreadId,
-    selectedProjectId,
-    allThreads.map((thread) => thread.id).join("|"),
-    filteredThreads.map((thread) => thread.id).join("|")
-  ]);
+  }, [selectedProjectId, selectedThreadId, threads]);
 
-  const activeThread =
-    filteredThreads.find((thread) => thread.id === selectedThreadId) ??
-    allThreads.find((thread) => thread.id === selectedThreadId) ??
-    null;
-
-  const skillCatalog = buildSkillCatalog(instructions);
-  const gitChanges = activeThread ? buildGitPreview(activeThread) : [];
-  const terminalEntries = activeThread ? buildTerminalPreview(activeThread, runtimeStatus) : [];
-  const runtimeTone = runtimeHealth?.status === "ok" ? (runtimeStatus?.workerState === "running" ? "busy" : "ready") : "offline";
+  const activeThread = threads.find((thread) => thread.id === selectedThreadId) ?? null;
+  const runtimeTone =
+    runtimeHealth?.status === "ok"
+      ? runtimeStatus?.workerState === "running"
+        ? "busy"
+        : "ready"
+      : "offline";
   const runtimeLabel =
     runtimeHealth?.status === "ok"
       ? runtimeStatus?.workerState === "running"
@@ -220,22 +194,7 @@ function App() {
         : "Healthy"
       : "Offline";
   const backendConnected = runtimeHealth?.status === "ok";
-
-  function handleNavSelect(navId: SidebarNavItemId) {
-    setActiveNav(navId);
-
-    if (navId === "skills") {
-      setActiveTab("skills");
-      return;
-    }
-
-    if (navId === "automations") {
-      setActiveTab("automations");
-      return;
-    }
-
-    setActiveTab("run");
-  }
+  const skillCatalog = buildSkillCatalog(instructions);
 
   async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -243,7 +202,7 @@ function App() {
     if (activeProject.kind !== "live") {
       setSubmissionFeedback({
         tone: "info",
-        text: "Switch to Shipyard Runtime to submit a live task. Preview workspaces are UI-only."
+        text: "Switch to Shipyard Runtime to submit a live task. Preview workspaces stay UI-only."
       });
       return;
     }
@@ -259,7 +218,7 @@ function App() {
     if (!composerValue.trim()) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Write an instruction before submitting the task."
+        text: "Write an instruction before sending the thread."
       });
       return;
     }
@@ -269,7 +228,6 @@ function App() {
 
     try {
       const response = await submitRuntimeTask({
-        title: composerTitle.trim() || undefined,
         instruction: composerValue.trim(),
         simulateFailure
       });
@@ -277,13 +235,11 @@ function App() {
       setSelectedProjectId("shipyard-runtime");
       setSelectedThreadId(response.task.id);
       setActiveNav("projects");
-      setActiveTab("run");
-      setComposerTitle("");
       setComposerValue("");
       setSimulateFailure(false);
       setSubmissionFeedback({
         tone: "success",
-        text: "Task accepted by the persistent runtime service."
+        text: "Thread accepted by the persistent runtime."
       });
 
       await loadRuntimeSnapshot();
@@ -301,82 +257,79 @@ function App() {
   }
 
   return (
-    <main className="workspace-shell">
+    <main className="app-shell">
       <Sidebar
         projects={workspaceProjects}
-        threads={filteredThreads}
-        navItems={sidebarNavigation}
+        threads={threads}
         activeProjectId={selectedProjectId}
         activeThreadId={selectedThreadId}
         activeNav={activeNav}
-        filterValue={threadFilter}
         runtimeTone={runtimeTone}
         runtimeLabel={runtimeLabel}
         onSelectProject={(projectId) => {
           setSelectedProjectId(projectId);
           setActiveNav("projects");
         }}
-        onSelectThread={setSelectedThreadId}
-        onFilterChange={setThreadFilter}
+        onSelectThread={(threadId) => {
+          setSelectedThreadId(threadId);
+          setActiveNav("projects");
+        }}
         onCreateThread={() => {
           setSelectedProjectId("shipyard-runtime");
           setActiveNav("projects");
-          setActiveTab("run");
-          setThreadFilter("");
+          setComposerValue("");
           setSubmissionFeedback({
             tone: "info",
-            text: "Compose a new task below and send it to the live runtime."
+            text: "Compose a new task below and send it to the runtime."
           });
         }}
-        onSelectNav={handleNavSelect}
+        onSelectNav={setActiveNav}
       />
 
       <TaskWorkspace
+        activeNav={activeNav}
         project={activeProject}
-        thread={activeThread}
-        mode={mode}
-        modeOptions={modeOptions}
-        composerTitle={composerTitle}
-        composerValue={composerValue}
-        feedback={
-          submissionFeedback ??
-          (projectError
-            ? {
-                tone: "info" as const,
-                text: projectError
-              }
-            : runtimeError
-            ? {
-                tone: "danger",
-                text: runtimeError
-              }
-            : null)
-        }
-        submitting={submitting}
-        simulateFailure={simulateFailure}
-        selectedSkillCount={selectedSkillIds.length}
-        backendConnected={backendConnected}
-        onModeChange={setMode}
-        onComposerTitleChange={setComposerTitle}
-        onComposerValueChange={setComposerValue}
-        onSimulateFailureChange={setSimulateFailure}
-        onSubmit={handleSubmitTask}
-      />
-
-      <UtilityDock
-        activeTab={activeTab}
-        tabs={utilityTabs}
-        project={project}
+        projectBrief={project}
         thread={activeThread}
         runtimeHealth={runtimeHealth}
         runtimeStatus={runtimeStatus}
         instructions={instructions}
-        gitChanges={gitChanges}
-        terminalEntries={terminalEntries}
-        skillCatalog={skillCatalog}
+        mode={mode}
+        modeOptions={modeOptions}
+        composerValue={composerValue}
+        feedback={
+          submissionFeedback ??
+          (runtimeError
+            ? {
+                tone: "danger" as const,
+                text: runtimeError
+              }
+            : projectError
+              ? {
+                  tone: "info" as const,
+                  text: projectError
+                }
+              : null)
+        }
+        submitting={submitting}
+        simulateFailure={simulateFailure}
         selectedSkillIds={selectedSkillIds}
+        skillCatalog={skillCatalog}
         automations={automations}
-        onSelectTab={setActiveTab}
+        backendConnected={backendConnected}
+        repositoryUrl={repositoryUrl}
+        onModeChange={setMode}
+        onComposerValueChange={setComposerValue}
+        onSimulateFailureChange={setSimulateFailure}
+        onSubmit={handleSubmitTask}
+        onHandoff={() =>
+          setSubmissionFeedback({
+            tone: "info",
+            text: "Handoff is a shell surface right now. Run transfer behavior will land in the next phase."
+          })
+        }
+        onOpenSettings={() => setActiveNav("settings")}
+        onOpenProjects={() => setActiveNav("projects")}
         onToggleSkill={(skillId) => {
           setSelectedSkillIds((current) =>
             current.includes(skillId)
@@ -397,7 +350,6 @@ function App() {
             ...current
           ]);
           setActiveNav("automations");
-          setActiveTab("automations");
         }}
       />
     </main>
