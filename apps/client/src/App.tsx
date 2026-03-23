@@ -20,6 +20,9 @@ const emptyState: ProjectPayload = {
   nextStep: "Complete PRESEARCH before implementation begins."
 };
 
+const apiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, "") ?? "";
+const projectEndpoint = apiBaseUrl ? `${apiBaseUrl}/api/project` : "/api/project";
+
 function App() {
   const [data, setData] = useState<ProjectPayload>(emptyState);
   const [loading, setLoading] = useState(true);
@@ -28,7 +31,7 @@ function App() {
   useEffect(() => {
     const loadProject = async () => {
       try {
-        const response = await fetch("/api/project");
+        const response = await fetch(projectEndpoint);
         if (!response.ok) {
           throw new Error(`Request failed with ${response.status}`);
         }
@@ -36,7 +39,9 @@ function App() {
         const payload = (await response.json()) as ProjectPayload;
         setData(payload);
       } catch (requestError) {
-        setError("Server not running yet. Start the API to see the live brief.");
+        setError(
+          "Server not reachable. Start the API locally or point VITE_API_URL at the Railway server."
+        );
       } finally {
         setLoading(false);
       }
@@ -82,4 +87,3 @@ function InfoCard({ title, items }: { title: string; items: string[] }) {
 }
 
 export default App;
-

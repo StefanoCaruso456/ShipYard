@@ -6,7 +6,7 @@ Use a split deployment model:
 
 - Railway for the persistent server runtime
 - Railway PostgreSQL for run and task state
-- Vercel later for the web UI
+- Vercel for the client UI
 
 ## Runtime Hosting
 
@@ -32,9 +32,9 @@ Do not add vector storage in phase 1. Add `pgvector` only if retrieval or semant
 
 ## Frontend Hosting
 
-If the web UI is added early, deploy it separately on Vercel.
+Deploy the client separately on Vercel and keep the runtime server on Railway.
 
-Keep the runtime server separate from the UI host.
+The Vercel client should call the Railway API through `VITE_API_URL` in production.
 
 ## Secrets and Environment
 
@@ -61,10 +61,9 @@ Expected managed secrets later:
 - Railway runtime service
 - Railway PostgreSQL
 - environment-backed secrets
+- Vercel client deployment
 
 ### Phase 3
 
-- optional Vercel UI
 - production trace dashboards
 - durable run/task persistence
-
