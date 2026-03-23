@@ -1,10 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "types": ["node"],
     "declaration": true,
     "emitDeclarationOnly": false,
     "outDir": "dist"
   },
   "include": ["src", "tsup.config.ts"]
 }
-
