@@ -2,6 +2,8 @@
 
 Shipyard is the workspace for building an autonomous coding agent that can make surgical code edits, accept runtime context, coordinate multiple agents, and eventually rebuild the Ship app as its real integration test.
 
+The future product agent's execution behavior is defined in `skill.md`, which is intended for the AI harness we are building rather than the current builder agent.
+
 ## What
 
 - A persistent coding agent with a client, server, and shared packages
@@ -35,6 +37,7 @@ shipyard/
 │   └── shared/
 ├── CODEAGENT.md
 ├── PRESEARCH.md
+├── skill.md
 └── README.md
 ```
 
@@ -45,4 +48,3 @@ cp .env.example .env
 pnpm install
 pnpm dev
 ```
-
