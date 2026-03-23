@@ -54,3 +54,9 @@ cp .env.example .env
 pnpm install
 pnpm dev
 ```
+
+## Deploy
+
+- Vercel hosts `apps/client` using `vercel.json`.
+- Railway hosts `apps/server` and PostgreSQL using `railway.json`.
+- In Vercel, set `VITE_API_URL` to the Railway server origin so the client calls the live API in production.
