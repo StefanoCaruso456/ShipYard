@@ -1,19 +1,18 @@
-import type { ReactNode } from "react";
-
-import type { SidebarNavItemId, WorkspaceProject, WorkspaceThread } from "../types";
+import type { WorkspaceProject, WorkspaceThread } from "../types";
 
 type SidebarProps = {
   projects: WorkspaceProject[];
   threads: WorkspaceThread[];
-  activeProjectId: string;
+  activeProjectId: string | null;
   activeThreadId: string | null;
-  activeNav: SidebarNavItemId;
   runtimeTone: "ready" | "busy" | "offline";
   runtimeLabel: string;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (threadId: string) => void;
   onCreateThread: () => void;
-  onSelectNav: (navId: SidebarNavItemId) => void;
+  onRenameProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
+  onOpenSettings: () => void;
 };
 
 export function Sidebar({
@@ -21,14 +20,17 @@ export function Sidebar({
   threads,
   activeProjectId,
   activeThreadId,
-  activeNav,
   runtimeTone,
   runtimeLabel,
   onSelectProject,
   onSelectThread,
   onCreateThread,
-  onSelectNav
+  onRenameProject,
+  onDeleteProject,
+  onOpenSettings
 }: SidebarProps) {
+  const activeProject = projects.find((candidate) => candidate.id === activeProjectId) ?? projects[0] ?? null;
+
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -42,61 +44,54 @@ export function Sidebar({
         <span className={`sidebar__runtime sidebar__runtime--${runtimeTone}`}>{runtimeLabel}</span>
       </div>
 
-      <nav className="sidebar__primary-nav" aria-label="Primary navigation">
-        <SidebarButton
-          icon={<ComposeIcon />}
-          label="New thread"
-          active={false}
-          onClick={onCreateThread}
-        />
-        <SidebarButton
-          icon={<ClockIcon />}
-          label="Automations"
-          active={activeNav === "automations"}
-          onClick={() => onSelectNav("automations")}
-        />
-        <SidebarButton
-          icon={<SparkIcon />}
-          label="Skills"
-          active={activeNav === "skills"}
-          onClick={() => onSelectNav("skills")}
-        />
-      </nav>
+      <button type="button" className="sidebar__primary-action" onClick={onCreateThread}>
+        <ComposeIcon />
+        <span>New thread</span>
+      </button>
 
       <section className="sidebar__threads">
         <div className="sidebar__threads-header">
           <strong>Threads</strong>
-          <div className="sidebar__threads-actions" aria-hidden="true">
-            <button type="button" onClick={onCreateThread}>
-              <PlusIcon />
-            </button>
-            <button type="button" onClick={() => onSelectNav("projects")}>
-              <FilterIcon />
-            </button>
-          </div>
         </div>
 
-        <label className="sidebar__project-picker">
-          <FolderIcon />
-          <select
-            value={activeProjectId}
-            onChange={(event) => onSelectProject(event.target.value)}
-            aria-label="Select workspace"
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {activeProject ? (
+          <div className="sidebar__session-row">
+            <button
+              type="button"
+              className="sidebar__session-link"
+              onClick={() => onSelectProject(activeProject.id)}
+            >
+              <FolderIcon />
+              <span>{activeProject.name}</span>
+            </button>
+
+            <div className="sidebar__session-actions">
+              <button
+                type="button"
+                className="sidebar__icon-button"
+                aria-label="Rename session"
+                onClick={() => onRenameProject(activeProject.id)}
+              >
+                <RenameIcon />
+              </button>
+              <button
+                type="button"
+                className="sidebar__icon-button"
+                aria-label="Delete session"
+                onClick={() => onDeleteProject(activeProject.id)}
+              >
+                <DeleteIcon />
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="sidebar__thread-list">
           {threads.map((thread) => (
             <button
               key={thread.id}
               type="button"
-              className={`thread-row ${thread.id === activeThreadId && activeNav === "projects" ? "is-active" : ""}`}
+              className={`thread-row ${thread.id === activeThreadId ? "is-active" : ""}`}
               onClick={() => onSelectThread(thread.id)}
             >
               <span className="thread-row__title">{thread.title}</span>
@@ -106,34 +101,11 @@ export function Sidebar({
         </div>
       </section>
 
-      <button
-        type="button"
-        className={`sidebar__settings ${activeNav === "settings" ? "is-active" : ""}`}
-        onClick={() => onSelectNav("settings")}
-      >
+      <button type="button" className="sidebar__settings" onClick={onOpenSettings}>
         <SettingsIcon />
         <span>Settings</span>
       </button>
     </aside>
-  );
-}
-
-function SidebarButton({
-  icon,
-  label,
-  active,
-  onClick
-}: {
-  icon: ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className={`sidebar__nav-item ${active ? "is-active" : ""}`} onClick={onClick}>
-      {icon}
-      <span>{label}</span>
-    </button>
   );
 }
 
@@ -153,30 +125,6 @@ function ComposeIcon() {
   );
 }
 
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M10 6.5v3.7l2.5 1.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SparkIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M6 5.5h8a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 14 14H6a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 6 5.5z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path d="M7.5 9.8h5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M10 7.3l1.3 2.5L10 12.3 8.7 9.8 10 7.3z" fill="currentColor" />
-    </svg>
-  );
-}
-
 function FolderIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -191,23 +139,31 @@ function FolderIcon() {
   );
 }
 
-function PlusIcon() {
+function RenameIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="M5 13.8V15h1.2l7.2-7.2-1.2-1.2L5 13.8z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M11.6 5.4l1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
 
-function FilterIcon() {
+function DeleteIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path
-        d="M4.5 6h11M7 10h6M8.8 14h2.4"
+        d="M6.2 6.2h7.6M8 6.2v8M12 6.2v8M7.2 6.2l.4-1.2h4.8l.4 1.2m-7 0 .5 8a1 1 0 0 0 1 .9h5a1 1 0 0 0 1-.9l.5-8"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.4"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

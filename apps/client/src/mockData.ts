@@ -251,9 +251,9 @@ export function buildGuideThread(
   const runtimeSummary = runtimeStatus
     ? `${runtimeStatus.totalRuns} runs tracked, ${runtimeStatus.queuedRuns} queued, worker ${runtimeStatus.workerState}.`
     : "Runtime status will appear here when the API is reachable.";
-  const skillSummary = instructions
-    ? `${instructions.skill.meta.name} loaded with ${instructions.skill.sectionCount} parsed sections.`
-    : "Instruction runtime inspection not available yet.";
+  const instructionSummary = instructions
+    ? `${instructions.skill.meta.name} is loaded in the runtime.`
+    : "Instruction runtime inspection is not available yet.";
 
   return {
     id: "runtime-guide",
@@ -266,35 +266,15 @@ export function buildGuideThread(
     tags: ["overview", "runtime", runtimeBadge],
     messages: [
       createMessage(
-        "guide-system",
-        "system",
-        "Workspace shell",
-        "This shell blends live runtime data with seeded collaboration surfaces so we can develop the product UI before deeper orchestration exists.",
-        "Now",
-        "info"
-      ),
-      createMessage(
         "guide-assistant",
         "assistant",
-        "Product brief",
-        `${project.tagline} Next step: ${project.nextStep}`,
+        "Shipyard",
+        `${project.tagline} ${runtimeSummary} ${instructionSummary} Next step: ${project.nextStep}`,
         "Now",
         "default"
-      ),
-      createMessage("guide-assistant-2", "assistant", "Runtime", runtimeSummary, "Live", "success"),
-      createMessage("guide-assistant-3", "assistant", "Instructions", skillSummary, "Live", "default")
-    ],
-    progress: [
-      createProgress("guide-p1", "Client shell online", "Workspace navigation, composer, and utility surfaces are available.", "Now", "success"),
-      createProgress("guide-p2", "Runtime connected", runtimeSummary, "Live", runtimeHealth?.status === "ok" ? "info" : "warning"),
-      createProgress(
-        "guide-p3",
-        "What we are building",
-        project.what.length > 0 ? project.what[0] : "Persistent coding-agent control center.",
-        "Brief",
-        "default"
       )
-    ]
+    ],
+    progress: []
   };
 }
 

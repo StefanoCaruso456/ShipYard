@@ -1,26 +1,22 @@
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useId, useRef } from "react";
 
 import type {
-  AutomationItem,
+  ComposerAttachment,
+  ComposerMode,
   ModeOption,
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
   SidebarNavItemId,
-  SkillCatalogItem,
+  WorkspaceProject,
   WorkspaceThread
 } from "../types";
 
 type TaskWorkspaceProps = {
   activeNav: SidebarNavItemId;
-  project: {
-    id: string;
-    name: string;
-    environment: string;
-    kind: "live" | "preview";
-  };
+  project: WorkspaceProject | null;
   projectBrief: ProjectPayload;
   thread: WorkspaceThread | null;
   runtimeHealth: RuntimeHealthResponse | null;
@@ -28,48 +24,23 @@ type TaskWorkspaceProps = {
   instructions: RuntimeInstructionResponse | null;
   mode: ModeOption;
   modeOptions: Array<{ id: ModeOption; label: string; detail: string }>;
+  composerMode: ComposerMode;
   composerValue: string;
+  composerAttachments: ComposerAttachment[];
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
   simulateFailure: boolean;
-  selectedSkillIds: string[];
-  skillCatalog: SkillCatalogItem[];
-  automations: AutomationItem[];
   backendConnected: boolean;
   repositoryUrl: string;
   onModeChange: (mode: ModeOption) => void;
+  onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
+  onComposerAttachmentsChange: (attachments: ComposerAttachment[]) => void;
   onSimulateFailureChange: (value: boolean) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onHandoff: () => void;
   onOpenSettings: () => void;
-  onOpenProjects: () => void;
-  onToggleSkill: (skillId: string) => void;
-  onCreateAutomation: (input: {
-    name: string;
-    schedule: string;
-    workspace: string;
-    note: string;
-  }) => void;
 };
-
-type FeedEntry =
-  | {
-      id: string;
-      kind: "note";
-      label: string;
-      timestamp: string;
-      tone: "default" | "info" | "success" | "danger";
-      body: string;
-    }
-  | {
-      id: string;
-      kind: "log";
-      label: string;
-      timestamp: string;
-      detail: string;
-      tone: "default" | "info" | "success" | "warning" | "danger";
-    };
 
 export function TaskWorkspace({
   activeNav,
@@ -81,54 +52,54 @@ export function TaskWorkspace({
   instructions,
   mode,
   modeOptions,
+  composerMode,
   composerValue,
+  composerAttachments,
   feedback,
   submitting,
   simulateFailure,
-  selectedSkillIds,
-  skillCatalog,
-  automations,
   backendConnected,
   repositoryUrl,
   onModeChange,
+  onComposerModeChange,
   onComposerValueChange,
+  onComposerAttachmentsChange,
   onSimulateFailureChange,
   onSubmit,
   onHandoff,
-  onOpenSettings,
-  onOpenProjects,
-  onToggleSkill,
-  onCreateAutomation
+  onOpenSettings
 }: TaskWorkspaceProps) {
-  const [automationName, setAutomationName] = useState("");
-  const [automationSchedule, setAutomationSchedule] = useState("Weekdays · 9:00 AM");
-  const [automationNote, setAutomationNote] = useState("");
+  const fileInputId = useId();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const headerTitle =
-    activeNav === "projects"
-      ? thread?.title ?? "New thread"
-      : activeNav === "skills"
-        ? "Skills"
-        : activeNav === "automations"
-          ? "Automations"
-          : "Settings";
-  const headerMeta =
-    activeNav === "projects"
-      ? project.name
-      : activeNav === "skills"
-        ? "Runtime skills and attachments"
-        : activeNav === "automations"
-          ? "Scheduled work and drafts"
-          : "Runtime and instruction status";
-  const feedEntries = useMemo(() => buildFeedEntries(thread), [thread]);
-  const runningServices = 1 + (backendConnected ? 1 : 0);
+  function handleFileSelection(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+
+    const nextAttachments = Array.from(fileList).map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      size: file.size,
+      type: file.type || inferFileType(file.name)
+    }));
+
+    onComposerAttachmentsChange([...composerAttachments, ...nextAttachments]);
+  }
+
+  const composerPlaceholder =
+    composerMode === "image"
+      ? "Describe the image task or attach media..."
+      : composerMode === "voice"
+        ? "Voice mode is staged. Type the instruction or attach files..."
+        : "Ask for follow-up changes";
 
   return (
     <section className="workspace">
       <header className="workspace__header">
         <div className="workspace__title">
-          <p>{headerMeta}</p>
-          <h2>{headerTitle}</h2>
+          <p>{project?.name ?? "Shipyard"}</p>
+          <h2>{thread?.title ?? "New thread"}</h2>
         </div>
 
         <div className="workspace__actions">
@@ -152,302 +123,190 @@ export function TaskWorkspace({
           <a className="workspace__action-button" href={repositoryUrl} target="_blank" rel="noreferrer">
             Repo
           </a>
-          <button type="button" className="workspace__icon-button" onClick={onOpenSettings} aria-label="Open settings">
+          <button type="button" className="workspace__icon-button" aria-label="Open settings" onClick={onOpenSettings}>
             <PanelIcon />
           </button>
         </div>
       </header>
 
-      <div className="workspace__body">
-        {activeNav === "projects" ? (
-          <div className="workspace__scroll">
-            {feedEntries.length > 0 ? (
-              feedEntries.map((entry) =>
-                entry.kind === "log" ? (
-                  <div key={entry.id} className={`feed-log feed-log--${entry.tone}`}>
-                    <strong>{entry.label}</strong>
-                    <span>{entry.timestamp}</span>
-                    <p>{entry.detail}</p>
-                  </div>
-                ) : (
-                  <article key={entry.id} className={`feed-note feed-note--${entry.tone}`}>
-                    <div className="feed-note__meta">
-                      <strong>{entry.label}</strong>
-                      <span>{entry.timestamp}</span>
-                    </div>
-                    <p>{entry.body}</p>
-                  </article>
-                )
-              )
-            ) : (
-              <div className="empty-panel">
-                <h3>No thread selected</h3>
-                <p>Choose a thread from the left rail or create a new one.</p>
-              </div>
-            )}
-
-            {thread?.id === "runtime-guide" && projectBrief.what.length > 0 ? (
-              <section className="brief-section">
-                <BriefBlock title="What" items={projectBrief.what} />
-                <BriefBlock title="Why" items={projectBrief.why} />
-                <BriefBlock title="How" items={projectBrief.how} />
-                <BriefBlock title="Outcome" items={projectBrief.outcome} />
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-
-        {activeNav === "skills" ? (
-          <div className="workspace__scroll">
-            <section className="panel-stack">
-              <div className="info-banner">
-                <strong>{instructions?.skill.meta.name ?? "Runtime skill unavailable"}</strong>
-                <p>
-                  {instructions
-                    ? `${instructions.skill.sectionCount} sections are loaded into the runtime.`
-                    : "Start the backend to inspect the loaded runtime skill."}
-                </p>
-              </div>
-
-              {skillCatalog.map((skill) => {
-                const attached = selectedSkillIds.includes(skill.id);
-
-                return (
-                  <article key={skill.id} className="list-card">
-                    <div className="list-card__header">
-                      <div>
-                        <strong>{skill.name}</strong>
-                        <p>{skill.scope}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className={`pill-button ${attached ? "is-active" : ""}`}
-                        onClick={() => onToggleSkill(skill.id)}
-                      >
-                        {attached ? "Attached" : "Attach"}
-                      </button>
-                    </div>
-                    <p className="list-card__body">{skill.description}</p>
-                    <small>{skill.status}</small>
-                  </article>
-                );
-              })}
-            </section>
-          </div>
-        ) : null}
-
-        {activeNav === "automations" ? (
-          <div className="workspace__scroll">
-            <section className="panel-stack">
-              <form
-                className="automation-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-
-                  if (!automationName.trim()) {
-                    return;
-                  }
-
-                  onCreateAutomation({
-                    name: automationName.trim(),
-                    schedule: automationSchedule.trim(),
-                    workspace: project.name,
-                    note: automationNote.trim() || "UI-only draft until scheduling is wired."
-                  });
-
-                  setAutomationName("");
-                  setAutomationSchedule("Weekdays · 9:00 AM");
-                  setAutomationNote("");
-                }}
-              >
-                <div className="list-card__header">
-                  <div>
-                    <strong>New automation</strong>
-                    <p>Stage recurring work without leaving the shell.</p>
-                  </div>
-                </div>
-
-                <input
-                  type="text"
-                  placeholder="Automation name"
-                  value={automationName}
-                  onChange={(event) => setAutomationName(event.target.value)}
-                />
-                <input
-                  type="text"
-                  placeholder="Schedule"
-                  value={automationSchedule}
-                  onChange={(event) => setAutomationSchedule(event.target.value)}
-                />
-                <textarea
-                  rows={4}
-                  placeholder="Notes"
-                  value={automationNote}
-                  onChange={(event) => setAutomationNote(event.target.value)}
-                />
-                <button type="submit" className="pill-button is-active">
-                  Save draft
-                </button>
-              </form>
-
-              {automations.map((automation) => (
-                <article key={automation.id} className="list-card">
-                  <div className="list-card__header">
-                    <div>
-                      <strong>{automation.name}</strong>
-                      <p>{automation.workspace}</p>
-                    </div>
-                    <span className={`status-chip status-chip--${automation.status}`}>{automation.status}</span>
-                  </div>
-                  <p className="list-card__body">{automation.note}</p>
-                  <small>{automation.schedule}</small>
-                </article>
-              ))}
-            </section>
-          </div>
-        ) : null}
-
+      <div className="workspace__content">
         {activeNav === "settings" ? (
-          <div className="workspace__scroll">
-            <section className="panel-stack">
-              <article className="list-card">
-                <div className="list-card__header">
-                  <div>
-                    <strong>Runtime</strong>
-                    <p>Persistent loop service</p>
-                  </div>
-                  <span className={`status-chip status-chip--${backendConnected ? "active" : "draft"}`}>
-                    {backendConnected ? "live" : "offline"}
-                  </span>
-                </div>
-                <p className="list-card__body">
-                  Worker: {runtimeStatus?.workerState ?? "offline"} · queued: {runtimeStatus?.queuedRuns ?? 0} · total runs:{" "}
-                  {runtimeStatus?.totalRuns ?? 0}
-                </p>
-                <small>{runtimeHealth?.instructions.loadedAt ?? "Instruction runtime unavailable"}</small>
-              </article>
+          <section className="settings-panel">
+            <div className="settings-panel__row">
+              <strong>Runtime</strong>
+              <span>{backendConnected ? "Live" : "Offline"}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Worker</strong>
+              <span>{runtimeStatus?.workerState ?? "offline"}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Queued runs</strong>
+              <span>{runtimeStatus?.queuedRuns ?? 0}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Total runs</strong>
+              <span>{runtimeStatus?.totalRuns ?? 0}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Skill</strong>
+              <span>{instructions?.skill.meta.name ?? "Unavailable"}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Direction</strong>
+              <span>{projectBrief.nextStep}</span>
+            </div>
+            <div className="settings-panel__row">
+              <strong>Instruction runtime</strong>
+              <span>{runtimeHealth?.instructions.loadedAt ?? "Unavailable"}</span>
+            </div>
+          </section>
+        ) : (
+          <section className="conversation">
+            <div className="conversation__status">
+              <span>{backendConnected ? "Runtime live" : "Runtime offline"}</span>
+              <span>{thread?.updatedLabel ?? "No session selected"}</span>
+            </div>
 
-              <article className="list-card">
-                <div className="list-card__header">
-                  <div>
-                    <strong>Instruction precedence</strong>
-                    <p>Current runtime ordering</p>
-                  </div>
-                </div>
-                <ol className="ordered-list">
-                  {(instructions?.instructionPrecedence ?? ["Runtime unavailable"]).map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ol>
-              </article>
-
-              <article className="list-card">
-                <div className="list-card__header">
-                  <div>
-                    <strong>Direction lock</strong>
-                    <p>Current product brief</p>
-                  </div>
-                </div>
-                <p className="list-card__body">{projectBrief.tagline}</p>
-                <div className="mini-grid">
-                  {projectBrief.agentDecisions.slice(0, 4).map((decision) => (
-                    <div key={decision.area} className="mini-grid__item">
-                      <strong>{decision.area}</strong>
-                      <span>{decision.status}</span>
+            <div className="conversation__scroll">
+              {thread?.messages.length ? (
+                thread.messages.map((message) => (
+                  <article key={message.id} className={`message message--${message.role}`}>
+                    <div className="message__meta">
+                      <strong>{message.label}</strong>
+                      <span>{message.timestamp}</span>
                     </div>
-                  ))}
+                    <p>{message.body}</p>
+                  </article>
+                ))
+              ) : (
+                <div className="conversation__empty">
+                  <h3>Start a thread</h3>
+                  <p>Use the composer below to send a task to the runtime.</p>
                 </div>
-              </article>
-            </section>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="workspace__console-bar">
-        <button type="button" className="workspace__console-button" onClick={onOpenProjects}>
-          Running {runningServices} service{runningServices === 1 ? "" : "s"}
-        </button>
-        <div className="workspace__console-meta">
-          <span>{mode}</span>
-          <span>{backendConnected ? "Runtime live" : "Runtime offline"}</span>
-          <span>{selectedSkillIds.length} skill{selectedSkillIds.length === 1 ? "" : "s"} attached</span>
-        </div>
+              )}
+            </div>
+          </section>
+        )}
       </div>
 
       <form className="composer" onSubmit={onSubmit}>
-        <textarea
-          value={composerValue}
-          onChange={(event) => onComposerValueChange(event.target.value)}
-          placeholder="Ask for follow-up changes"
-          rows={4}
-        />
+        {composerAttachments.length > 0 ? (
+          <div className="composer__attachments">
+            {composerAttachments.map((attachment) => (
+              <span key={attachment.id} className="attachment-chip">
+                <span>{attachment.name}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onComposerAttachmentsChange(
+                      composerAttachments.filter((candidate) => candidate.id !== attachment.id)
+                    )
+                  }
+                  aria-label={`Remove ${attachment.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
 
-        <div className="composer__footer">
-          <div className="composer__meta">
+        <div className="composer__field">
+          <textarea
+            value={composerValue}
+            onChange={(event) => onComposerValueChange(event.target.value)}
+            placeholder={composerPlaceholder}
+            rows={5}
+          />
+        </div>
+
+        <div className="composer__toolbar">
+          <div className="composer__tools">
+            <button
+              type="button"
+              className="composer__tool-button composer__tool-button--icon"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Upload files"
+            >
+              <PlusIcon />
+            </button>
+
+            <label htmlFor={fileInputId} className="composer__file-trigger">
+              Upload
+            </label>
+
+            <button
+              type="button"
+              className={`composer__tool-button ${composerMode === "text" ? "is-active" : ""}`}
+              onClick={() => onComposerModeChange("text")}
+            >
+              Text
+            </button>
+            <button
+              type="button"
+              className={`composer__tool-button ${composerMode === "image" ? "is-active" : ""}`}
+              onClick={() => onComposerModeChange("image")}
+            >
+              Image
+            </button>
+            <button
+              type="button"
+              className={`composer__tool-button ${composerMode === "voice" ? "is-active" : ""}`}
+              onClick={() => onComposerModeChange("voice")}
+            >
+              <MicIcon />
+              <span>Mic</span>
+            </button>
+
             <label className="composer__toggle">
               <input
                 type="checkbox"
                 checked={simulateFailure}
                 onChange={(event) => onSimulateFailureChange(event.target.checked)}
               />
-              <span>Simulate failure path</span>
+              <span>Fail path</span>
             </label>
-            {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
           </div>
 
           <button
             type="submit"
             className="composer__submit"
-            disabled={submitting || project.kind !== "live" || !backendConnected}
+            disabled={submitting || project?.kind !== "live" || !backendConnected}
           >
             {submitting ? "Sending..." : "Send"}
           </button>
         </div>
+
+        {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
+
+        <input
+          id={fileInputId}
+          ref={fileInputRef}
+          className="composer__file-input"
+          type="file"
+          multiple
+          accept=".png,.pdf,.csv,image/*"
+          onChange={(event) => {
+            handleFileSelection(event.target.files);
+            event.currentTarget.value = "";
+          }}
+        />
       </form>
     </section>
   );
 }
 
-function buildFeedEntries(thread: WorkspaceThread | null): FeedEntry[] {
-  if (!thread) {
-    return [];
+function inferFileType(fileName: string) {
+  if (fileName.toLowerCase().endsWith(".pdf")) {
+    return "application/pdf";
   }
 
-  return [
-    ...thread.progress.map(
-      (event): FeedEntry => ({
-        id: event.id,
-        kind: "log",
-        label: event.label,
-        timestamp: event.timestamp,
-        detail: event.detail,
-        tone: event.tone
-      })
-    ),
-    ...thread.messages.map(
-      (message): FeedEntry => ({
-        id: message.id,
-        kind: "note",
-        label: message.label,
-        timestamp: message.timestamp,
-        tone: message.tone,
-        body: message.body
-      })
-    )
-  ];
-}
+  if (fileName.toLowerCase().endsWith(".csv")) {
+    return "text/csv";
+  }
 
-function BriefBlock({ title, items }: { title: string; items: string[] }) {
-  return (
-    <article className="brief-block">
-      <strong>{title}</strong>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </article>
-  );
+  return "application/octet-stream";
 }
 
 function PanelIcon() {
@@ -459,6 +318,28 @@ function PanelIcon() {
         stroke="currentColor"
         strokeWidth="1.4"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 4.5a2 2 0 0 1 2 2v3a2 2 0 0 1-4 0v-3a2 2 0 0 1 2-2zM6.5 9.8a3.5 3.5 0 0 0 7 0M10 13.3v2.2M7.8 15.5h4.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
       />
     </svg>
   );

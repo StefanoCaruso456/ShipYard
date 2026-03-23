@@ -136,6 +136,15 @@ export type SidebarNavItem = {
 
 export type ModeOption = "local" | "worktree" | "cloud";
 
+export type ComposerMode = "text" | "image" | "voice";
+
+export type ComposerAttachment = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+};
+
 export type UtilityTab = "run" | "diff" | "terminal" | "skills" | "automations";
 
 export type WorkspaceThreadStatus =

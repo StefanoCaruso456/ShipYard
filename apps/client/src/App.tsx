@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   fetchProjectBrief,
@@ -15,14 +15,13 @@ import {
   buildGuideThread,
   buildPreviewThreads,
   buildRuntimeThread,
-  buildSkillCatalog,
   emptyProjectBrief,
   modeOptions,
-  seededAutomations,
   workspaceProjects
 } from "./mockData";
 import type {
-  AutomationItem,
+  ComposerAttachment,
+  ComposerMode,
   ModeOption,
   ProjectPayload,
   RuntimeHealthResponse,
@@ -46,10 +45,10 @@ function App() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
   const [mode, setMode] = useState<ModeOption>("worktree");
+  const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [simulateFailure, setSimulateFailure] = useState(false);
-  const [automations, setAutomations] = useState<AutomationItem[]>(seededAutomations);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [submissionFeedback, setSubmissionFeedback] = useState<{
@@ -57,6 +56,8 @@ function App() {
     text: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
+  const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
 
   async function loadProjectData(cancelled?: { value: boolean }) {
     try {
@@ -153,34 +154,46 @@ function App() {
     };
   }, []);
 
+  const visibleProjects = useMemo(
+    () =>
+      workspaceProjects
+        .filter((candidate) => !hiddenProjectIds.includes(candidate.id))
+        .map((candidate) => ({
+          ...candidate,
+          name: renamedProjectIds[candidate.id] ?? candidate.name
+        })),
+    [hiddenProjectIds, renamedProjectIds]
+  );
+
+  const activeProject =
+    visibleProjects.find((candidate) => candidate.id === selectedProjectId) ?? visibleProjects[0] ?? null;
+
   useEffect(() => {
-    if (!instructions) {
+    if (!activeProject) {
       return;
     }
 
-    setSelectedSkillIds((current) =>
-      current.includes(instructions.skill.meta.id)
-        ? current
-        : [instructions.skill.meta.id, ...current]
-    );
-  }, [instructions]);
+    if (activeProject.id !== selectedProjectId) {
+      setSelectedProjectId(activeProject.id);
+    }
+  }, [activeProject, selectedProjectId]);
 
-  const activeProject =
-    workspaceProjects.find((candidate) => candidate.id === selectedProjectId) ?? workspaceProjects[0];
-  const threads = buildThreads(activeProject, project, runtimeHealth, runtimeStatus, instructions, runtimeTasks);
+  const allThreads = activeProject
+    ? buildThreads(activeProject, project, runtimeHealth, runtimeStatus, instructions, runtimeTasks)
+    : [];
 
   useEffect(() => {
-    if (threads.length === 0) {
+    if (allThreads.length === 0) {
       setSelectedThreadId(null);
       return;
     }
 
-    if (!selectedThreadId || !threads.some((thread) => thread.id === selectedThreadId)) {
-      setSelectedThreadId(threads[0].id);
+    if (!selectedThreadId || !allThreads.some((thread) => thread.id === selectedThreadId)) {
+      setSelectedThreadId(allThreads[0].id);
     }
-  }, [selectedProjectId, selectedThreadId, threads]);
+  }, [allThreads, selectedThreadId]);
 
-  const activeThread = threads.find((thread) => thread.id === selectedThreadId) ?? null;
+  const activeThread = allThreads.find((thread) => thread.id === selectedThreadId) ?? null;
   const runtimeTone =
     runtimeHealth?.status === "ok"
       ? runtimeStatus?.workerState === "running"
@@ -194,10 +207,23 @@ function App() {
         : "Healthy"
       : "Offline";
   const backendConnected = runtimeHealth?.status === "ok";
-  const skillCatalog = buildSkillCatalog(instructions);
+
+  function buildInstructionPayload() {
+    const trimmed = composerValue.trim();
+    const attachmentSummary =
+      composerAttachments.length > 0
+        ? `Attachments: ${composerAttachments.map((attachment) => attachment.name).join(", ")}`
+        : "";
+
+    return [trimmed, attachmentSummary].filter(Boolean).join("\n\n");
+  }
 
   async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!activeProject) {
+      return;
+    }
 
     if (activeProject.kind !== "live") {
       setSubmissionFeedback({
@@ -215,10 +241,12 @@ function App() {
       return;
     }
 
-    if (!composerValue.trim()) {
+    const instruction = buildInstructionPayload();
+
+    if (!instruction) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Write an instruction before sending the thread."
+        text: "Write a prompt or attach a file before sending the thread."
       });
       return;
     }
@@ -228,7 +256,7 @@ function App() {
 
     try {
       const response = await submitRuntimeTask({
-        instruction: composerValue.trim(),
+        instruction,
         simulateFailure
       });
 
@@ -236,6 +264,8 @@ function App() {
       setSelectedThreadId(response.task.id);
       setActiveNav("projects");
       setComposerValue("");
+      setComposerAttachments([]);
+      setComposerMode("text");
       setSimulateFailure(false);
       setSubmissionFeedback({
         tone: "success",
@@ -256,14 +286,51 @@ function App() {
     }
   }
 
+  function handleRenameProject(projectId: string) {
+    const projectToRename = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToRename) {
+      return;
+    }
+
+    const nextName = window.prompt("Rename session", projectToRename.name)?.trim();
+
+    if (!nextName) {
+      return;
+    }
+
+    setRenamedProjectIds((current) => ({
+      ...current,
+      [projectId]: nextName
+    }));
+  }
+
+  function handleDeleteProject(projectId: string) {
+    if (visibleProjects.length <= 1) {
+      setSubmissionFeedback({
+        tone: "info",
+        text: "Keep at least one session visible in the sidebar."
+      });
+      return;
+    }
+
+    const nextProjects = visibleProjects.filter((candidate) => candidate.id !== projectId);
+
+    setHiddenProjectIds((current) => [...current, projectId]);
+
+    if (selectedProjectId === projectId && nextProjects[0]) {
+      setSelectedProjectId(nextProjects[0].id);
+      setActiveNav("projects");
+    }
+  }
+
   return (
     <main className="app-shell">
       <Sidebar
-        projects={workspaceProjects}
-        threads={threads}
-        activeProjectId={selectedProjectId}
+        projects={visibleProjects}
+        threads={allThreads}
+        activeProjectId={activeProject?.id ?? null}
         activeThreadId={selectedThreadId}
-        activeNav={activeNav}
         runtimeTone={runtimeTone}
         runtimeLabel={runtimeLabel}
         onSelectProject={(projectId) => {
@@ -275,15 +342,18 @@ function App() {
           setActiveNav("projects");
         }}
         onCreateThread={() => {
-          setSelectedProjectId("shipyard-runtime");
           setActiveNav("projects");
           setComposerValue("");
+          setComposerAttachments([]);
+          setComposerMode("text");
           setSubmissionFeedback({
             tone: "info",
             text: "Compose a new task below and send it to the runtime."
           });
         }}
-        onSelectNav={setActiveNav}
+        onRenameProject={handleRenameProject}
+        onDeleteProject={handleDeleteProject}
+        onOpenSettings={() => setActiveNav("settings")}
       />
 
       <TaskWorkspace
@@ -296,7 +366,9 @@ function App() {
         instructions={instructions}
         mode={mode}
         modeOptions={modeOptions}
+        composerMode={composerMode}
         composerValue={composerValue}
+        composerAttachments={composerAttachments}
         feedback={
           submissionFeedback ??
           (runtimeError
@@ -313,44 +385,21 @@ function App() {
         }
         submitting={submitting}
         simulateFailure={simulateFailure}
-        selectedSkillIds={selectedSkillIds}
-        skillCatalog={skillCatalog}
-        automations={automations}
         backendConnected={backendConnected}
         repositoryUrl={repositoryUrl}
         onModeChange={setMode}
+        onComposerModeChange={setComposerMode}
         onComposerValueChange={setComposerValue}
+        onComposerAttachmentsChange={setComposerAttachments}
         onSimulateFailureChange={setSimulateFailure}
         onSubmit={handleSubmitTask}
         onHandoff={() =>
           setSubmissionFeedback({
             tone: "info",
-            text: "Handoff is a shell surface right now. Run transfer behavior will land in the next phase."
+            text: "Handoff is a shell control right now. Run transfer behavior lands in the next phase."
           })
         }
         onOpenSettings={() => setActiveNav("settings")}
-        onOpenProjects={() => setActiveNav("projects")}
-        onToggleSkill={(skillId) => {
-          setSelectedSkillIds((current) =>
-            current.includes(skillId)
-              ? current.filter((candidate) => candidate !== skillId)
-              : [...current, skillId]
-          );
-        }}
-        onCreateAutomation={(input) => {
-          setAutomations((current) => [
-            {
-              id: `automation-${current.length + 1}`,
-              name: input.name,
-              schedule: input.schedule,
-              workspace: input.workspace,
-              status: "draft",
-              note: input.note
-            },
-            ...current
-          ]);
-          setActiveNav("automations");
-        }}
       />
     </main>
   );
