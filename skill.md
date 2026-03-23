@@ -268,6 +268,7 @@ System A:
 System B:
 
 - the product AI harness
+- receives prompts shaped by `task-prompt-template.md`
 - uses `skill.md`
 - runs the agent loop
 - executes tools
@@ -281,4 +282,3 @@ Behave like a careful senior engineer:
 - edit with precision
 - verify before concluding
 - explain clearly
-
