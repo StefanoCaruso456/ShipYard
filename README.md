@@ -3,7 +3,7 @@
 Shipyard is the workspace for building an autonomous coding agent that can make surgical code edits, accept runtime context, coordinate multiple agents, and eventually rebuild the Ship app as its real integration test.
 
 The future product agent's execution behavior is defined in `skill.md`. The builder agent's per-task assignment format lives in `task-prompt-template.md`.
-Architecture direction docs live in `docs/architecture`, and locked decisions live in `instructions/decisions`.
+Architecture direction docs live in `docs/architecture`, locked decisions live in `instructions/decisions`, and repo-specific UI rules live in `instructions/rules`.
 
 ## What
 
@@ -39,7 +39,8 @@ shipyard/
 ├── docs/
 │   └── architecture/
 ├── instructions/
-│   └── decisions/
+│   ├── decisions/
+│   └── rules/
 ├── CODEAGENT.md
 ├── PRESEARCH.md
 ├── skill.md
