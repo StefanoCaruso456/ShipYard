@@ -1,0 +1,129 @@
+:root {
+  color: #f4efe6;
+  background:
+    radial-gradient(circle at top left, rgba(241, 155, 59, 0.18), transparent 24rem),
+    radial-gradient(circle at bottom right, rgba(72, 155, 173, 0.18), transparent 24rem),
+    #0f1720;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: transparent;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 3rem 1.5rem 4rem;
+}
+
+.hero {
+  max-width: 70rem;
+  margin: 0 auto 2rem;
+  padding: 2rem;
+  border: 1px solid rgba(244, 239, 230, 0.12);
+  border-radius: 1.5rem;
+  background: rgba(8, 13, 19, 0.72);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f19b3b;
+  font-size: 0.8rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  line-height: 0.95;
+}
+
+.tagline {
+  max-width: 54rem;
+  margin: 1rem 0 0;
+  color: #d1d7de;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: #f19b3b;
+  color: #0f1720;
+  font-weight: 700;
+}
+
+.status-pill.muted {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4efe6;
+}
+
+.notice {
+  margin-top: 1rem;
+  color: #8ed8e5;
+}
+
+.grid {
+  max-width: 70rem;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(244, 239, 230, 0.08);
+  background: rgba(8, 13, 19, 0.78);
+}
+
+.card h2 {
+  margin-top: 0;
+  margin-bottom: 0.9rem;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8ed8e5;
+}
+
+.card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #d6dce2;
+  line-height: 1.5;
+}
+
+.card li + li {
+  margin-top: 0.6rem;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 1rem 1rem 2rem;
+  }
+
+  .hero {
+    padding: 1.25rem;
+  }
+}
+
