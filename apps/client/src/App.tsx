@@ -18,6 +18,7 @@ import {
   workspaceProjects
 } from "./mockData";
 import type {
+  AttachmentCard,
   ComposerAttachment,
   ComposerMode,
   ProgressEvent,
@@ -47,6 +48,9 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState(workspaceProjects[0]?.id ?? "");
   const [selectedThreadIds, setSelectedThreadIds] = useState<Record<string, string | null>>({});
   const [draftThreadsByProject, setDraftThreadsByProject] = useState<Record<string, WorkspaceThread[]>>({});
+  const [runtimeAttachmentPreviewsByTaskId, setRuntimeAttachmentPreviewsByTaskId] = useState<
+    Record<string, ComposerAttachment[]>
+  >({});
   const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
   const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
@@ -174,9 +178,14 @@ function App() {
     () =>
       visibleProjects.map((candidate) => ({
         project: candidate,
-        threads: buildThreadsForProject(candidate, runtimeTasks, draftThreadsByProject[candidate.id] ?? [])
+        threads: buildThreadsForProject(
+          candidate,
+          runtimeTasks,
+          draftThreadsByProject[candidate.id] ?? [],
+          runtimeAttachmentPreviewsByTaskId
+        )
       })),
-    [draftThreadsByProject, runtimeTasks, visibleProjects]
+    [draftThreadsByProject, runtimeAttachmentPreviewsByTaskId, runtimeTasks, visibleProjects]
   );
 
   const activeProject =
@@ -209,12 +218,16 @@ function App() {
 
   function buildInstructionPayload() {
     const trimmed = composerValue.trim();
-    const attachmentSummary =
-      composerAttachments.length > 0
-        ? `Attachments: ${composerAttachments.map((attachment) => attachment.name).join(", ")}`
-        : "";
 
-    return [trimmed, attachmentSummary].filter(Boolean).join("\n\n");
+    if (trimmed) {
+      return trimmed;
+    }
+
+    if (composerAttachments.length > 0) {
+      return "Analyze the attached file(s) and summarize the key findings.";
+    }
+
+    return "";
   }
 
   function handleCreateThread() {
@@ -261,6 +274,7 @@ function App() {
       existingThread: activeThread?.source === "draft" ? activeThread : null,
       threadId: draftId,
       instruction,
+      attachments: composerAttachments,
       backendConnected: activeProject.kind === "live" && backendConnected
     });
 
@@ -297,10 +311,18 @@ function App() {
     try {
       const response = await submitRuntimeTask({
         instruction,
-        title: optimisticThread.title
+        title: optimisticThread.title,
+        attachments: composerAttachments
       });
 
       await loadRuntimeSnapshot();
+
+      if (composerAttachments.length > 0) {
+        setRuntimeAttachmentPreviewsByTaskId((current) => ({
+          ...current,
+          [response.task.id]: composerAttachments
+        }));
+      }
 
       setDraftThreadsByProject((current) => ({
         ...current,
@@ -451,10 +473,16 @@ function App() {
 function buildThreadsForProject(
   project: WorkspaceProject,
   runtimeTasks: RuntimeTask[],
-  draftThreads: WorkspaceThread[]
+  draftThreads: WorkspaceThread[],
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
 ) {
   if (project.kind === "live") {
-    return [...draftThreads, ...runtimeTasks.map((task) => buildRuntimeThread(task))];
+    return [
+      ...draftThreads,
+      ...runtimeTasks.map((task) =>
+        buildRuntimeThread(task, runtimeAttachmentPreviewsByTaskId[task.id] ?? [])
+      )
+    ];
   }
 
   return [...draftThreads, ...buildPreviewThreads(project.id)];
@@ -470,6 +498,7 @@ function createDraftThread(projectName: string): WorkspaceThread {
     createdLabel: "Just now",
     updatedLabel: "Draft",
     tags: ["draft"],
+    attachments: [],
     messages: [],
     progress: []
   };
@@ -479,11 +508,13 @@ function buildDraftSubmissionThread({
   existingThread,
   threadId,
   instruction,
+  attachments,
   backendConnected
 }: {
   existingThread: WorkspaceThread | null;
   threadId: string;
   instruction: string;
+  attachments: ComposerAttachment[];
   backendConnected: boolean;
 }): WorkspaceThread {
   const timestamp = formatShellTimestamp(new Date());
@@ -513,6 +544,7 @@ function buildDraftSubmissionThread({
     status: backendConnected ? "pending" : "draft",
     updatedLabel: timestamp,
     tags: backendConnected ? ["pending", "live-request"] : ["draft", "local"],
+    attachments: attachments.map(toLocalAttachmentCard),
     messages: [
       ...nextThread.messages,
       createMessage({
@@ -598,6 +630,20 @@ function createMessage(message: ThreadMessage): ThreadMessage {
 
 function createProgress(event: ProgressEvent): ProgressEvent {
   return event;
+}
+
+function toLocalAttachmentCard(attachment: ComposerAttachment): AttachmentCard {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    size: attachment.size,
+    mimeType: attachment.type,
+    kind: attachment.kind,
+    summary: attachment.summary,
+    excerpt: attachment.excerpt,
+    previewUrl: attachment.previewUrl,
+    source: "local"
+  };
 }
 
 export default App;

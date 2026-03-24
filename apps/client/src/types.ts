@@ -62,20 +62,92 @@ export type RuntimeStatusResponse = {
 
 export type RuntimeTaskStatus = "pending" | "running" | "completed" | "failed";
 
+export type AttachmentKind =
+  | "image"
+  | "text"
+  | "code"
+  | "csv"
+  | "json"
+  | "pdf"
+  | "document"
+  | "audio"
+  | "video"
+  | "archive"
+  | "binary"
+  | "unknown";
+
+export type AttachmentAnalysis = {
+  status: "analyzed" | "metadata_only";
+  summary: string;
+  excerpt: string | null;
+  warnings: string[];
+};
+
+export type RuntimeAttachment = {
+  id: string;
+  name: string;
+  mimeType: string | null;
+  size: number;
+  kind: AttachmentKind;
+  analysis: AttachmentAnalysis;
+};
+
+export type AttachmentCard = {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string | null;
+  kind: AttachmentKind;
+  summary: string;
+  excerpt: string | null;
+  previewUrl: string | null;
+  source: "local" | "runtime";
+};
+
 export type RuntimeTask = {
   id: string;
   title: string | null;
   instruction: string;
   simulateFailure: boolean;
+  toolRequest?: unknown;
+  attachments: RuntimeAttachment[];
+  context?: {
+    objective: string | null;
+    constraints: string[];
+    relevantFiles: Array<{
+      path: string;
+      excerpt?: string | null;
+      startLine?: number | null;
+      endLine?: number | null;
+      source?: string | null;
+      reason?: string | null;
+    }>;
+    validationTargets: string[];
+  };
   status: RuntimeTaskStatus;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  retryCount?: number;
+  validationStatus?: string;
+  lastValidationResult?: unknown;
+  rollingSummary?: {
+    text: string;
+    updatedAt: string;
+    source: "result" | "failure" | "retry";
+  } | null;
+  events?: Array<{
+    at: string;
+    type: string;
+    message: string;
+    path?: string | null;
+    toolName?: string | null;
+  }>;
   error: {
     message: string;
   } | null;
   result: {
-    mode: "placeholder-execution" | "ai-sdk-openai";
+    mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool";
     summary: string;
     instructionEcho: string;
     skillId: string;
@@ -83,6 +155,7 @@ export type RuntimeTask = {
     responseText?: string | null;
     provider?: "openai" | null;
     modelId?: string | null;
+    toolResult?: unknown;
   } | null;
 };
 
@@ -158,6 +231,13 @@ export type ComposerAttachment = {
   name: string;
   size: number;
   type: string;
+  mimeType: string | null;
+  kind: AttachmentKind;
+  file: File;
+  previewUrl: string | null;
+  summary: string;
+  excerpt: string | null;
+  source: "local";
 };
 
 export type UtilityTab = "run" | "diff" | "terminal" | "skills" | "automations";
@@ -195,6 +275,7 @@ export type WorkspaceThread = {
   createdLabel: string;
   updatedLabel: string;
   tags: string[];
+  attachments: AttachmentCard[];
   messages: ThreadMessage[];
   progress: ProgressEvent[];
 };

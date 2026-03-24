@@ -550,32 +550,116 @@ a {
 }
 
 .composer__attachments {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.attachment-preview-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.attachment-preview-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+  gap: 0.85rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #1f1f1f;
+}
+
+.attachment-preview-card__media {
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    #242424;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.attachment-chip {
-  display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.42rem 0.7rem;
-  border-radius: 999px;
-  background: #232323;
-  color: #d8d8d3;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  justify-content: center;
+}
+
+.attachment-preview-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-preview-card__badge {
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4ef;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.attachment-preview-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.attachment-preview-card__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.attachment-preview-card__meta strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-preview-card__meta span {
+  color: #9a9a95;
   font-size: 0.82rem;
+  white-space: nowrap;
 }
 
-.attachment-chip button {
-  border: 0;
+.attachment-preview-card__body p,
+.attachment-preview-card__body pre {
+  margin: 0;
+}
+
+.attachment-preview-card__body p {
+  color: #dbdbd6;
+  font-size: 0.9rem;
+}
+
+.attachment-preview-card__body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #a8a8a2;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+}
+
+.attachment-preview-card__remove {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 1.85rem;
+  height: 1.85rem;
   padding: 0;
-  background: transparent;
-  color: #8d8d87;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d6d6d1;
 }
 
-.attachment-chip button:hover {
-  color: #f3f3f0;
+.attachment-preview-card__remove:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .composer__field {

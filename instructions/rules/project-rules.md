@@ -20,6 +20,18 @@ Always follow:
 3. patch
 4. verify
 
+## Session Branch Workflow
+
+For every completed repo-changing task:
+
+- work on one `codex/...` session branch
+- do not push directly to `main`
+- commit the completed task before the final close-out response
+- push the branch before the final close-out response
+- open a pull request to `main`, or update the existing open session pull request
+- do not describe the task as done until the branch, push, and PR state are in place
+- if no repository files changed, say so explicitly
+
 ## Editing Rules
 
 - Do not make speculative edits.

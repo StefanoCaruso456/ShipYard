@@ -79,6 +79,8 @@ export type {
   ExecuteRun,
   PersistentAgentRuntimeService,
   RelevantFileContext,
+  RunAttachment,
+  RunAttachmentKind,
   RepoMutationToolRequest,
   RepoMutationToolResult,
   RollingSummary,
