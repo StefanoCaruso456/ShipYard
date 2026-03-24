@@ -12,7 +12,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
     return (
       <section className="agent-activity agent-activity--empty">
         <div className="agent-activity__header">
-          <strong>Agent activity</strong>
+          <strong>Working</strong>
           <span>{status === "running" ? "Waiting for live trace..." : "No trace captured yet"}</span>
         </div>
         <p>
@@ -27,7 +27,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
   return (
     <section className="agent-activity">
       <div className="agent-activity__header">
-        <strong>Agent activity</strong>
+        <strong>Working</strong>
         <span>{activity.length} updates</span>
       </div>
 
@@ -35,7 +35,9 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
         {activity.map((item) => (
           <article
             key={item.id}
-            className={`agent-activity__item agent-activity__item--${item.tone}`}
+            className={`agent-activity__item agent-activity__item--${item.tone} agent-activity__item--${
+              item.surface ?? "secondary"
+            }`}
             style={
               {
                 "--agent-activity-depth": item.depth
@@ -44,11 +46,12 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
           >
             <div className="agent-activity__item-head">
               <span className="agent-activity__badge">{item.badge}</span>
-              <strong>{item.label}</strong>
+              <div className="agent-activity__copy">
+                <strong>{item.label}</strong>
+                {item.detail ? <p>{item.detail}</p> : null}
+              </div>
               <span>{item.timestamp}</span>
             </div>
-
-            <p>{item.detail}</p>
 
             {item.meta && item.meta.length > 0 ? (
               <div className="agent-activity__meta">

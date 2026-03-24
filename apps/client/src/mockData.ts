@@ -564,7 +564,7 @@ function createProgress(
 
 function buildRuntimeActivity(task: RuntimeTask, trace: RuntimeTraceRunLog | null) {
   if (trace && trace.spans.length > 0) {
-    return flattenTrace(trace);
+    return condenseActivityItems(flattenTrace(trace));
   }
 
   const events = task.events ?? [];
@@ -574,11 +574,14 @@ function buildRuntimeActivity(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
       id: `${task.id}-event-${index}`,
       kind: "event" as const,
       badge: deriveEventBadge(event.type),
-      label: humanizeKey(event.type),
+      label: deriveEventLabel(event.type),
       detail: event.message,
       timestamp: formatDateTime(event.at),
       tone: deriveEventTone(event.type),
       depth: 0,
+      surface: "secondary" as const,
+      sourceType: "summary" as const,
+      sourceName: event.type,
       meta: [event.toolName, event.path].filter(Boolean) as string[]
     }));
   }
@@ -601,6 +604,9 @@ function buildRuntimeActivity(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
         timestamp: formatDateTime(task.rollingSummary.updatedAt),
         tone: summaryTone,
         depth: 0,
+        surface: "primary" as const,
+        sourceType: "summary" as const,
+        sourceName: task.rollingSummary.source,
         meta: [humanizeKey(task.rollingSummary.source)]
       }
     ];
@@ -651,7 +657,10 @@ function visitTraceSpan(
     timestamp: formatDateTime(span.startedAt),
     tone: deriveSpanTone(span),
     depth,
+    surface: deriveSpanSurface(span),
     status: span.status,
+    sourceType: span.spanType,
+    sourceName: span.name,
     meta: buildSpanMeta(span)
   });
 
@@ -662,11 +671,14 @@ function visitTraceSpan(
       id: event.id,
       kind: "event",
       badge: deriveEventBadge(event.name),
-      label: humanizeKey(event.name),
+      label: deriveEventLabel(event.name),
       detail: event.message?.trim() || "Runtime event recorded.",
       timestamp: formatDateTime(event.at),
       tone: deriveEventTone(event.name),
       depth: depth + 1,
+      surface: "secondary",
+      sourceType: span.spanType,
+      sourceName: event.name,
       meta: buildEventMeta(event)
     });
   }
@@ -706,13 +718,13 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
 function deriveSpanLabel(span: RuntimeTraceSpan) {
   switch (span.spanType) {
     case "role":
-      return `${capitalize(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name))} step`;
+      return deriveRoleLabel(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name));
     case "context":
-      return `Assemble ${capitalize(readString(span.metadata.role) ?? "runtime")} context`;
+      return `Built ${readString(span.metadata.role) ?? "runtime"} context`;
     case "tool":
-      return `Call ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
+      return `Used ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
     case "model":
-      return `Call ${readString(span.metadata.modelId) ?? trimTracePrefix(span.name)}`;
+      return `Used ${readString(span.metadata.modelId) ?? trimTracePrefix(span.name)}`;
     case "phase":
     case "story":
     case "task":
@@ -731,6 +743,22 @@ function deriveSpanLabel(span: RuntimeTraceSpan) {
 function deriveSpanDetail(span: RuntimeTraceSpan) {
   if (span.error?.trim()) {
     return span.error.trim();
+  }
+
+  if (span.spanType === "role") {
+    return deriveRoleDetail(span);
+  }
+
+  if (span.spanType === "model") {
+    return "Generated the next response draft for the current step.";
+  }
+
+  if (span.spanType === "context") {
+    return "Pulled together the objective, rules, current state, and supporting context for this role.";
+  }
+
+  if (span.spanType === "run") {
+    return "The runtime processed the task from planning through completion.";
   }
 
   if (span.outputSummary?.trim()) {
@@ -758,6 +786,10 @@ function deriveSpanTone(span: RuntimeTraceSpan): AgentActivityItem["tone"] {
   }
 
   return "default";
+}
+
+function deriveSpanSurface(span: RuntimeTraceSpan): AgentActivityItem["surface"] {
+  return span.spanType === "role" ? "primary" : "secondary";
 }
 
 function deriveEventBadge(eventName: string) {
@@ -794,6 +826,39 @@ function deriveEventBadge(eventName: string) {
   }
 
   return "Event";
+}
+
+function deriveEventLabel(eventName: string) {
+  switch (eventName) {
+    case "validation_gate_failed":
+      return "Validation gate failed";
+    case "validation_gate_passed":
+      return "Validation gate passed";
+    case "task_started":
+      return "Started task";
+    case "task_completed":
+      return "Completed task";
+    case "task_failed":
+      return "Task needs another pass";
+    case "story_started":
+      return "Started story";
+    case "story_completed":
+      return "Completed story";
+    case "story_failed":
+      return "Story needs another pass";
+    case "phase_started":
+      return "Started phase";
+    case "phase_completed":
+      return "Completed phase";
+    case "phase_failed":
+      return "Phase failed";
+    case "retry_scheduled":
+      return "Retry scheduled";
+    case "model_unavailable":
+      return "Model unavailable";
+    default:
+      return humanizeKey(eventName);
+  }
 }
 
 function deriveEventTone(eventName: string): AgentActivityItem["tone"] {
@@ -886,6 +951,107 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   }
 
   return meta;
+}
+
+function condenseActivityItems(items: AgentActivityItem[]) {
+  const filtered = items.filter((item, index) => shouldKeepActivityItem(item, items, index));
+  const condensed: AgentActivityItem[] = [];
+
+  for (const item of filtered) {
+    const previous = condensed[condensed.length - 1];
+
+    if (previous && areDuplicateActivityItems(previous, item)) {
+      continue;
+    }
+
+    condensed.push(item);
+  }
+
+  return condensed;
+}
+
+function shouldKeepActivityItem(
+  item: AgentActivityItem,
+  items: AgentActivityItem[],
+  index: number
+) {
+  if (item.sourceType === "run") {
+    return false;
+  }
+
+  if (
+    item.kind === "event" &&
+    [
+      "agent_result_received",
+      "planner_step_proposed",
+      "executor_step_completed",
+      "verifier_decision_made",
+      "tool_succeeded",
+      "tool_failed"
+    ].includes(item.sourceName ?? "")
+  ) {
+    return false;
+  }
+
+  if (
+    item.sourceType === "model" &&
+    items.some(
+      (candidate) =>
+        candidate.id !== item.id &&
+        candidate.sourceType === "role" &&
+        candidate.sourceName?.startsWith("executor:") &&
+        normalizeActivityText(candidate.timestamp) === normalizeActivityText(item.timestamp)
+    )
+  ) {
+    return true;
+  }
+
+  return true;
+}
+
+function areDuplicateActivityItems(left: AgentActivityItem, right: AgentActivityItem) {
+  return (
+    normalizeActivityText(left.label) === normalizeActivityText(right.label) &&
+    normalizeActivityText(left.detail) === normalizeActivityText(right.detail) &&
+    normalizeActivityText(left.timestamp) === normalizeActivityText(right.timestamp)
+  );
+}
+
+function normalizeActivityText(value: string | null | undefined) {
+  return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function deriveRoleLabel(role: string) {
+  switch (role) {
+    case "planner":
+      return "I’m deciding the next bounded step.";
+    case "executor":
+      return "I’m working on the current step.";
+    case "verifier":
+      return "I’m checking the result before moving on.";
+    default:
+      return `${capitalize(role)} step`;
+  }
+}
+
+function deriveRoleDetail(span: RuntimeTraceSpan) {
+  const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
+  const toolName = readString(span.metadata.toolName);
+
+  switch (role) {
+    case "planner":
+      return toolName
+        ? `I narrowed the task to a specific ${toolName} action so the next move stays scoped.`
+        : "I narrowed the task to a direct response so it stays focused and does not expand scope.";
+    case "executor":
+      return toolName
+        ? `I’m carrying out the planned ${toolName} step and keeping the change limited to the intended target.`
+        : "I’m drafting the response for the current request and keeping it aligned with the planned step.";
+    case "verifier":
+      return "I’m checking that the result matches the request, stays on target, and is safe to accept.";
+    default:
+      return span.outputSummary?.trim() || span.inputSummary?.trim() || "Runtime role step recorded.";
+  }
 }
 
 function parseRoleFromSpanName(name: string) {

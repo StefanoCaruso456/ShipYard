@@ -51,6 +51,13 @@ export function ThreadView({
     );
   }
 
+  const hasActivity = (thread.activity?.length ?? 0) > 0;
+  const visibleMessages = hasActivity
+    ? thread.messages.filter((message) => message.role !== "system")
+    : thread.messages;
+  const userMessages = visibleMessages.filter((message) => message.role === "user");
+  const responseMessages = visibleMessages.filter((message) => message.role !== "user");
+
   return (
     <section className="thread-view">
       <div className="thread-view__status">
@@ -61,19 +68,31 @@ export function ThreadView({
       <div className="thread-view__stream">
         <AttachmentPreviewList attachments={thread.attachments} />
 
-        {(thread.activity?.length ?? 0) > 0 || thread.source === "live" ? (
+        {userMessages.map((message) => (
+          <article key={message.id} className={`message message--${message.role}`}>
+            <div className="message__meta">
+              <strong>{message.label}</strong>
+              <span>{message.timestamp}</span>
+            </div>
+            <p>{message.body}</p>
+          </article>
+        ))}
+
+        {hasActivity || thread.source === "live" ? (
           <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
         ) : null}
 
-        {thread.progress.map((event) => (
-          <div key={event.id} className={`event-row event-row--${event.tone}`}>
-            <strong>{event.label}</strong>
-            <span>{event.timestamp}</span>
-            <p>{event.detail}</p>
-          </div>
-        ))}
+        {!hasActivity
+          ? thread.progress.map((event) => (
+              <div key={event.id} className={`event-row event-row--${event.tone}`}>
+                <strong>{event.label}</strong>
+                <span>{event.timestamp}</span>
+                <p>{event.detail}</p>
+              </div>
+            ))
+          : null}
 
-        {thread.messages.map((message) => (
+        {responseMessages.map((message) => (
           <article key={message.id} className={`message message--${message.role}`}>
             <div className="message__meta">
               <strong>{message.label}</strong>

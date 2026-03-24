@@ -451,14 +451,32 @@ a {
 
 .agent-activity {
   display: grid;
-  gap: 0.9rem;
-  padding: 1rem;
+  gap: 0.8rem;
+  padding: 0.2rem 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.agent-activity::before {
+  content: "";
+  display: block;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-bottom: 0.25rem;
+}
+
+.agent-activity::after {
+  content: "";
+  display: block;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-top: 0.25rem;
+}
+
+.agent-activity--empty {
+  padding: 0.85rem 0;
   border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(180deg, rgba(31, 31, 31, 0.98), rgba(25, 25, 25, 0.98));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 16px 32px rgba(0, 0, 0, 0.18);
 }
 
 .agent-activity--empty p {
@@ -474,7 +492,7 @@ a {
 }
 
 .agent-activity__header strong {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 620;
 }
 
@@ -485,24 +503,24 @@ a {
 
 .agent-activity__list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.2rem;
 }
 
 .agent-activity__item {
   display: grid;
-  gap: 0.45rem;
-  padding: 0.8rem 0.9rem;
-  margin-left: calc(var(--agent-activity-depth, 0) * 0.85rem);
-  border-radius: 0.95rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  gap: 0.25rem;
+  padding: 0.65rem 0 0.65rem calc(var(--agent-activity-depth, 0) * 0.85rem);
+  margin-left: 0;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
 }
 
 .agent-activity__item-head {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.65rem;
-  flex-wrap: wrap;
+  align-items: start;
 }
 
 .agent-activity__badge {
@@ -510,61 +528,93 @@ a {
   align-items: center;
   padding: 0.2rem 0.48rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #d9d9d3;
-  font-size: 0.72rem;
-  font-weight: 620;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8f8f89;
+  font-size: 0.69rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
-.agent-activity__item-head strong {
-  font-size: 0.9rem;
-  font-weight: 620;
+.agent-activity__copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.agent-activity__copy strong {
+  font-size: 0.93rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.agent-activity__copy p {
+  margin: 0;
+  color: #9f9f99;
+  line-height: 1.55;
 }
 
 .agent-activity__item-head span:last-child {
-  margin-left: auto;
   color: #7f7f7a;
   font-size: 0.78rem;
 }
 
-.agent-activity__item p {
-  margin: 0;
-  color: #a6a6a0;
-  line-height: 1.58;
+.agent-activity__item--primary {
+  padding-top: 0.95rem;
+  padding-bottom: 0.95rem;
+}
+
+.agent-activity__item--primary .agent-activity__copy strong {
+  font-size: 1.05rem;
+  color: #ededea;
+}
+
+.agent-activity__item--primary .agent-activity__copy p {
+  color: #c6c6bf;
+  font-size: 0.95rem;
+}
+
+.agent-activity__item--secondary .agent-activity__copy strong {
+  font-size: 0.82rem;
+  color: #cbcbc5;
+}
+
+.agent-activity__item--secondary .agent-activity__copy p {
+  font-size: 0.82rem;
+  color: #8e8e89;
 }
 
 .agent-activity__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.35rem;
+  margin-left: calc(1.9rem + 0.65rem);
 }
 
 .agent-activity__meta span {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.48rem;
+  padding: 0.16rem 0.42rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #c7c7c2;
-  font-size: 0.74rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #9f9f98;
+  font-size: 0.72rem;
 }
 
 .agent-activity__item--success {
-  border-color: rgba(116, 153, 124, 0.3);
+  border-left-color: rgba(116, 153, 124, 0.38);
 }
 
 .agent-activity__item--danger {
-  border-color: rgba(154, 96, 96, 0.3);
+  border-left-color: rgba(154, 96, 96, 0.38);
 }
 
 .agent-activity__item--warning {
-  border-color: rgba(176, 143, 80, 0.32);
+  border-left-color: rgba(176, 143, 80, 0.4);
 }
 
 .agent-activity__item--info {
-  border-color: rgba(88, 110, 139, 0.3);
+  border-left-color: rgba(88, 110, 139, 0.38);
 }
 
 .message {

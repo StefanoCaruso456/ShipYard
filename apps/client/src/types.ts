@@ -250,7 +250,10 @@ export type AgentActivityItem = {
   timestamp: string;
   tone: "default" | "info" | "success" | "warning" | "danger";
   depth: number;
+  surface?: "primary" | "secondary";
   status?: RuntimeTraceSpanStatus;
+  sourceType?: RuntimeTraceSpanType | "summary";
+  sourceName?: string | null;
   meta?: string[];
 };
 
