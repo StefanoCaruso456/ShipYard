@@ -7,7 +7,9 @@ import type {
   ContextAssembler,
   PersistentAgentRuntimeService,
   RepoMutationToolRequest,
-  SubmitTaskInput
+  SubmitTaskInput,
+  ValidationGate,
+  ValidationGateKind
 } from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
@@ -294,6 +296,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     simulateFailure?: unknown;
     toolRequest?: unknown;
     context?: unknown;
+    phaseExecution?: unknown;
   };
 
   if (typeof body?.instruction !== "string" || !body.instruction.trim()) {
@@ -328,6 +331,12 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     return context;
   }
 
+  const phaseExecution = parsePhaseExecutionInput(parseUnknownJson(body.phaseExecution));
+
+  if ("error" in phaseExecution) {
+    return phaseExecution;
+  }
+
   return {
     instruction: body.instruction,
     title: body.title,
@@ -343,7 +352,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
           }))
         : []
     ),
-    context: context.value
+    context: context.value,
+    phaseExecution: phaseExecution.value
   };
 }
 
@@ -363,6 +373,7 @@ function serializeRun(run: AgentRunRecord) {
     retryCount: run.retryCount,
     validationStatus: run.validationStatus,
     lastValidationResult: run.lastValidationResult,
+    phaseExecution: run.phaseExecution ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
     error: run.error,
@@ -631,4 +642,326 @@ function parseToolRequest(
   return {
     error: "toolRequest.toolName must be edit_file_region, create_file, or delete_file."
   };
+}
+
+function parsePhaseExecutionInput(
+  value: unknown
+): { value: SubmitTaskInput["phaseExecution"] } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return {
+      error: "phaseExecution must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    phases?: unknown;
+    retryPolicy?: unknown;
+  };
+
+  if (!Array.isArray(candidate.phases) || candidate.phases.length === 0) {
+    return {
+      error: "phaseExecution.phases must be a non-empty array."
+    };
+  }
+
+  const phases: NonNullable<SubmitTaskInput["phaseExecution"]>["phases"] = [];
+
+  for (const [phaseIndex, rawPhase] of candidate.phases.entries()) {
+    if (!rawPhase || typeof rawPhase !== "object") {
+      return {
+        error: `phaseExecution.phases[${phaseIndex}] must be an object.`
+      };
+    }
+
+    const phase = rawPhase as {
+      id?: unknown;
+      name?: unknown;
+      description?: unknown;
+      userStories?: unknown;
+    };
+
+    if (
+      typeof phase.id !== "string" ||
+      typeof phase.name !== "string" ||
+      typeof phase.description !== "string"
+    ) {
+      return {
+        error: "Each phase requires string id, name, and description fields."
+      };
+    }
+
+    if (!Array.isArray(phase.userStories) || phase.userStories.length === 0) {
+      return {
+        error: `phaseExecution.phases[${phaseIndex}].userStories must be a non-empty array.`
+      };
+    }
+
+    const userStories: NonNullable<
+      SubmitTaskInput["phaseExecution"]
+    >["phases"][number]["userStories"] = [];
+
+    for (const [storyIndex, rawStory] of phase.userStories.entries()) {
+      if (!rawStory || typeof rawStory !== "object") {
+        return {
+          error: `phaseExecution.phases[${phaseIndex}].userStories[${storyIndex}] must be an object.`
+        };
+      }
+
+      const story = rawStory as {
+        id?: unknown;
+        title?: unknown;
+        description?: unknown;
+        tasks?: unknown;
+        acceptanceCriteria?: unknown;
+        validationGates?: unknown;
+      };
+
+      if (
+        typeof story.id !== "string" ||
+        typeof story.title !== "string" ||
+        typeof story.description !== "string"
+      ) {
+        return {
+          error: "Each user story requires string id, title, and description fields."
+        };
+      }
+
+      if (!Array.isArray(story.tasks) || story.tasks.length === 0) {
+        return {
+          error: "Each user story requires a non-empty tasks array."
+        };
+      }
+
+      if (
+        !Array.isArray(story.acceptanceCriteria) ||
+        story.acceptanceCriteria.some((criterion) => typeof criterion !== "string")
+      ) {
+        return {
+          error: "Each user story requires acceptanceCriteria as an array of strings."
+        };
+      }
+
+      const validationGates = parseValidationGates(story.validationGates);
+
+      if ("error" in validationGates) {
+        return validationGates;
+      }
+
+      const tasks: NonNullable<
+        SubmitTaskInput["phaseExecution"]
+      >["phases"][number]["userStories"][number]["tasks"] = [];
+
+      for (const [taskIndex, rawTask] of story.tasks.entries()) {
+        if (!rawTask || typeof rawTask !== "object") {
+          return {
+            error: `phaseExecution.phases[${phaseIndex}].userStories[${storyIndex}].tasks[${taskIndex}] must be an object.`
+          };
+        }
+
+        const task = rawTask as {
+          id?: unknown;
+          instruction?: unknown;
+          expectedOutcome?: unknown;
+          toolRequest?: unknown;
+          context?: unknown;
+          validationGates?: unknown;
+        };
+
+        if (
+          typeof task.id !== "string" ||
+          typeof task.instruction !== "string" ||
+          typeof task.expectedOutcome !== "string"
+        ) {
+          return {
+            error: "Each task requires string id, instruction, and expectedOutcome fields."
+          };
+        }
+
+        const taskToolRequest = parseToolRequest(task.toolRequest);
+
+        if ("error" in taskToolRequest) {
+          return taskToolRequest;
+        }
+
+        const taskContext = parseRunContextInput(task.context);
+
+        if ("error" in taskContext) {
+          return taskContext;
+        }
+
+        const taskValidationGates = parseValidationGates(task.validationGates);
+
+        if ("error" in taskValidationGates) {
+          return taskValidationGates;
+        }
+
+        tasks.push({
+          id: task.id,
+          instruction: task.instruction,
+          expectedOutcome: task.expectedOutcome,
+          toolRequest: taskToolRequest.value,
+          context: taskContext.value,
+          validationGates: taskValidationGates.value
+        });
+      }
+
+      userStories.push({
+        id: story.id,
+        title: story.title,
+        description: story.description,
+        tasks,
+        acceptanceCriteria: story.acceptanceCriteria as string[],
+        validationGates: validationGates.value
+      });
+    }
+
+    phases.push({
+      id: phase.id,
+      name: phase.name,
+      description: phase.description,
+      userStories
+    });
+  }
+
+  const retryPolicy = parseRetryPolicy(candidate.retryPolicy);
+
+  if ("error" in retryPolicy) {
+    return retryPolicy;
+  }
+
+  return {
+    value: {
+      phases,
+      retryPolicy: retryPolicy.value
+    }
+  };
+}
+
+function parseValidationGates(
+  value: unknown
+): { value: ValidationGate[] } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: []
+    };
+  }
+
+  if (!Array.isArray(value)) {
+    return {
+      error: "validationGates must be an array when provided."
+    };
+  }
+
+  const gates = [];
+
+  for (const [index, rawGate] of value.entries()) {
+    if (!rawGate || typeof rawGate !== "object") {
+      return {
+        error: `validationGates[${index}] must be an object.`
+      };
+    }
+
+    const gate = rawGate as {
+      id?: unknown;
+      description?: unknown;
+      kind?: unknown;
+      expectedValue?: unknown;
+    };
+
+    if (typeof gate.description !== "string" || typeof gate.kind !== "string") {
+      return {
+        error: "Each validation gate requires string description and kind fields."
+      };
+    }
+
+    if (!isValidationGateKind(gate.kind)) {
+      return {
+        error:
+          "validationGates.kind must be task_completed, all_tasks_completed, all_user_stories_completed, tool_result_ok, validation_passed, result_summary_includes, response_text_includes, evidence_includes, or event_type_present."
+      };
+    }
+
+    if (gate.expectedValue !== undefined && typeof gate.expectedValue !== "string") {
+      return {
+        error: "validationGates.expectedValue must be a string when provided."
+      };
+    }
+
+    gates.push({
+      id: typeof gate.id === "string" && gate.id.trim() ? gate.id.trim() : `gate-${index + 1}`,
+      description: gate.description,
+      kind: gate.kind,
+      expectedValue: gate.expectedValue as string | undefined
+    });
+  }
+
+  return {
+    value: gates
+  };
+}
+
+function parseRetryPolicy(
+  value: unknown
+): { value: NonNullable<SubmitTaskInput["phaseExecution"]>["retryPolicy"] | undefined } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: undefined
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return {
+      error: "phaseExecution.retryPolicy must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    maxTaskRetries?: unknown;
+    maxStoryRetries?: unknown;
+  };
+
+  if (
+    candidate.maxTaskRetries !== undefined &&
+    (typeof candidate.maxTaskRetries !== "number" || candidate.maxTaskRetries < 0)
+  ) {
+    return {
+      error: "phaseExecution.retryPolicy.maxTaskRetries must be a non-negative number."
+    };
+  }
+
+  if (
+    candidate.maxStoryRetries !== undefined &&
+    (typeof candidate.maxStoryRetries !== "number" || candidate.maxStoryRetries < 0)
+  ) {
+    return {
+      error: "phaseExecution.retryPolicy.maxStoryRetries must be a non-negative number."
+    };
+  }
+
+  return {
+    value: {
+      maxTaskRetries: candidate.maxTaskRetries as number | undefined,
+      maxStoryRetries: candidate.maxStoryRetries as number | undefined
+    }
+  };
+}
+
+function isValidationGateKind(value: string): value is ValidationGateKind {
+  return (
+    value === "task_completed" ||
+    value === "all_tasks_completed" ||
+    value === "all_user_stories_completed" ||
+    value === "tool_result_ok" ||
+    value === "validation_passed" ||
+    value === "result_summary_includes" ||
+    value === "response_text_includes" ||
+    value === "evidence_includes" ||
+    value === "event_type_present"
+  );
 }

@@ -167,6 +167,154 @@ test("persistent runtime retries validation failures once and records rollback e
   assert.ok(failedRun.events.some((event) => event.type === "rollback_succeeded"));
 });
 
+test("persistent runtime executes phases, stories, and tasks sequentially", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const run = runtimeService.submitTask({
+    instruction: "Execute the backend delivery plan.",
+    phaseExecution: {
+      phases: [
+        {
+          id: "phase-foundation",
+          name: "Foundation",
+          description: "Lay down the core execution contracts.",
+          userStories: [
+            {
+              id: "story-runtime-shape",
+              title: "Define runtime shape",
+              description: "Introduce the runtime contracts for the new system.",
+              acceptanceCriteria: ["Define runtime shape", "Expose runtime contracts"],
+              tasks: [
+                {
+                  id: "task-1",
+                  instruction: "Define runtime shape.",
+                  expectedOutcome: "Define runtime shape"
+                },
+                {
+                  id: "task-2",
+                  instruction: "Expose runtime contracts.",
+                  expectedOutcome: "Expose runtime contracts"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: "phase-validation",
+          name: "Validation",
+          description: "Ensure the system validates progression.",
+          userStories: [
+            {
+              id: "story-gates",
+              title: "Gate every step",
+              description: "Validate task and story completion before moving on.",
+              acceptanceCriteria: ["Gate every step"],
+              tasks: [
+                {
+                  id: "task-3",
+                  instruction: "Gate every step.",
+                  expectedOutcome: "Gate every step"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.equal(completedRun.result?.mode, "phase-execution");
+  assert.equal(completedRun.phaseExecution?.status, "completed");
+  assert.deepEqual(startedInstructions, [
+    "Define runtime shape.",
+    "Expose runtime contracts.",
+    "Gate every step."
+  ]);
+  assert.equal(completedRun.phaseExecution?.progress.completedPhases, 2);
+  assert.equal(completedRun.phaseExecution?.progress.completedStories, 2);
+  assert.equal(completedRun.phaseExecution?.progress.completedTasks, 3);
+  assert.ok(completedRun.events.some((event) => event.type === "phase_started"));
+  assert.ok(completedRun.events.some((event) => event.type === "story_completed"));
+  assert.ok(completedRun.events.some((event) => event.type === "task_completed"));
+});
+
+test("persistent runtime retries task validation gates before failing the full run", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const attempts = new Map<string, number>();
+  const runtimeService = createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      const currentAttempt = (attempts.get(run.instruction) ?? 0) + 1;
+      attempts.set(run.instruction, currentAttempt);
+
+      return {
+        mode: "placeholder-execution",
+        summary: currentAttempt === 1 ? "Mismatched output" : run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const run = runtimeService.submitTask({
+    instruction: "Execute the retrying plan.",
+    phaseExecution: {
+      retryPolicy: {
+        maxTaskRetries: 1
+      },
+      phases: [
+        {
+          id: "phase-retry",
+          name: "Retry",
+          description: "Validate retry behavior.",
+          userStories: [
+            {
+              id: "story-retry",
+              title: "Retry a task",
+              description: "Retry when task evidence misses the expected outcome.",
+              acceptanceCriteria: ["Expected output"],
+              tasks: [
+                {
+                  id: "task-retry",
+                  instruction: "Produce the expected output.",
+                  expectedOutcome: "Expected output"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+  const task =
+    completedRun.phaseExecution?.phases[0]?.userStories[0]?.tasks[0];
+
+  assert.equal(task?.retryCount, 1);
+  assert.equal(task?.status, "completed");
+  assert.ok(completedRun.events.some((event) => event.type === "validation_gate_failed"));
+  assert.ok(completedRun.events.some((event) => event.type === "retry_scheduled"));
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),

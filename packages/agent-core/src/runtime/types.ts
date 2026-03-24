@@ -67,6 +67,37 @@ export type RepoMutationToolResult =
   | CreateFileResult
   | DeleteFileResult;
 
+export type PhaseStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export type TaskStatus = "pending" | "running" | "completed" | "failed";
+
+export type ValidationGateKind =
+  | "task_completed"
+  | "all_tasks_completed"
+  | "all_user_stories_completed"
+  | "tool_result_ok"
+  | "validation_passed"
+  | "result_summary_includes"
+  | "response_text_includes"
+  | "evidence_includes"
+  | "event_type_present";
+
+export type ValidationGate = {
+  id: string;
+  description: string;
+  kind: ValidationGateKind;
+  expectedValue?: string | null;
+};
+
+export type ValidationGateResult = {
+  gateId: string;
+  description: string;
+  kind: ValidationGateKind;
+  success: boolean;
+  message: string;
+  expectedValue?: string | null;
+};
+
 export type RelevantFileContext = {
   path: string;
   excerpt?: string | null;
@@ -83,6 +114,102 @@ export type RunContextInput = {
   validationTargets: string[];
 };
 
+export type TaskInput = {
+  id: string;
+  instruction: string;
+  expectedOutcome: string;
+  toolRequest?: RepoMutationToolRequest | null;
+  context?: RunContextInput | null;
+  validationGates?: ValidationGate[];
+};
+
+export type UserStoryInput = {
+  id: string;
+  title: string;
+  description: string;
+  tasks: TaskInput[];
+  acceptanceCriteria: string[];
+  validationGates?: ValidationGate[];
+};
+
+export type PhaseInput = {
+  id: string;
+  name: string;
+  description: string;
+  userStories: UserStoryInput[];
+};
+
+export type PhaseExecutionRetryPolicy = {
+  maxTaskRetries: number;
+  maxStoryRetries: number;
+};
+
+export type PhaseExecutionInput = {
+  phases: PhaseInput[];
+  retryPolicy?: Partial<PhaseExecutionRetryPolicy> | null;
+};
+
+export type Task = {
+  id: string;
+  instruction: string;
+  expectedOutcome: string;
+  status: TaskStatus;
+  toolRequest: RepoMutationToolRequest | null;
+  context: RunContextInput | null;
+  validationGates: ValidationGate[];
+  retryCount: number;
+  failureReason: string | null;
+  lastValidationResults: ValidationGateResult[] | null;
+  result: AgentRunResult | null;
+};
+
+export type UserStory = {
+  id: string;
+  title: string;
+  description: string;
+  tasks: Task[];
+  acceptanceCriteria: string[];
+  validationGates: ValidationGate[];
+  status: PhaseStatus;
+  retryCount: number;
+  failureReason: string | null;
+  lastValidationResults: ValidationGateResult[] | null;
+};
+
+export type Phase = {
+  id: string;
+  name: string;
+  description: string;
+  status: PhaseStatus;
+  userStories: UserStory[];
+  failureReason: string | null;
+  lastValidationResults: ValidationGateResult[] | null;
+};
+
+export type PhaseExecutionProgress = {
+  totalPhases: number;
+  completedPhases: number;
+  totalStories: number;
+  completedStories: number;
+  totalTasks: number;
+  completedTasks: number;
+};
+
+export type PhaseExecutionPointer = {
+  phaseId: string | null;
+  storyId: string | null;
+  taskId: string | null;
+};
+
+export type PhaseExecutionState = {
+  status: PhaseStatus;
+  phases: Phase[];
+  current: PhaseExecutionPointer;
+  progress: PhaseExecutionProgress;
+  retryPolicy: PhaseExecutionRetryPolicy;
+  lastFailureReason: string | null;
+};
+
 export type RollingSummary = {
   text: string;
   updatedAt: string;
@@ -96,6 +223,7 @@ export type SubmitTaskInput = {
   toolRequest?: RepoMutationToolRequest | null;
   attachments?: RunAttachment[];
   context?: RunContextInput | null;
+  phaseExecution?: PhaseExecutionInput | null;
 };
 
 export type AgentRunFailure = {
@@ -108,11 +236,12 @@ export type AgentRunFailure = {
 };
 
 export type AgentRunResult = {
-  mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool";
+  mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool" | "phase-execution";
   summary: string;
   instructionEcho: string;
   skillId: string;
   completedAt: string;
+  phaseExecution?: PhaseExecutionState | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -134,6 +263,7 @@ export type AgentRunRecord = {
   retryCount: number;
   validationStatus: ValidationStatus;
   lastValidationResult: ValidationResult | null;
+  phaseExecution?: PhaseExecutionState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];
   error: AgentRunFailure | null;

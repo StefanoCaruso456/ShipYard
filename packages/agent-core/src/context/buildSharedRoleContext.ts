@@ -51,6 +51,12 @@ function selectRoleSkillView(roleSkillView: RoleSkillView) {
 }
 
 function deriveTaskObjective(run: AgentRunRecord) {
+  const activeTask = extractActiveTask(run);
+
+  if (activeTask?.expectedOutcome) {
+    return activeTask.expectedOutcome;
+  }
+
   if (run.context.objective) {
     return run.context.objective;
   }
@@ -139,4 +145,19 @@ function extractToolPath(run: AgentRunRecord) {
   }
 
   return null;
+}
+
+function extractActiveTask(run: AgentRunRecord) {
+  const phaseId = run.phaseExecution?.current.phaseId;
+  const storyId = run.phaseExecution?.current.storyId;
+  const taskId = run.phaseExecution?.current.taskId;
+
+  if (!phaseId || !storyId || !taskId) {
+    return null;
+  }
+
+  const phase = run.phaseExecution?.phases.find((candidate) => candidate.id === phaseId);
+  const story = phase?.userStories.find((candidate) => candidate.id === storyId);
+
+  return story?.tasks.find((candidate) => candidate.id === taskId) ?? null;
 }

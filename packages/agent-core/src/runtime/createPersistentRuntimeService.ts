@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
+import {
+  executePhaseExecutionRun,
+  normalizePhaseExecutionInput,
+  normalizePhaseExecutionState
+} from "./phaseExecution";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import {
   cloneRunRecord,
@@ -60,6 +65,7 @@ export function createPersistentRuntimeService(
       retryCount: 0,
       validationStatus: "not_run",
       lastValidationResult: null,
+      phaseExecution: normalizePhaseExecutionInput(input.phaseExecution),
       rollingSummary: null,
       events: [],
       error: null,
@@ -212,24 +218,34 @@ export function createPersistentRuntimeService(
         store.update(runningRun);
 
         try {
-          const result = await executeRun(runningRun, {
-            instructionRuntime: options.instructionRuntime
-          });
+          const result = runningRun.phaseExecution
+            ? await executePhaseExecutionRun({
+                run: runningRun,
+                instructionRuntime: options.instructionRuntime,
+                executeRun,
+                persistRun: (updatedRun) => {
+                  store.update(normalizeRunRecord(updatedRun));
+                }
+              })
+            : await executeRun(runningRun, {
+                instructionRuntime: options.instructionRuntime
+              });
           const completedAt = new Date().toISOString();
           const validationResult = extractValidationResult(result);
+          const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
           const completedRun = normalizeRunRecord({
-            ...(store.get(run.id) ?? runningRun),
+            ...latestStoredRun,
             status: "completed",
             completedAt,
             validationStatus: validationResult
               ? validationResult.success
                 ? "passed"
                 : "failed"
-              : runningRun.validationStatus,
-            lastValidationResult: validationResult ?? runningRun.lastValidationResult,
+              : latestStoredRun.validationStatus,
+            lastValidationResult: validationResult ?? latestStoredRun.lastValidationResult,
             events: validationResult
-              ? appendRunEvents(runningRun, createValidationSuccessEvent(result, validationResult))
-              : runningRun.events,
+              ? appendRunEvents(latestStoredRun, createValidationSuccessEvent(result, validationResult))
+              : latestStoredRun.events,
             rollingSummary: createResultRollingSummary(result, completedAt),
             error: null,
             result: {
@@ -363,6 +379,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
     validationStatus: run.validationStatus ?? "not_run",
     lastValidationResult: run.lastValidationResult ?? null,
+    phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
     rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
   };
@@ -446,6 +463,10 @@ function shouldRetryRun(
   run: AgentRunRecord,
   failure: NonNullable<AgentRunRecord["error"]>
 ) {
+  if (run.phaseExecution) {
+    return false;
+  }
+
   return (
     failure.code === "validation_failed" &&
     failure.rollback?.success === true &&

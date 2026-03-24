@@ -50,6 +50,11 @@ export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgent
 export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
+export {
+  executePhaseExecutionRun,
+  normalizePhaseExecutionInput,
+  normalizePhaseExecutionState
+} from "./runtime/phaseExecution";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
   ContextAssembler,
@@ -77,6 +82,13 @@ export type {
   AgentRunStore,
   AgentRuntimeStatus,
   ExecuteRun,
+  Phase,
+  PhaseExecutionInput,
+  PhaseExecutionPointer,
+  PhaseExecutionProgress,
+  PhaseExecutionRetryPolicy,
+  PhaseExecutionState,
+  PhaseStatus,
   PersistentAgentRuntimeService,
   RelevantFileContext,
   RunAttachment,
@@ -86,7 +98,15 @@ export type {
   RollingSummary,
   RunContextInput,
   RuntimeWorkerState,
-  SubmitTaskInput
+  SubmitTaskInput,
+  Task,
+  TaskInput,
+  TaskStatus,
+  UserStory,
+  UserStoryInput,
+  ValidationGate,
+  ValidationGateKind,
+  ValidationGateResult
 } from "./runtime/types";
 export type {
   CreateFileInput,

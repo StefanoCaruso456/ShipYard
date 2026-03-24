@@ -82,6 +82,13 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
         retryCount: shared.run.retryCount,
         validationStatus: shared.run.validationStatus,
         lastValidationResult: shared.run.lastValidationResult,
+        phaseExecution: shared.run.phaseExecution
+          ? {
+              status: shared.run.phaseExecution.status,
+              current: shared.run.phaseExecution.current,
+              progress: shared.run.phaseExecution.progress
+            }
+          : null,
         workerState: shared.runtimeStatus.workerState
       },
       null,
