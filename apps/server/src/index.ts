@@ -8,6 +8,7 @@ import { registerRuntimeRoutes } from "./routes/runtime";
 import { bootRuntimeService } from "./runtime/bootRuntimeService";
 
 const port = Number(process.env.PORT ?? 8787);
+const host = process.env.HOST ?? "0.0.0.0";
 
 async function startServer() {
   const { runtimeService, openAI } = await bootRuntimeService();
@@ -15,6 +16,27 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json());
+
+  app.get("/", (_request, response) => {
+    const runtimeStatus = runtimeService.getStatus();
+
+    response.json({
+      service: "shipyard-server",
+      status: "ok",
+      message: "Shipyard runtime server is online.",
+      endpoints: {
+        health: "/api/health",
+        project: "/api/project",
+        runtimeStatus: "/api/runtime/status",
+        runtimeTasks: "/api/runtime/tasks"
+      },
+      runtime: {
+        workerState: runtimeStatus.workerState,
+        queuedRuns: runtimeStatus.queuedRuns,
+        totalRuns: runtimeStatus.totalRuns
+      }
+    });
+  });
 
   app.get("/api/health", (_request, response) => {
     const runtimeStatus = runtimeService.getStatus();
@@ -51,8 +73,8 @@ async function startServer() {
 
   registerRuntimeRoutes(app, runtimeService, openAI);
 
-  app.listen(port, () => {
-    console.log(`Shipyard server running on http://localhost:${port}`);
+  app.listen(port, host, () => {
+    console.log(`Shipyard server running on http://${host}:${port}`);
   });
 }
 
