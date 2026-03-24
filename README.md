@@ -3,12 +3,25 @@
 Shipyard is the workspace for building an autonomous coding agent that can make surgical code edits, accept runtime context, coordinate multiple agents, and eventually rebuild the Ship app as its real integration test.
 
 The future product agent's execution behavior is defined in `skill.md`. The builder agent's per-task assignment format lives in `task-prompt-template.md`.
-Architecture direction docs live in `docs/architecture`, including `docs/architecture/implementation-phases.md`. Locked decisions live in `instructions/decisions`, and repo-specific UI rules live in `instructions/rules`.
+
+## Docs
+
+Keep the docs set small and intentional:
+
+- `docs/architecture/implementation-phases.md`: completed implementation phases
+- `docs/architecture/system-architecture.md`: target runtime shape
+- `docs/architecture/infrastructure.md`: hosting and deployment direction
+- `docs/architecture/model-strategy.md`: model and provider direction
+- `docs/architecture/editing-strategy.md`: editing approach and guardrails
+- `docs/architecture/observability.md`: tracing direction
+- `instructions/decisions`: locked architecture decisions
+- `instructions/rules/project-rules.md`: repo work rules
+- `instructions/rules/frontend-ui-rules.md`: frontend design rules
 
 ## What
 
 - A persistent coding agent with a client, server, and shared packages
-- A repo structure that is ready for the upcoming PRESEARCH and implementation phases
+- A repo structure that is ready for ongoing implementation phases
 - A starter contract for agent architecture, tracing, and product intent
 
 ## Why
@@ -24,7 +37,7 @@ The assignment is not about generating code quickly. It is about designing an ag
 
 ## Outcome
 
-This repo is now wired as a lean monorepo so we can move straight into PRESEARCH, lock the architecture, and then build the actual coding agent on top of a clean structure.
+This repo is now wired as a lean monorepo so we can keep building the coding agent on top of a clean structure.
 
 ## Tree
 
@@ -41,8 +54,7 @@ shipyard/
 ├── instructions/
 │   ├── decisions/
 │   └── rules/
-├── CODEAGENT.md
-├── PRESEARCH.md
+├── CONTRIBUTING.md
 ├── skill.md
 ├── task-prompt-template.md
 └── README.md

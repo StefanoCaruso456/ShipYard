@@ -81,15 +81,17 @@ Meaning:
 7. runtime either continues, retries, or stops
 8. trace and run state persisted
 
-## Current Phase Boundary
+## Current State
 
-Phase 1 is intentionally smaller than the full architecture:
+Phases 1 through 4 are complete:
 
-- runtime loads `skill.md`
-- role-specific skill views are compiled and cached
-- debug endpoint exposes the compiled result
-- builder-agent prompts remain separate from runtime prompts
-- no persistent task queue yet
-- no Postgres-backed run state yet
-- no full planner/executor/verifier model loop yet
+- runtime instruction loading
+- persistent runtime loop skeleton
+- repo inspection tools
+- surgical file editing
 
+Still not built:
+
+- full planner/executor/verifier orchestration
+- durable database-backed runtime state
+- richer trace storage and review flows
