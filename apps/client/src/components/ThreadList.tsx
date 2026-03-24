@@ -36,19 +36,21 @@ export function ThreadList({
             <div className="thread-group__actions">
               <button
                 type="button"
-                className="sidebar__icon-button thread-group__action-button"
+                className="thread-group__action-button"
                 onClick={() => onRenameProject(project.id)}
                 aria-label={`Rename ${project.name}`}
               >
                 <RenameIcon />
+                <span>Rename</span>
               </button>
               <button
                 type="button"
-                className="sidebar__icon-button thread-group__action-button thread-group__action-button--danger"
+                className="thread-group__action-button thread-group__action-button--danger"
                 onClick={() => onDeleteProject(project.id)}
                 aria-label={`Delete ${project.name}`}
               >
                 <DeleteIcon />
+                <span>Delete</span>
               </button>
             </div>
           </div>

@@ -187,16 +187,24 @@ a {
 }
 
 .thread-group__actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  flex-shrink: 0;
-  justify-content: flex-end;
 }
 
 .thread-group__action-button {
+  width: 100%;
+  height: auto;
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.6rem;
   border-color: rgba(255, 255, 255, 0.06);
   background: #202020;
+  font-size: 0.76rem;
+  color: #cfcfca;
 }
 
 .thread-group__action-button--danger {
@@ -241,6 +249,16 @@ a {
   height: 2rem;
   display: grid;
   place-items: center;
+}
+
+.thread-group__action-button span {
+  line-height: 1;
+}
+
+.thread-group__action-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
 }
 
 .sidebar__icon-button svg {
