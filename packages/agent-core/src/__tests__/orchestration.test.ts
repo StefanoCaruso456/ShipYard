@@ -5,6 +5,7 @@ import test from "node:test";
 import { createContextAssembler } from "../context/createContextAssembler";
 import { createAgentRuntime } from "../runtime/createAgentRuntime";
 import { createPersistentRuntimeService } from "../runtime/createPersistentRuntimeService";
+import { createAgentHandoff, createAgentInvocation } from "../runtime/coordinator/handoffs";
 import { planNextStep, verifyStepResult } from "../runtime/orchestration";
 import type {
   AgentRunRecord,
@@ -12,6 +13,30 @@ import type {
   PlannerStepResult,
   Task
 } from "../runtime/types";
+
+test("typed handoffs preserve bounded coordination payloads for role invocations", () => {
+  const handoff = createAgentHandoff({
+    runId: "run-handoff",
+    stepId: "step-1",
+    source: "coordinator",
+    target: "planner",
+    purpose: "plan_next_step",
+    payload: {
+      objective: "Plan a bounded step."
+    },
+    correlationId: "corr-123"
+  });
+  const invocation = createAgentInvocation(handoff);
+
+  assert.equal(handoff.source, "coordinator");
+  assert.equal(handoff.target, "planner");
+  assert.equal(handoff.correlationId, "corr-123");
+  assert.equal(invocation.role, "planner");
+  assert.equal(invocation.stepId, "step-1");
+  assert.deepEqual(invocation.input, {
+    objective: "Plan a bounded step."
+  });
+});
 
 test("planner step generation stays bounded and carries tool metadata", async () => {
   const { assembler } = await createHarness();
@@ -178,13 +203,14 @@ test("live orchestration consumes assembler payloads and records planner/executo
   assert.ok(completedRun.orchestration?.lastPlannerResult);
   assert.ok(completedRun.orchestration?.lastExecutorResult);
   assert.ok(completedRun.orchestration?.lastVerifierResult);
+  assert.ok(completedRun.events.some((event) => event.type === "planner_step_proposed"));
+  assert.ok(completedRun.events.some((event) => event.type === "executor_step_completed"));
+  assert.ok(completedRun.events.some((event) => event.type === "verifier_decision_made"));
   assert.ok(
     completedRun.orchestration?.lastPlannerResult?.consumedContextSectionIds.includes("task-objective")
   );
   assert.ok(
-    completedRun.orchestration?.lastVerifierResult?.consumedContextSectionIds.includes(
-      "current-run-state"
-    )
+    completedRun.orchestration?.lastVerifierResult?.consumedContextSectionIds.includes("task-objective")
   );
 });
 
@@ -237,6 +263,12 @@ test("verifier can fail a task immediately when retries are exhausted", async ()
 
   assert.equal(failedRun.orchestration?.lastVerifierResult?.decision, "fail");
   assert.match(failedRun.error?.message ?? "", /Verifier failed/);
+  assert.ok(
+    failedRun.events.some((event) => event.type === "coordination_conflict_detected")
+  );
+  assert.ok(
+    failedRun.events.some((event) => event.message.includes("verifier_intent_mismatch"))
+  );
 });
 
 async function createHarness() {

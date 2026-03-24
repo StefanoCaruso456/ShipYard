@@ -109,16 +109,24 @@ test("runtime traces planner executor verifier and context spans for a successfu
     assert.ok(completedRun.result);
     assert.ok(trace);
     assert.ok(trace?.spans.some((span) => span.spanType === "run"));
+    assert.ok(trace?.spans.some((span) => span.spanType === "coordinator"));
+    assert.ok(trace?.spans.some((span) => span.spanType === "handoff"));
+    assert.ok(trace?.spans.some((span) => span.spanType === "merge"));
     assert.ok(trace?.spans.some((span) => span.spanType === "context"));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("planner:")));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("executor:")));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("verifier:")));
+    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:planner:")));
+    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:executor:")));
+    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:verifier:")));
     assert.ok(
       trace?.spans.some(
         (span) =>
           span.spanType === "context" &&
           Array.isArray(span.metadata.sectionIds) &&
           span.metadata.sectionIds.includes("task-objective")
+      )
+    );
+    assert.ok(
+      trace?.spans.some(
+        (span) => span.spanType === "handoff" && span.name.includes("coordinator->planner")
       )
     );
   } finally {

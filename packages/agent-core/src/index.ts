@@ -47,6 +47,13 @@ export { buildVerifierContext } from "./context/buildVerifierContext";
 export { createContextAssembler, runtimeContextPrecedence } from "./context/createContextAssembler";
 export { selectSkillSections } from "./context/selectSkillSections";
 export { getActiveTraceScope, runWithTraceScope } from "./observability/traceScope";
+export { invokeExecutorAgent } from "./runtime/agents/executorAgent";
+export { invokePlannerAgent } from "./runtime/agents/plannerAgent";
+export { invokeVerifierAgent } from "./runtime/agents/verifierAgent";
+export {
+  createAgentHandoff,
+  createAgentInvocation
+} from "./runtime/coordinator/handoffs";
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
 export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
@@ -63,6 +70,16 @@ export {
 } from "./runtime/phaseExecution";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
+  AgentExecutionStatus,
+  AgentInvocation,
+  AgentResult,
+  ExecutorAgentInput,
+  ExecutorAgentOutput,
+  OrchestrationAgentRole,
+  PlannerAgentInput,
+  VerifierAgentInput
+} from "./runtime/agents/types";
+export type {
   EndTraceSpanInput,
   StartTraceRunInput,
   StartTraceSpanInput,
@@ -77,6 +94,12 @@ export type {
   TraceSpanType,
   TraceValue
 } from "./observability/types";
+export type {
+  AgentHandoff
+} from "./runtime/coordinator/handoffs";
+export type {
+  ConflictRecord
+} from "./runtime/coordinator/conflicts";
 export type {
   ContextAssembler,
   ContextAssemblerRunInput,
