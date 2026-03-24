@@ -152,6 +152,12 @@ function createRun(
     instruction: overrides.instruction ?? `${overrides.id} instruction`,
     simulateFailure: overrides.simulateFailure ?? false,
     toolRequest: overrides.toolRequest ?? null,
+    context: overrides.context ?? {
+      objective: null,
+      constraints: [],
+      relevantFiles: [],
+      validationTargets: []
+    },
     status: overrides.status,
     createdAt: overrides.createdAt ?? "2026-03-23T12:00:00.000Z",
     startedAt: overrides.startedAt ?? null,
@@ -159,6 +165,7 @@ function createRun(
     retryCount: overrides.retryCount ?? 0,
     validationStatus: overrides.validationStatus ?? "not_run",
     lastValidationResult: overrides.lastValidationResult ?? null,
+    rollingSummary: overrides.rollingSummary ?? null,
     events: overrides.events ?? [],
     error: overrides.error ?? null,
     result: overrides.result ?? null

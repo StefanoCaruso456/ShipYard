@@ -2,6 +2,8 @@ import type { Express, Request } from "express";
 
 import type {
   AgentRunRecord,
+  AgentRole,
+  ContextAssembler,
   PersistentAgentRuntimeService,
   RepoMutationToolRequest,
   SubmitTaskInput
@@ -12,7 +14,8 @@ import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 export function registerRuntimeRoutes(
   app: Express,
   runtimeService: PersistentAgentRuntimeService,
-  openAI: OpenAIExecutorConfig
+  openAI: OpenAIExecutorConfig,
+  contextAssembler?: ContextAssembler
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
@@ -93,6 +96,42 @@ export function registerRuntimeRoutes(
       )
     });
   });
+
+  app.get("/api/runtime/context/:role/:id", (request, response) => {
+    if (!contextAssembler) {
+      response.status(503).json({
+        error: "Runtime context assembler is not available."
+      });
+      return;
+    }
+
+    const role = parseRole(request.params.role);
+
+    if (!role) {
+      response.status(400).json({
+        error: "role must be planner, executor, or verifier."
+      });
+      return;
+    }
+
+    const task = runtimeService.getRun(request.params.id);
+
+    if (!task) {
+      response.status(404).json({
+        error: `Task ${request.params.id} not found.`
+      });
+      return;
+    }
+
+    response.json({
+      taskId: task.id,
+      role,
+      payload: contextAssembler.buildRolePayload(role, {
+        run: task,
+        runtimeStatus: runtimeService.getStatus()
+      })
+    });
+  });
 }
 
 function serializeOpenAIConfig(openAI: OpenAIExecutorConfig) {
@@ -110,6 +149,7 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
     title?: unknown;
     simulateFailure?: unknown;
     toolRequest?: unknown;
+    context?: unknown;
   };
 
   if (typeof body?.instruction !== "string" || !body.instruction.trim()) {
@@ -136,11 +176,18 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
     return toolRequest;
   }
 
+  const context = parseRunContextInput(body.context);
+
+  if ("error" in context) {
+    return context;
+  }
+
   return {
     instruction: body.instruction,
     title: body.title,
     simulateFailure: body.simulateFailure,
-    toolRequest: toolRequest.value
+    toolRequest: toolRequest.value,
+    context: context.value
   };
 }
 
@@ -151,6 +198,7 @@ function serializeRun(run: AgentRunRecord) {
     instruction: run.instruction,
     simulateFailure: run.simulateFailure,
     toolRequest: run.toolRequest,
+    context: run.context,
     status: run.status,
     createdAt: run.createdAt,
     startedAt: run.startedAt,
@@ -158,9 +206,133 @@ function serializeRun(run: AgentRunRecord) {
     retryCount: run.retryCount,
     validationStatus: run.validationStatus,
     lastValidationResult: run.lastValidationResult,
+    rollingSummary: run.rollingSummary,
     events: run.events,
     error: run.error,
     result: run.result
+  };
+}
+
+function parseRole(value: string): AgentRole | null {
+  return value === "planner" || value === "executor" || value === "verifier" ? value : null;
+}
+
+function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context"] } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return {
+      error: "context must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    objective?: unknown;
+    constraints?: unknown;
+    relevantFiles?: unknown;
+    validationTargets?: unknown;
+  };
+
+  if (candidate.objective !== undefined && typeof candidate.objective !== "string") {
+    return {
+      error: "context.objective must be a string when provided."
+    };
+  }
+
+  if (
+    candidate.constraints !== undefined &&
+    (!Array.isArray(candidate.constraints) ||
+      candidate.constraints.some((constraint) => typeof constraint !== "string"))
+  ) {
+    return {
+      error: "context.constraints must be an array of strings when provided."
+    };
+  }
+
+  if (
+    candidate.validationTargets !== undefined &&
+    (!Array.isArray(candidate.validationTargets) ||
+      candidate.validationTargets.some((target) => typeof target !== "string"))
+  ) {
+    return {
+      error: "context.validationTargets must be an array of strings when provided."
+    };
+  }
+
+  if (candidate.relevantFiles !== undefined) {
+    if (!Array.isArray(candidate.relevantFiles)) {
+      return {
+        error: "context.relevantFiles must be an array when provided."
+      };
+    }
+
+    for (const file of candidate.relevantFiles) {
+      if (!file || typeof file !== "object") {
+        return {
+          error: "Each context.relevantFiles entry must be an object."
+        };
+      }
+
+      const entry = file as {
+        path?: unknown;
+        excerpt?: unknown;
+        startLine?: unknown;
+        endLine?: unknown;
+        source?: unknown;
+        reason?: unknown;
+      };
+
+      if (typeof entry.path !== "string") {
+        return {
+          error: "Each context.relevantFiles entry requires a string path."
+        };
+      }
+
+      if (entry.excerpt !== undefined && typeof entry.excerpt !== "string") {
+        return {
+          error: "context.relevantFiles.excerpt must be a string when provided."
+        };
+      }
+
+      if (entry.startLine !== undefined && typeof entry.startLine !== "number") {
+        return {
+          error: "context.relevantFiles.startLine must be a number when provided."
+        };
+      }
+
+      if (entry.endLine !== undefined && typeof entry.endLine !== "number") {
+        return {
+          error: "context.relevantFiles.endLine must be a number when provided."
+        };
+      }
+
+      if (entry.source !== undefined && typeof entry.source !== "string") {
+        return {
+          error: "context.relevantFiles.source must be a string when provided."
+        };
+      }
+
+      if (entry.reason !== undefined && typeof entry.reason !== "string") {
+        return {
+          error: "context.relevantFiles.reason must be a string when provided."
+        };
+      }
+    }
+  }
+
+  return {
+    value: {
+      objective: candidate.objective as string | undefined,
+      constraints: (candidate.constraints as string[] | undefined) ?? [],
+      relevantFiles:
+        (candidate.relevantFiles as NonNullable<SubmitTaskInput["context"]>["relevantFiles"] | undefined) ??
+        [],
+      validationTargets: (candidate.validationTargets as string[] | undefined) ?? []
+    }
   };
 }
 
