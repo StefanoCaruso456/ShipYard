@@ -10,7 +10,10 @@ type ActiveTraceScope = {
 
 const traceScopeStorage = new AsyncLocalStorage<ActiveTraceScope>();
 
-export function runWithTraceScope<T>(scope: ActiveTraceScope, callback: () => T): T {
+export function runWithTraceScope<T>(
+  scope: ActiveTraceScope,
+  callback: () => T | Promise<T>
+): T | Promise<T> {
   return traceScopeStorage.run(scope, callback);
 }
 

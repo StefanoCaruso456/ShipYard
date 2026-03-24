@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+import { getActiveTraceScope, runWithTraceScope } from "../../observability/traceScope";
 import type { RollbackResult, ValidationResult } from "../../validation/types";
 import type {
   CreateFileInput,
@@ -65,515 +66,856 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
   const defaultListLimit = options.defaultListLimit ?? DEFAULT_LIST_LIMIT;
   const defaultSearchLimit = options.defaultSearchLimit ?? DEFAULT_SEARCH_LIMIT;
 
+  async function traceRepoToolCall<
+    Name extends RepoToolName,
+    Result extends { ok: boolean; toolName: Name }
+  >(
+    toolName: Name,
+    inputSummary: string,
+    metadata: Record<string, string | number | boolean | null>,
+    execute: () => Promise<Result>
+  ): Promise<Result> {
+    const traceScope = getActiveTraceScope();
+    const ownsSpan = Boolean(traceScope && traceScope.activeSpan.spanType !== "tool");
+    const toolSpan =
+      ownsSpan && traceScope
+        ? await traceScope.activeSpan.startChild({
+            name: `tool:${toolName}`,
+            spanType: "tool",
+            inputSummary,
+            metadata
+          })
+        : traceScope?.activeSpan ?? null;
+
+    const executeWithinScope = async () => execute();
+
+    try {
+      const result =
+        ownsSpan && traceScope && toolSpan
+          ? await runWithTraceScope(
+              {
+                ...traceScope,
+                activeSpan: toolSpan
+              },
+              executeWithinScope
+            )
+          : await executeWithinScope();
+
+      annotateToolResult(toolSpan, result);
+
+      if (ownsSpan && toolSpan) {
+        await toolSpan.end({
+          status: result.ok ? "completed" : "failed",
+          outputSummary: summarizeRepoToolResult(result),
+          error: result.ok
+            ? null
+            : (result as unknown as RepoToolFailure<Name>).error.message
+        });
+      } else {
+        toolSpan?.addEvent(result.ok ? "tool_succeeded" : "tool_failed", {
+          message: summarizeRepoToolResult(result),
+          metadata: {
+            toolName: result.toolName
+          }
+        });
+      }
+
+      return result;
+    } catch (error) {
+      if (ownsSpan && toolSpan) {
+        await toolSpan.end({
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      } else {
+        toolSpan?.addEvent("tool_failed", {
+          message: error instanceof Error ? error.message : String(error),
+          metadata: {
+            toolName
+          }
+        });
+      }
+
+      throw error;
+    }
+  }
+
   return {
     rootDir,
     async listFiles(input = {}) {
-      const limit = normalizeLimit(input.limit, defaultListLimit);
+      return traceRepoToolCall(
+        "list_files",
+        input.glob?.trim() ? `List files matching ${input.glob.trim()}.` : "List repo files.",
+        {
+          glob: input.glob?.trim() || null,
+          limit: input.limit ?? defaultListLimit
+        },
+        async () => {
+          const limit = normalizeLimit(input.limit, defaultListLimit);
 
-      if (typeof limit !== "number") {
-        return fail("list_files", limit);
-      }
+          if (typeof limit !== "number") {
+            return fail("list_files", limit);
+          }
 
-      if (input.glob !== undefined && !input.glob.trim()) {
-        return fail("list_files", invalidInput("glob must be a non-empty string when provided."));
-      }
+          if (input.glob !== undefined && !input.glob.trim()) {
+            return fail("list_files", invalidInput("glob must be a non-empty string when provided."));
+          }
 
-      const matcher = input.glob ? createGlobMatcher(input.glob) : null;
-      const rgResult = await runRipgrep(["--files", rootDir], rootDir);
+          const matcher = input.glob ? createGlobMatcher(input.glob) : null;
+          const rgResult = await runRipgrep(["--files", rootDir], rootDir);
 
-      let files: string[];
+          let files: string[];
 
-      if (rgResult.kind === "completed") {
-        if (rgResult.exitCode !== 0) {
-          return fail(
-            "list_files",
-            commandFailed("rg --files", rgResult.stderr || "ripgrep failed while listing files.")
-          );
+          if (rgResult.kind === "completed") {
+            if (rgResult.exitCode !== 0) {
+              return fail(
+                "list_files",
+                commandFailed("rg --files", rgResult.stderr || "ripgrep failed while listing files.")
+              );
+            }
+
+            files = rgResult.stdout
+              .split(/\r?\n/)
+              .filter(Boolean)
+              .map((entry) => normalizeRelativePath(rootDir, entry))
+              .filter((entry) => !matcher || matcher.test(entry));
+          } else if (rgResult.kind === "missing_binary") {
+            files = await walkRepoFiles(rootDir, input.glob);
+          } else {
+            return fail("list_files", commandFailed("rg --files", rgResult.message));
+          }
+
+          files.sort();
+
+          return {
+            ok: true,
+            toolName: "list_files",
+            data: {
+              rootDir,
+              glob: input.glob ?? null,
+              files: files.slice(0, limit),
+              totalCount: files.length,
+              truncated: files.length > limit
+            }
+          };
         }
-
-        files = rgResult.stdout
-          .split(/\r?\n/)
-          .filter(Boolean)
-          .map((entry) => normalizeRelativePath(rootDir, entry))
-          .filter((entry) => !matcher || matcher.test(entry));
-      } else if (rgResult.kind === "missing_binary") {
-        files = await walkRepoFiles(rootDir, input.glob);
-      } else {
-        return fail("list_files", commandFailed("rg --files", rgResult.message));
-      }
-
-      files.sort();
-
-      return {
-        ok: true,
-        toolName: "list_files",
-        data: {
-          rootDir,
-          glob: input.glob ?? null,
-          files: files.slice(0, limit),
-          totalCount: files.length,
-          truncated: files.length > limit
-        }
-      };
+      );
     },
     async readFile(input) {
-      const repoPath = resolveRepoPath(rootDir, input.path);
+      return traceRepoToolCall(
+        "read_file",
+        `Read ${input.path}.`,
+        {
+          path: input.path
+        },
+        async () => {
+          const repoPath = resolveRepoPath(rootDir, input.path);
 
-      if (!repoPath.ok) {
-        return fail("read_file", repoPath.error);
-      }
+          if (!repoPath.ok) {
+            return fail("read_file", repoPath.error);
+          }
 
-      const fileResult = await readRepoFile(repoPath.resolvedPath);
+          const fileResult = await readRepoFile(repoPath.resolvedPath);
 
-      if (!fileResult.ok) {
-        return fail("read_file", {
-          ...fileResult.error,
-          path: repoPath.relativePath
-        });
-      }
+          if (!fileResult.ok) {
+            return fail("read_file", {
+              ...fileResult.error,
+              path: repoPath.relativePath
+            });
+          }
 
-      return {
-        ok: true,
-        toolName: "read_file",
-        data: {
-          rootDir,
-          path: repoPath.relativePath,
-          content: fileResult.content,
-          lineCount: toLines(fileResult.content).length
+          return {
+            ok: true,
+            toolName: "read_file",
+            data: {
+              rootDir,
+              path: repoPath.relativePath,
+              content: fileResult.content,
+              lineCount: toLines(fileResult.content).length
+            }
+          };
         }
-      };
+      );
     },
     async readFileRange(input) {
-      const validatedRange = validateRange(input);
+      return traceRepoToolCall(
+        "read_file_range",
+        `Read ${input.path}:${input.startLine}-${input.endLine}.`,
+        {
+          path: input.path,
+          startLine: input.startLine,
+          endLine: input.endLine
+        },
+        async () => {
+          const validatedRange = validateRange(input);
 
-      if (!validatedRange.ok) {
-        return fail("read_file_range", validatedRange.error);
-      }
+          if (!validatedRange.ok) {
+            return fail("read_file_range", validatedRange.error);
+          }
 
-      const fileResult = await this.readFile({
-        path: input.path
-      });
+          const fileResult = await this.readFile({
+            path: input.path
+          });
 
-      if (!fileResult.ok) {
-        return fail("read_file_range", fileResult.error);
-      }
+          if (!fileResult.ok) {
+            return fail("read_file_range", fileResult.error);
+          }
 
-      const lines = toLines(fileResult.data.content);
+          const lines = toLines(fileResult.data.content);
 
-      if (validatedRange.value.startLine > lines.length) {
-        return fail(
-          "read_file_range",
-          invalidInput(
-            `startLine ${validatedRange.value.startLine} is outside the file's ${lines.length} line(s).`,
-            fileResult.data.path
-          )
-        );
-      }
+          if (validatedRange.value.startLine > lines.length) {
+            return fail(
+              "read_file_range",
+              invalidInput(
+                `startLine ${validatedRange.value.startLine} is outside the file's ${lines.length} line(s).`,
+                fileResult.data.path
+              )
+            );
+          }
 
-      const selectedLines = lines.slice(
-        validatedRange.value.startLine - 1,
-        validatedRange.value.endLine
-      );
+          const selectedLines = lines.slice(
+            validatedRange.value.startLine - 1,
+            validatedRange.value.endLine
+          );
 
-      return {
-        ok: true,
-        toolName: "read_file_range",
-        data: {
-          rootDir,
-          path: fileResult.data.path,
-          startLine: validatedRange.value.startLine,
-          endLine: validatedRange.value.endLine,
-          totalLineCount: lines.length,
-          lines: selectedLines.map((content, index) => ({
-            lineNumber: validatedRange.value.startLine + index,
-            content
-          })),
-          content: selectedLines.join("\n")
+          return {
+            ok: true,
+            toolName: "read_file_range",
+            data: {
+              rootDir,
+              path: fileResult.data.path,
+              startLine: validatedRange.value.startLine,
+              endLine: validatedRange.value.endLine,
+              totalLineCount: lines.length,
+              lines: selectedLines.map((content, index) => ({
+                lineNumber: validatedRange.value.startLine + index,
+                content
+              })),
+              content: selectedLines.join("\n")
+            }
+          };
         }
-      };
+      );
     },
     async searchRepo(input) {
-      const validatedInput = validateSearchInput(input, defaultSearchLimit);
+      return traceRepoToolCall(
+        "search_repo",
+        `Search repo for ${input.query}.`,
+        {
+          query: input.query,
+          glob: input.glob?.trim() || null,
+          caseSensitive: input.caseSensitive ?? false,
+          limit: input.limit ?? defaultSearchLimit
+        },
+        async () => {
+          const validatedInput = validateSearchInput(input, defaultSearchLimit);
 
-      if (!validatedInput.ok) {
-        return fail("search_repo", validatedInput.error);
-      }
-
-      const normalizedInput = validatedInput.value;
-      const rgResult = await runRipgrep(
-        [
-          "--json",
-          "--fixed-strings",
-          "--line-number",
-          normalizedInput.caseSensitive ? "--case-sensitive" : "--ignore-case",
-          normalizedInput.query,
-          rootDir
-        ],
-        rootDir
-      );
-
-      if (rgResult.kind === "completed") {
-        if (rgResult.exitCode !== 0 && rgResult.exitCode !== 1) {
-          return fail(
-            "search_repo",
-            commandFailed("rg --json", rgResult.stderr || "ripgrep failed while searching.")
-          );
-        }
-
-        const matcher = normalizedInput.glob ? createGlobMatcher(normalizedInput.glob) : null;
-        const allMatches = parseRipgrepMatches(rgResult.stdout, rootDir).filter(
-          (match) => !matcher || matcher.test(match.path)
-        );
-
-        return {
-          ok: true,
-          toolName: "search_repo",
-          data: {
-            rootDir,
-            query: normalizedInput.query,
-            glob: normalizedInput.glob ?? null,
-            caseSensitive: normalizedInput.caseSensitive,
-            matches: allMatches.slice(0, normalizedInput.limit),
-            truncated: allMatches.length > normalizedInput.limit
+          if (!validatedInput.ok) {
+            return fail("search_repo", validatedInput.error);
           }
-        };
-      }
 
-      if (rgResult.kind === "spawn_error") {
-        return fail("search_repo", commandFailed("rg --json", rgResult.message));
-      }
+          const normalizedInput = validatedInput.value;
+          const rgResult = await runRipgrep(
+            [
+              "--json",
+              "--fixed-strings",
+              "--line-number",
+              normalizedInput.caseSensitive ? "--case-sensitive" : "--ignore-case",
+              normalizedInput.query,
+              rootDir
+            ],
+            rootDir
+          );
 
-      const fallbackMatches = await searchRepoFallback(rootDir, normalizedInput);
+          if (rgResult.kind === "completed") {
+            if (rgResult.exitCode !== 0 && rgResult.exitCode !== 1) {
+              return fail(
+                "search_repo",
+                commandFailed("rg --json", rgResult.stderr || "ripgrep failed while searching.")
+              );
+            }
 
-      return {
-        ok: true,
-        toolName: "search_repo",
-        data: {
-          rootDir,
-          query: normalizedInput.query,
-          glob: normalizedInput.glob ?? null,
-          caseSensitive: normalizedInput.caseSensitive,
-          matches: fallbackMatches.matches,
-          truncated: fallbackMatches.truncated
+            const matcher = normalizedInput.glob ? createGlobMatcher(normalizedInput.glob) : null;
+            const allMatches = parseRipgrepMatches(rgResult.stdout, rootDir).filter(
+              (match) => !matcher || matcher.test(match.path)
+            );
+
+            return {
+              ok: true,
+              toolName: "search_repo",
+              data: {
+                rootDir,
+                query: normalizedInput.query,
+                glob: normalizedInput.glob ?? null,
+                caseSensitive: normalizedInput.caseSensitive,
+                matches: allMatches.slice(0, normalizedInput.limit),
+                truncated: allMatches.length > normalizedInput.limit
+              }
+            };
+          }
+
+          if (rgResult.kind === "spawn_error") {
+            return fail("search_repo", commandFailed("rg --json", rgResult.message));
+          }
+
+          const fallbackMatches = await searchRepoFallback(rootDir, normalizedInput);
+
+          return {
+            ok: true,
+            toolName: "search_repo",
+            data: {
+              rootDir,
+              query: normalizedInput.query,
+              glob: normalizedInput.glob ?? null,
+              caseSensitive: normalizedInput.caseSensitive,
+              matches: fallbackMatches.matches,
+              truncated: fallbackMatches.truncated
+            }
+          };
         }
-      };
+      );
     },
     async editFileRegion(input) {
-      const validatedInput = validateEditFileRegionInput(input);
+      return traceRepoToolCall(
+        "edit_file_region",
+        `Edit ${input.path} around anchor ${input.anchor}.`,
+        {
+          path: input.path,
+          anchor: input.anchor
+        },
+        async () => {
+          const validatedInput = validateEditFileRegionInput(input);
 
-      if (!validatedInput.ok) {
-        return fail("edit_file_region", validatedInput.error);
-      }
-
-      const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
-
-      if (!repoPath.ok) {
-        return fail("edit_file_region", repoPath.error);
-      }
-
-      const fileResult = await readRepoFile(repoPath.resolvedPath);
-
-      if (!fileResult.ok) {
-        return fail("edit_file_region", {
-          ...fileResult.error,
-          path: repoPath.relativePath
-        });
-      }
-
-      const anchoredEdit = applyAnchoredEdit({
-        source: fileResult.content,
-        anchor: validatedInput.value.anchor,
-        currentText: validatedInput.value.currentText,
-        replacementText: validatedInput.value.replacementText
-      });
-
-      if (!anchoredEdit.ok) {
-        return fail("edit_file_region", {
-          ...anchoredEdit.error,
-          path: repoPath.relativePath
-        });
-      }
-
-      const mutationResult = await commitTextFileMutation({
-        resolvedPath: repoPath.resolvedPath,
-        displayPath: repoPath.relativePath,
-        originalContent: fileResult.content,
-        nextContent: anchoredEdit.updatedContent,
-        validate(updatedContent) {
-          return validateEditedFile({
-            originalContent: fileResult.content,
-            updatedContent,
-            replacementText: validatedInput.value.replacementText,
-            targetRange: anchoredEdit.targetRange
-          });
-        }
-      });
-
-      if (!mutationResult.ok) {
-        return fail("edit_file_region", {
-          ...mutationResult.error,
-          path: repoPath.relativePath
-        });
-      }
-
-      return {
-        ok: true,
-        toolName: "edit_file_region",
-        data: {
-          rootDir,
-          path: repoPath.relativePath,
-          status: "success",
-          anchor: validatedInput.value.anchor,
-          validation: mutationResult.validation,
-          validationResult: {
-            ...mutationResult.validationResult,
-            path: repoPath.relativePath
-          },
-          changedRegion: {
-            startOffset: anchoredEdit.targetRange.startOffset,
-            endOffset: anchoredEdit.targetRange.endOffset,
-            before: validatedInput.value.currentText,
-            after: validatedInput.value.replacementText
+          if (!validatedInput.ok) {
+            return fail("edit_file_region", validatedInput.error);
           }
+
+          const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
+
+          if (!repoPath.ok) {
+            return fail("edit_file_region", repoPath.error);
+          }
+
+          const fileResult = await readRepoFile(repoPath.resolvedPath);
+
+          if (!fileResult.ok) {
+            return fail("edit_file_region", {
+              ...fileResult.error,
+              path: repoPath.relativePath
+            });
+          }
+
+          const anchoredEdit = applyAnchoredEdit({
+            source: fileResult.content,
+            anchor: validatedInput.value.anchor,
+            currentText: validatedInput.value.currentText,
+            replacementText: validatedInput.value.replacementText
+          });
+
+          if (!anchoredEdit.ok) {
+            return fail("edit_file_region", {
+              ...anchoredEdit.error,
+              path: repoPath.relativePath
+            });
+          }
+
+          const mutationResult = await commitTextFileMutation({
+            resolvedPath: repoPath.resolvedPath,
+            displayPath: repoPath.relativePath,
+            originalContent: fileResult.content,
+            nextContent: anchoredEdit.updatedContent,
+            validate(updatedContent) {
+              return validateEditedFile({
+                originalContent: fileResult.content,
+                updatedContent,
+                replacementText: validatedInput.value.replacementText,
+                targetRange: anchoredEdit.targetRange
+              });
+            }
+          });
+
+          await traceValidationOutcome("edit_file_region", repoPath.relativePath, mutationResult);
+
+          if (!mutationResult.ok) {
+            return fail("edit_file_region", {
+              ...mutationResult.error,
+              path: repoPath.relativePath
+            });
+          }
+
+          return {
+            ok: true,
+            toolName: "edit_file_region",
+            data: {
+              rootDir,
+              path: repoPath.relativePath,
+              status: "success" as const,
+              anchor: validatedInput.value.anchor,
+              validation: mutationResult.validation,
+              validationResult: {
+                ...mutationResult.validationResult,
+                path: repoPath.relativePath
+              },
+              changedRegion: {
+                startOffset: anchoredEdit.targetRange.startOffset,
+                endOffset: anchoredEdit.targetRange.endOffset,
+                before: validatedInput.value.currentText,
+                after: validatedInput.value.replacementText
+              }
+            }
+          };
         }
-      };
+      );
     },
     async createFile(input) {
-      const validatedInput = validateCreateFileInput(input);
+      return traceRepoToolCall(
+        "create_file",
+        `Create ${input.path}.`,
+        {
+          path: input.path
+        },
+        async () => {
+          const validatedInput = validateCreateFileInput(input);
 
-      if (!validatedInput.ok) {
-        return fail("create_file", validatedInput.error);
-      }
-
-      const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
-
-      if (!repoPath.ok) {
-        return fail("create_file", repoPath.error);
-      }
-
-      const rollbackPath = repoPath.relativePath;
-
-      try {
-        await mkdir(path.dirname(repoPath.resolvedPath), { recursive: true });
-        await writeFile(repoPath.resolvedPath, validatedInput.value.content, {
-          encoding: "utf8",
-          flag: "wx"
-        });
-      } catch (error) {
-        const nodeError = error as NodeJS.ErrnoException;
-
-        if (nodeError.code === "EEXIST") {
-          return fail(
-            "create_file",
-            alreadyExists(
-              `File already exists: ${repoPath.relativePath}`,
-              repoPath.relativePath
-            )
-          );
-        }
-
-        return fail(
-          "create_file",
-          writeFailed(
-            error instanceof Error ? error.message : "Failed to create the file.",
-            repoPath.relativePath
-          )
-        );
-      }
-
-      const fileResult = await readRepoFile(repoPath.resolvedPath);
-
-      if (!fileResult.ok) {
-        const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
-        const validationResult = createFileValidationFailure(
-          rollbackPath,
-          fileResult.error.message,
-          {
-            fileExists: fileResult.error.code !== "not_found",
-            fileReadable: false,
-            contentMatches: false
+          if (!validatedInput.ok) {
+            return fail("create_file", validatedInput.error);
           }
-        );
 
-        return fail("create_file", {
-          code: rollback.success ? "validation_failed" : "rollback_failed",
-          message: rollback.success
-            ? fileResult.error.message
-            : `${fileResult.error.message} ${rollback.message}`,
-          path: rollbackPath,
-          validationResult,
-          rollback
-        });
-      }
+          const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
 
-      if (fileResult.content !== validatedInput.value.content) {
-        const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
-        const validationResult = createFileValidationFailure(
-          rollbackPath,
-          "Created file content did not match the requested content after re-read.",
-          {
-            fileExists: true,
-            fileReadable: true,
-            contentMatches: false
+          if (!repoPath.ok) {
+            return fail("create_file", repoPath.error);
           }
-        );
 
-        return fail(
-          "create_file",
-          rollback.success
-            ? validationFailed(
-                "Created file content did not match the requested content after re-read.",
-                rollbackPath,
-                validationResult,
-                rollback
-              )
-            : rollbackFailed(
-                "Created file content did not match the requested content after re-read.",
-                rollbackPath,
-                validationResult,
-                rollback
-              )
-        );
-      }
+          const rollbackPath = repoPath.relativePath;
 
-      return {
-        ok: true,
-        toolName: "create_file",
-        data: {
-          rootDir,
-          path: repoPath.relativePath,
-          status: "success",
-          lineCount: toLines(fileResult.content).length,
-          validationResult: createFileValidationSuccess(repoPath.relativePath, {
+          try {
+            await mkdir(path.dirname(repoPath.resolvedPath), { recursive: true });
+            await writeFile(repoPath.resolvedPath, validatedInput.value.content, {
+              encoding: "utf8",
+              flag: "wx"
+            });
+          } catch (error) {
+            const nodeError = error as NodeJS.ErrnoException;
+
+            if (nodeError.code === "EEXIST") {
+              return fail(
+                "create_file",
+                alreadyExists(
+                  `File already exists: ${repoPath.relativePath}`,
+                  repoPath.relativePath
+                )
+              );
+            }
+
+            return fail(
+              "create_file",
+              writeFailed(
+                error instanceof Error ? error.message : "Failed to create the file.",
+                repoPath.relativePath
+              )
+            );
+          }
+
+          const fileResult = await readRepoFile(repoPath.resolvedPath);
+
+          if (!fileResult.ok) {
+            const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
+            const validationResult = createFileValidationFailure(
+              rollbackPath,
+              fileResult.error.message,
+              {
+                fileExists: fileResult.error.code !== "not_found",
+                fileReadable: false,
+                contentMatches: false
+              }
+            );
+
+            const failure = fail("create_file", {
+              code: rollback.success ? "validation_failed" : "rollback_failed",
+              message: rollback.success
+                ? fileResult.error.message
+                : `${fileResult.error.message} ${rollback.message}`,
+              path: rollbackPath,
+              validationResult,
+              rollback
+            });
+            await traceValidationAndRollback(
+              rollbackPath,
+              validationResult,
+              rollback,
+              "create_file"
+            );
+            return failure;
+          }
+
+          if (fileResult.content !== validatedInput.value.content) {
+            const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
+            const validationResult = createFileValidationFailure(
+              rollbackPath,
+              "Created file content did not match the requested content after re-read.",
+              {
+                fileExists: true,
+                fileReadable: true,
+                contentMatches: false
+              }
+            );
+
+            const failure = fail(
+              "create_file",
+              rollback.success
+                ? validationFailed(
+                    "Created file content did not match the requested content after re-read.",
+                    rollbackPath,
+                    validationResult,
+                    rollback
+                  )
+                : rollbackFailed(
+                    "Created file content did not match the requested content after re-read.",
+                    rollbackPath,
+                    validationResult,
+                    rollback
+                  )
+            );
+            await traceValidationAndRollback(
+              rollbackPath,
+              validationResult,
+              rollback,
+              "create_file"
+            );
+            return failure;
+          }
+
+          const validationResult = createFileValidationSuccess(repoPath.relativePath, {
             fileExists: true,
             fileReadable: true,
             contentMatches: true
-          })
+          });
+          await traceValidationAndRollback(
+            repoPath.relativePath,
+            validationResult,
+            null,
+            "create_file"
+          );
+
+          return {
+            ok: true,
+            toolName: "create_file",
+            data: {
+              rootDir,
+              path: repoPath.relativePath,
+              status: "success" as const,
+              lineCount: toLines(fileResult.content).length,
+              validationResult
+            }
+          };
         }
-      };
+      );
     },
     async deleteFile(input) {
-      const validatedInput = validateDeleteFileInput(input);
+      return traceRepoToolCall(
+        "delete_file",
+        `Delete ${input.path}.`,
+        {
+          path: input.path
+        },
+        async () => {
+          const validatedInput = validateDeleteFileInput(input);
 
-      if (!validatedInput.ok) {
-        return fail("delete_file", validatedInput.error);
-      }
-
-      const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
-
-      if (!repoPath.ok) {
-        return fail("delete_file", repoPath.error);
-      }
-
-      const originalFile = await readRepoFile(repoPath.resolvedPath);
-
-      if (!originalFile.ok) {
-        return fail("delete_file", {
-          ...originalFile.error,
-          path: repoPath.relativePath
-        });
-      }
-
-      try {
-        await unlink(repoPath.resolvedPath);
-      } catch (error) {
-        const nodeError = error as NodeJS.ErrnoException;
-
-        if (nodeError.code === "ENOENT") {
-          return fail(
-            "delete_file",
-            notFound(`File not found: ${repoPath.relativePath}`, repoPath.relativePath)
-          );
-        }
-
-        return fail(
-          "delete_file",
-          writeFailed(
-            error instanceof Error ? error.message : "Failed to delete the file.",
-            repoPath.relativePath
-          )
-        );
-      }
-
-      const fileResult = await readRepoFile(repoPath.resolvedPath);
-
-      if (fileResult.ok) {
-        const rollback = await restoreDeletedFile(
-          repoPath.resolvedPath,
-          originalFile.content,
-          repoPath.relativePath
-        );
-        const validationResult = createFileValidationFailure(
-          repoPath.relativePath,
-          "Deleted file is still present after the delete operation.",
-          {
-            fileExists: true,
-            fileReadable: true,
-            deleted: false
+          if (!validatedInput.ok) {
+            return fail("delete_file", validatedInput.error);
           }
-        );
 
-        return fail(
-          "delete_file",
-          rollback.success
-            ? validationFailed(
-                "Deleted file is still present after the delete operation.",
-                repoPath.relativePath,
-                validationResult,
-                rollback
-              )
-            : rollbackFailed(
-                "Deleted file is still present after the delete operation.",
-                repoPath.relativePath,
-                validationResult,
-                rollback
-              )
-        );
-      }
+          const repoPath = resolveRepoPath(rootDir, validatedInput.value.path);
 
-      if (fileResult.error.code !== "not_found") {
-        const rollback = await restoreDeletedFile(
-          repoPath.resolvedPath,
-          originalFile.content,
-          repoPath.relativePath
-        );
-        const validationResult = createFileValidationFailure(
-          repoPath.relativePath,
-          fileResult.error.message,
-          {
-            fileExists: false,
-            fileReadable: false,
-            deleted: false
+          if (!repoPath.ok) {
+            return fail("delete_file", repoPath.error);
           }
-        );
 
-        return fail("delete_file", {
-          code: rollback.success ? "validation_failed" : "rollback_failed",
-          message: rollback.success
-            ? fileResult.error.message
-            : `${fileResult.error.message} ${rollback.message}`,
-          path: repoPath.relativePath,
-          validationResult,
-          rollback
-        });
-      }
+          const originalFile = await readRepoFile(repoPath.resolvedPath);
 
-      return {
-        ok: true,
-        toolName: "delete_file",
-        data: {
-          rootDir,
-          path: repoPath.relativePath,
-          status: "success",
-          validationResult: createFileValidationSuccess(repoPath.relativePath, {
+          if (!originalFile.ok) {
+            return fail("delete_file", {
+              ...originalFile.error,
+              path: repoPath.relativePath
+            });
+          }
+
+          try {
+            await unlink(repoPath.resolvedPath);
+          } catch (error) {
+            const nodeError = error as NodeJS.ErrnoException;
+
+            if (nodeError.code === "ENOENT") {
+              return fail(
+                "delete_file",
+                notFound(`File not found: ${repoPath.relativePath}`, repoPath.relativePath)
+              );
+            }
+
+            return fail(
+              "delete_file",
+              writeFailed(
+                error instanceof Error ? error.message : "Failed to delete the file.",
+                repoPath.relativePath
+              )
+            );
+          }
+
+          const fileResult = await readRepoFile(repoPath.resolvedPath);
+
+          if (fileResult.ok) {
+            const rollback = await restoreDeletedFile(
+              repoPath.resolvedPath,
+              originalFile.content,
+              repoPath.relativePath
+            );
+            const validationResult = createFileValidationFailure(
+              repoPath.relativePath,
+              "Deleted file is still present after the delete operation.",
+              {
+                fileExists: true,
+                fileReadable: true,
+                deleted: false
+              }
+            );
+
+            const failure = fail(
+              "delete_file",
+              rollback.success
+                ? validationFailed(
+                    "Deleted file is still present after the delete operation.",
+                    repoPath.relativePath,
+                    validationResult,
+                    rollback
+                  )
+                : rollbackFailed(
+                    "Deleted file is still present after the delete operation.",
+                    repoPath.relativePath,
+                    validationResult,
+                    rollback
+                  )
+            );
+            await traceValidationAndRollback(
+              repoPath.relativePath,
+              validationResult,
+              rollback,
+              "delete_file"
+            );
+            return failure;
+          }
+
+          if (fileResult.error.code !== "not_found") {
+            const rollback = await restoreDeletedFile(
+              repoPath.resolvedPath,
+              originalFile.content,
+              repoPath.relativePath
+            );
+            const validationResult = createFileValidationFailure(
+              repoPath.relativePath,
+              fileResult.error.message,
+              {
+                fileExists: false,
+                fileReadable: false,
+                deleted: false
+              }
+            );
+
+            const failure = fail("delete_file", {
+              code: rollback.success ? "validation_failed" : "rollback_failed",
+              message: rollback.success
+                ? fileResult.error.message
+                : `${fileResult.error.message} ${rollback.message}`,
+              path: repoPath.relativePath,
+              validationResult,
+              rollback
+            });
+            await traceValidationAndRollback(
+              repoPath.relativePath,
+              validationResult,
+              rollback,
+              "delete_file"
+            );
+            return failure;
+          }
+
+          const validationResult = createFileValidationSuccess(repoPath.relativePath, {
             fileExists: false,
             fileReadable: false,
             deleted: true
-          })
+          });
+          await traceValidationAndRollback(
+            repoPath.relativePath,
+            validationResult,
+            null,
+            "delete_file"
+          );
+
+          return {
+            ok: true,
+            toolName: "delete_file",
+            data: {
+              rootDir,
+              path: repoPath.relativePath,
+              status: "success" as const,
+              validationResult
+            }
+          };
         }
-      };
+      );
     }
   };
+}
+
+async function traceValidationOutcome(
+  toolName: "edit_file_region",
+  path: string,
+  mutationResult:
+    | Awaited<ReturnType<typeof commitTextFileMutation>>
+) {
+  if (mutationResult.ok) {
+    await traceValidationAndRollback(path, mutationResult.validationResult, null, toolName);
+    return;
+  }
+
+  await traceValidationAndRollback(
+    path,
+    mutationResult.error.validationResult ?? null,
+    mutationResult.error.rollback ?? null,
+    toolName
+  );
+}
+
+async function traceValidationAndRollback(
+  path: string,
+  validationResult: ValidationResult | null,
+  rollback: RollbackResult | null,
+  toolName: RepoToolName = "create_file"
+) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  if (validationResult) {
+    const validationSpan = await traceScope.activeSpan.startChild({
+      name: `validation:${toolName}:${path}`,
+      spanType: "validation",
+      inputSummary: `Validate ${path} after ${toolName}.`,
+      metadata: {
+        toolName,
+        path,
+        validationType: validationResult.type,
+        checks: validationResult.checks
+          ? Object.keys(validationResult.checks).filter((key) => validationResult.checks?.[key])
+          : []
+      }
+    });
+    await validationSpan.end({
+      status: validationResult.success ? "completed" : "failed",
+      outputSummary: validationResult.success
+        ? `Validation passed for ${path}.`
+        : validationResult.errors?.join(" ") || `Validation failed for ${path}.`,
+      error: validationResult.success ? null : validationResult.errors?.join(" ") || null,
+      metadata: {
+        errorCount: validationResult.errors?.length ?? 0,
+        warningCount: validationResult.warnings?.length ?? 0
+      }
+    });
+  }
+
+  if (rollback) {
+    const rollbackSpan = await traceScope.activeSpan.startChild({
+      name: `rollback:${toolName}:${path}`,
+      spanType: "rollback",
+      inputSummary: `Rollback ${path} after ${toolName}.`,
+      metadata: {
+        toolName,
+        path,
+        attempted: rollback.attempted
+      }
+    });
+    await rollbackSpan.end({
+      status: rollback.success ? "completed" : "failed",
+      outputSummary: rollback.message,
+      error: rollback.success ? null : rollback.message
+    });
+  }
+}
+
+function annotateToolResult(
+  span: { annotate(metadata: Record<string, unknown>): void } | null,
+  result: { ok: boolean; toolName: RepoToolName } & Record<string, unknown>
+) {
+  if (!span) {
+    return;
+  }
+
+  if (!result.ok) {
+    const error = result.error as RepoToolError;
+    span.annotate({
+      toolName: result.toolName,
+      success: false,
+      errorCode: error.code,
+      path: error.path ?? null,
+      validationSucceeded: error.validationResult?.success ?? null,
+      rollbackAttempted: error.rollback?.attempted ?? null,
+      rollbackSucceeded: error.rollback?.success ?? null
+    });
+    return;
+  }
+
+  const data = result.data as Record<string, unknown>;
+  span.annotate({
+    toolName: result.toolName,
+    success: true,
+    path: typeof data.path === "string" ? data.path : null,
+    resultCount:
+      typeof data.totalCount === "number"
+        ? data.totalCount
+        : Array.isArray(data.matches)
+          ? data.matches.length
+          : Array.isArray(data.files)
+            ? data.files.length
+            : null,
+    validationSucceeded:
+      data.validationResult && typeof data.validationResult === "object"
+        ? ((data.validationResult as ValidationResult).success ?? null)
+        : null
+  });
+}
+
+function summarizeRepoToolResult(result: { ok: boolean; toolName: RepoToolName } & Record<string, unknown>) {
+  if (!result.ok) {
+    const error = result.error as RepoToolError;
+    return `${result.toolName} failed: ${error.message}`;
+  }
+
+  const data = result.data as Record<string, unknown>;
+
+  switch (result.toolName) {
+    case "list_files":
+      return `Listed ${
+        Array.isArray(data.files) ? data.files.length : 0
+      } file(s).`;
+    case "read_file":
+      return `Read ${typeof data.path === "string" ? data.path : "file"}.`;
+    case "read_file_range":
+      return `Read lines ${String(data.startLine)}-${String(data.endLine)} from ${
+        typeof data.path === "string" ? data.path : "file"
+      }.`;
+    case "search_repo":
+      return `Found ${
+        Array.isArray(data.matches) ? data.matches.length : 0
+      } match(es) for ${String(data.query ?? "query")}.`;
+    case "edit_file_region":
+      return `Edited ${typeof data.path === "string" ? data.path : "file"} surgically.`;
+    case "create_file":
+      return `Created ${typeof data.path === "string" ? data.path : "file"}.`;
+    case "delete_file":
+      return `Deleted ${typeof data.path === "string" ? data.path : "file"}.`;
+  }
 }
 
 function normalizeLimit(value: number | undefined, fallback: number): number | RepoToolError {

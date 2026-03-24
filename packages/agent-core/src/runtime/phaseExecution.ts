@@ -21,6 +21,7 @@ import {
 import { executeOrchestrationLoop } from "./orchestration";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import type { ContextAssembler } from "../context/types";
+import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
 import type { RunEvent } from "../validation/types";
 
 const DEFAULT_TASK_RETRIES = 1;
@@ -482,29 +483,56 @@ async function executeTask(options: {
   persist(options.persistRun, run);
 
   let result: AgentRunResult;
+  const traceScope = getActiveTraceScope();
+  const taskSpan = traceScope
+    ? await traceScope.activeSpan.startChild({
+        name: `task:${task.id}`,
+        spanType: "task",
+        inputSummary: task.instruction,
+        metadata: {
+          phaseId: phase.id,
+          storyId: story.id,
+          taskId: task.id,
+          expectedOutcome: task.expectedOutcome,
+          retryCount: task.retryCount
+        }
+      })
+    : null;
 
   try {
-    result = await executeOrchestrationLoop({
-      run: createTaskScopedRun(run, phaseExecution, phase, story, task),
-      task,
-      instructionRuntime: options.instructionRuntime,
-      contextAssembler: options.contextAssembler,
-      executeRun: options.executeRun,
-      persistRun: (updatedRun) => {
-        run.orchestration = updatedRun.orchestration;
-        run.result = updatedRun.result;
-        run.error = updatedRun.error;
-        run.events = updatedRun.events;
-        run.validationStatus = updatedRun.validationStatus;
-        run.lastValidationResult = updatedRun.lastValidationResult;
-        run.rollingSummary = updatedRun.rollingSummary;
-        run.phaseExecution = phaseExecution;
-        persist(options.persistRun, run);
-      },
-      getRuntimeStatus: options.getRuntimeStatus,
-      maxStepRetries: phaseExecution.retryPolicy.maxTaskRetries,
-      maxReplans: phaseExecution.retryPolicy.maxReplans
-    });
+    const executeTaskRun = async () =>
+      executeOrchestrationLoop({
+        run: createTaskScopedRun(run, phaseExecution, phase, story, task),
+        task,
+        instructionRuntime: options.instructionRuntime,
+        contextAssembler: options.contextAssembler,
+        executeRun: options.executeRun,
+        persistRun: (updatedRun) => {
+          run.orchestration = updatedRun.orchestration;
+          run.result = updatedRun.result;
+          run.error = updatedRun.error;
+          run.events = updatedRun.events;
+          run.validationStatus = updatedRun.validationStatus;
+          run.lastValidationResult = updatedRun.lastValidationResult;
+          run.rollingSummary = updatedRun.rollingSummary;
+          run.phaseExecution = phaseExecution;
+          persist(options.persistRun, run);
+        },
+        getRuntimeStatus: options.getRuntimeStatus,
+        maxStepRetries: phaseExecution.retryPolicy.maxTaskRetries,
+        maxReplans: phaseExecution.retryPolicy.maxReplans
+      });
+
+    result =
+      taskSpan && traceScope
+        ? await runWithTraceScope(
+            {
+              ...traceScope,
+              activeSpan: taskSpan
+            },
+            executeTaskRun
+          )
+        : await executeTaskRun();
   } catch (error) {
     const failure = createExecutionFailure(
       error instanceof Error ? error.message : "Task execution failed unexpectedly."
@@ -522,6 +550,18 @@ async function executeTask(options: {
       stepId: run.orchestration?.currentStep?.id ?? null,
       message: failure.message,
       retryCount: task.retryCount
+    });
+    taskSpan?.annotate({
+      retryCount: task.retryCount,
+      validationGateFailures: task.lastValidationResults
+        ?.filter((gate) => !gate.success)
+        .map((gate) => gate.gateId) ?? [],
+      failureReason: failure.message
+    });
+    await taskSpan?.end({
+      status: "failed",
+      outputSummary: failure.message,
+      error: failure.message
     });
     persist(options.persistRun, run);
     throw failure;
@@ -558,6 +598,15 @@ async function executeTask(options: {
         retryCount: task.retryCount
       }
     );
+    taskSpan?.annotate({
+      retryCount: task.retryCount,
+      validationGateCount: taskGateResults.length,
+      validationPassed: true
+    });
+    await taskSpan?.end({
+      status: "completed",
+      outputSummary: result.summary
+    });
     updateProgress(phaseExecution);
     persist(options.persistRun, run);
     return;
@@ -590,6 +639,19 @@ async function executeTask(options: {
       retryCount: task.retryCount
     }
   );
+  taskSpan?.annotate({
+    retryCount: task.retryCount,
+    validationGateCount: taskGateResults.length,
+    validationPassed: false,
+    validationGateFailures: taskGateResults
+      .filter((gate) => !gate.success)
+      .map((gate) => gate.gateId)
+  });
+  await taskSpan?.end({
+    status: "failed",
+    outputSummary: taskFailureMessage,
+    error: taskFailureMessage
+  });
   updateProgress(phaseExecution);
   persist(options.persistRun, run);
   throw createExecutionFailure(taskFailureMessage);
@@ -877,6 +939,31 @@ function renderPhaseExecutionResponse(phaseExecution: PhaseExecutionState) {
 
 function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
   run.events = [...run.events, ...events];
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  for (const event of events) {
+    traceScope.activeSpan.addEvent(event.type, {
+      message: event.message,
+      metadata: {
+        at: event.at,
+        phaseId: event.phaseId ?? null,
+        storyId: event.storyId ?? null,
+        taskId: event.taskId ?? null,
+        stepId: event.stepId ?? null,
+        gateId: event.gateId ?? null,
+        path: event.path ?? null,
+        toolName: event.toolName ?? null,
+        retryCount: event.retryCount ?? null,
+        validationSucceeded: event.validationResult?.success ?? null,
+        rollbackAttempted: event.rollback?.attempted ?? null,
+        rollbackSucceeded: event.rollback?.success ?? null
+      }
+    });
+  }
 }
 
 function createGateEvents(input: {

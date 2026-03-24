@@ -58,7 +58,17 @@ test("createOpenAIExecutor maps AI SDK text into the runtime result", async () =
     config,
     generateTextImpl: (async () =>
       ({
-        text: "Implementation plan ready.\n\nNext step: wire the runtime endpoint."
+        text: "Implementation plan ready.\n\nNext step: wire the runtime endpoint.",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
       })) as unknown as typeof generateText
   });
   const instructionRuntime = await createInstructionRuntimeForTests();
@@ -71,6 +81,9 @@ test("createOpenAIExecutor maps AI SDK text into the runtime result", async () =
   assert.equal(result.modelId, "gpt-4o-mini");
   assert.equal(result.responseText, "Implementation plan ready.\n\nNext step: wire the runtime endpoint.");
   assert.match(result.summary, /Implementation plan ready/);
+  assert.equal(result.usage?.inputTokens, 12);
+  assert.equal(result.usage?.outputTokens, 18);
+  assert.equal(result.usage?.totalTokens, 30);
 });
 
 async function createInstructionRuntimeForTests() {
