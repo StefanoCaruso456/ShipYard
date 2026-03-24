@@ -25,7 +25,7 @@ export function resolveLangSmithTraceConfig(
 ): LangSmithTraceConfig {
   const tracingEnabled = env.LANGSMITH_TRACING?.trim().toLowerCase() === "true";
   const apiKey = env.LANGSMITH_API_KEY?.trim() || null;
-  const workspaceId = env.LANGSMITH_WORKSPACE_ID?.trim() || null;
+  const workspaceId = env.WORKSPACE_ID?.trim() || env.LANGSMITH_WORKSPACE_ID?.trim() || null;
   const project = env.LANGSMITH_PROJECT?.trim() || null;
   const endpoint = env.LANGSMITH_ENDPOINT?.trim() || null;
 

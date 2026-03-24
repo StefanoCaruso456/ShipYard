@@ -54,3 +54,14 @@ Planner, executor, and verifier spans should be added once that orchestration pa
 ## Important Constraint
 
 Observability must cover both LLM and non-LLM steps. File loading, context assembly, validation, retries, and rollbacks matter just as much as model calls.
+
+## Runtime Config
+
+The deployed runtime accepts these LangSmith environment variables:
+
+- `LANGSMITH_TRACING`
+- `LANGSMITH_API_KEY`
+- `LANGSMITH_PROJECT`
+- `WORKSPACE_ID`
+
+`LANGSMITH_WORKSPACE_ID` is still accepted as a backwards-compatible fallback, but `WORKSPACE_ID` is the preferred workspace selector in the current runtime configuration.
