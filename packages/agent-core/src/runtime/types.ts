@@ -1,21 +1,54 @@
 import type { AgentInstructionRuntime } from "../instructions/types";
+import type {
+  CreateFileInput,
+  CreateFileResult,
+  DeleteFileInput,
+  DeleteFileResult,
+  EditFileRegionInput,
+  EditFileRegionResult,
+  RepoToolErrorCode,
+  RepoToolName
+} from "../tools/repo/types";
 
 export type AgentRunStatus = "pending" | "running" | "completed" | "failed";
 
 export type RuntimeWorkerState = "idle" | "running";
 
+export type RepoMutationToolRequest =
+  | {
+      toolName: "edit_file_region";
+      input: EditFileRegionInput;
+    }
+  | {
+      toolName: "create_file";
+      input: CreateFileInput;
+    }
+  | {
+      toolName: "delete_file";
+      input: DeleteFileInput;
+    };
+
+export type RepoMutationToolResult =
+  | EditFileRegionResult
+  | CreateFileResult
+  | DeleteFileResult;
+
 export type SubmitTaskInput = {
   instruction: string;
   title?: string;
   simulateFailure?: boolean;
+  toolRequest?: RepoMutationToolRequest | null;
 };
 
 export type AgentRunFailure = {
   message: string;
+  code?: RepoToolErrorCode | "runtime_error";
+  toolName?: RepoToolName;
+  path?: string;
 };
 
 export type AgentRunResult = {
-  mode: "placeholder-execution" | "ai-sdk-openai";
+  mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool";
   summary: string;
   instructionEcho: string;
   skillId: string;
@@ -23,6 +56,7 @@ export type AgentRunResult = {
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
+  toolResult?: RepoMutationToolResult | null;
 };
 
 export type AgentRunRecord = {
@@ -30,6 +64,7 @@ export type AgentRunRecord = {
   title: string | null;
   instruction: string;
   simulateFailure: boolean;
+  toolRequest: RepoMutationToolRequest | null;
   status: AgentRunStatus;
   createdAt: string;
   startedAt: string | null;
@@ -74,9 +109,5 @@ export type PersistentAgentRuntimeService = {
 };
 
 export function cloneRunRecord(run: AgentRunRecord): AgentRunRecord {
-  return {
-    ...run,
-    error: run.error ? { ...run.error } : null,
-    result: run.result ? { ...run.result } : null
-  };
+  return structuredClone(run);
 }

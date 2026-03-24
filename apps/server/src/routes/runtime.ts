@@ -3,6 +3,7 @@ import type { Express, Request } from "express";
 import type {
   AgentRunRecord,
   PersistentAgentRuntimeService,
+  RepoMutationToolRequest,
   SubmitTaskInput
 } from "@shipyard/agent-core";
 
@@ -108,6 +109,7 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
     instruction?: unknown;
     title?: unknown;
     simulateFailure?: unknown;
+    toolRequest?: unknown;
   };
 
   if (typeof body?.instruction !== "string" || !body.instruction.trim()) {
@@ -128,10 +130,17 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
     };
   }
 
+  const toolRequest = parseToolRequest(body.toolRequest);
+
+  if ("error" in toolRequest) {
+    return toolRequest;
+  }
+
   return {
     instruction: body.instruction,
     title: body.title,
-    simulateFailure: body.simulateFailure
+    simulateFailure: body.simulateFailure,
+    toolRequest: toolRequest.value
   };
 }
 
@@ -141,11 +150,114 @@ function serializeRun(run: AgentRunRecord) {
     title: run.title,
     instruction: run.instruction,
     simulateFailure: run.simulateFailure,
+    toolRequest: run.toolRequest,
     status: run.status,
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     error: run.error,
     result: run.result
+  };
+}
+
+function parseToolRequest(
+  value: unknown
+): { value: RepoMutationToolRequest | null } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return {
+      error: "toolRequest must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    toolName?: unknown;
+    input?: unknown;
+  };
+
+  if (candidate.toolName === "edit_file_region") {
+    const input = candidate.input as {
+      path?: unknown;
+      anchor?: unknown;
+      currentText?: unknown;
+      replacementText?: unknown;
+    };
+
+    if (
+      typeof input?.path !== "string" ||
+      typeof input.anchor !== "string" ||
+      typeof input.currentText !== "string" ||
+      typeof input.replacementText !== "string"
+    ) {
+      return {
+        error:
+          "edit_file_region requires string path, anchor, currentText, and replacementText fields."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "edit_file_region",
+        input: {
+          path: input.path,
+          anchor: input.anchor,
+          currentText: input.currentText,
+          replacementText: input.replacementText
+        }
+      }
+    };
+  }
+
+  if (candidate.toolName === "create_file") {
+    const input = candidate.input as {
+      path?: unknown;
+      content?: unknown;
+    };
+
+    if (typeof input?.path !== "string" || typeof input.content !== "string") {
+      return {
+        error: "create_file requires string path and content fields."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "create_file",
+        input: {
+          path: input.path,
+          content: input.content
+        }
+      }
+    };
+  }
+
+  if (candidate.toolName === "delete_file") {
+    const input = candidate.input as {
+      path?: unknown;
+    };
+
+    if (typeof input?.path !== "string") {
+      return {
+        error: "delete_file requires a string path field."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "delete_file",
+        input: {
+          path: input.path
+        }
+      }
+    };
+  }
+
+  return {
+    error: "toolRequest.toolName must be edit_file_region, create_file, or delete_file."
   };
 }

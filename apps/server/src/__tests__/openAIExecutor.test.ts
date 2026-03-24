@@ -88,6 +88,7 @@ function createRun(instruction: string): AgentRunRecord {
     title: "Test",
     instruction,
     simulateFailure: false,
+    toolRequest: null,
     status: "running",
     createdAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
