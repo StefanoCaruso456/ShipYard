@@ -108,6 +108,82 @@ test("rolling summary defaults to omitted when no prior step state exists", asyn
   assert.ok(payload.omittedSections.some((section) => section.id === "rolling-summary"));
 });
 
+test("executor payload reflects the active phase execution task", async () => {
+  const assembler = await createAssemblerForTests();
+  const payload = assembler.buildRolePayload("executor", {
+    run: createRunRecord({
+      instruction: "Top-level execution plan",
+      phaseExecution: {
+        status: "in_progress",
+        current: {
+          phaseId: "phase-a",
+          storyId: "story-a",
+          taskId: "task-a"
+        },
+        progress: {
+          totalPhases: 1,
+          completedPhases: 0,
+          totalStories: 1,
+          completedStories: 0,
+          totalTasks: 1,
+          completedTasks: 0
+        },
+        retryPolicy: {
+          maxTaskRetries: 1,
+          maxStoryRetries: 1
+        },
+        lastFailureReason: null,
+        phases: [
+          {
+            id: "phase-a",
+            name: "Phase A",
+            description: "Phase A description",
+            status: "in_progress",
+            failureReason: null,
+            lastValidationResults: null,
+            userStories: [
+              {
+                id: "story-a",
+                title: "Story A",
+                description: "Story A description",
+                acceptanceCriteria: ["Ship the scoped task"],
+                validationGates: [],
+                status: "in_progress",
+                retryCount: 0,
+                failureReason: null,
+                lastValidationResults: null,
+                tasks: [
+                  {
+                    id: "task-a",
+                    instruction: "Ship the scoped task",
+                    expectedOutcome: "Ship the scoped task",
+                    status: "running",
+                    toolRequest: null,
+                    context: null,
+                    validationGates: [],
+                    retryCount: 0,
+                    failureReason: null,
+                    lastValidationResults: null,
+                    result: null
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  const objectiveSection = payload.sections.find((section) => section.id === "task-objective");
+  const stateSection = payload.sections.find((section) => section.id === "current-run-state");
+
+  assert.equal(objectiveSection?.content, "Ship the scoped task");
+  assert.match(stateSection?.content ?? "", /"phaseExecution"/);
+  assert.match(stateSection?.content ?? "", /"taskId": "task-a"/);
+});
+
 async function createAssemblerForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),

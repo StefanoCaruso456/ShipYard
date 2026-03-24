@@ -24,6 +24,17 @@ export type RollbackResult = {
 };
 
 export type RunEventType =
+  | "phase_started"
+  | "phase_completed"
+  | "phase_failed"
+  | "story_started"
+  | "story_completed"
+  | "story_failed"
+  | "task_started"
+  | "task_completed"
+  | "task_failed"
+  | "validation_gate_passed"
+  | "validation_gate_failed"
   | "validation_succeeded"
   | "validation_failed"
   | "rollback_succeeded"
@@ -35,6 +46,10 @@ export type RunEvent = {
   at: string;
   type: RunEventType;
   message: string;
+  phaseId?: string | null;
+  storyId?: string | null;
+  taskId?: string | null;
+  gateId?: string | null;
   path?: string | null;
   toolName?: string | null;
   retryCount?: number;

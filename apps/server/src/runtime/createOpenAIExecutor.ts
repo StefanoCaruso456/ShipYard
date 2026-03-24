@@ -92,6 +92,7 @@ function buildTaskPrompt(run: AgentRunRecord) {
     "Produce the next execution response for the operator.",
     run.title ? `Thread title: ${run.title}` : null,
     `Task instruction:\n${run.instruction}`,
+    renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
     renderRunContext(run),
     "Keep the answer concise, concrete, and implementation-focused.",
@@ -99,6 +100,31 @@ function buildTaskPrompt(run: AgentRunRecord) {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function renderPhaseExecutionContext(run: AgentRunRecord) {
+  const phaseExecution = run.phaseExecution;
+
+  if (!phaseExecution) {
+    return null;
+  }
+
+  const phase = phaseExecution.phases.find((candidate) => candidate.id === phaseExecution.current.phaseId);
+  const story = phase?.userStories.find((candidate) => candidate.id === phaseExecution.current.storyId);
+  const task = story?.tasks.find((candidate) => candidate.id === phaseExecution.current.taskId);
+
+  return [
+    "Phase execution context:",
+    `Progress: ${phaseExecution.progress.completedPhases}/${phaseExecution.progress.totalPhases} phases, ${phaseExecution.progress.completedStories}/${phaseExecution.progress.totalStories} stories, ${phaseExecution.progress.completedTasks}/${phaseExecution.progress.totalTasks} tasks completed.`,
+    phase ? `Current phase: ${phase.name}` : null,
+    story ? `Current story: ${story.title}` : null,
+    task ? `Current task expected outcome: ${task.expectedOutcome}` : null,
+    story && story.acceptanceCriteria.length > 0
+      ? `Story acceptance criteria:\n${story.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")}`
+      : null
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function renderAttachmentContext(run: AgentRunRecord) {

@@ -81,6 +81,13 @@ export function buildExecutorContext(shared: SharedRoleContext): RoleContextPayl
         status: shared.run.status,
         retryCount: shared.run.retryCount,
         validationStatus: shared.run.validationStatus,
+        phaseExecution: shared.run.phaseExecution
+          ? {
+              status: shared.run.phaseExecution.status,
+              current: shared.run.phaseExecution.current,
+              progress: shared.run.phaseExecution.progress
+            }
+          : null,
         toolRequest: shared.run.toolRequest,
         workerState: shared.runtimeStatus.workerState,
         queuedRuns: shared.runtimeStatus.queuedRuns

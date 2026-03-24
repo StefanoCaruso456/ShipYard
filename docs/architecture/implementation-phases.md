@@ -189,6 +189,44 @@ The backend can now reject invalid edits, restore the repo to its pre-edit state
 
 Complete
 
+## Phase 6: Phase Execution System
+
+### What
+
+The runtime can now execute ordered phases, user stories, and tasks with validation gates between each step.
+
+### Why
+
+Sequential task execution alone is not enough for larger delivery work. The system needs to know what phase it is in, which story is active, which task is next, and whether each step actually satisfied its completion gate before moving forward.
+
+### How
+
+- define phases made of user stories and tasks
+- track current phase, story, and task pointers inside runtime state
+- execute tasks in order without skipping unfinished work
+- validate tasks and stories through structured validation gates
+- retry failed task gates and story gates within configured limits
+- record phase, story, task, gate, and retry events for inspection
+
+### Purpose
+
+Add a structured execution backbone that prevents the runtime from claiming a larger body of work is complete when only part of it succeeded.
+
+### Outcome
+
+The backend can now run a multi-step implementation plan, validate each task and story before advancing, and fail the run conservatively when retries are exhausted.
+
+### Architecture
+
+- phase execution state lives in `packages/agent-core/src/runtime`
+- phase validation gates and retry policy are enforced inside the persistent runtime service
+- `apps/server` accepts phase execution plans through the runtime task API
+- executor prompts and context payloads can now reflect the active phase, story, and task
+
+### Status
+
+Complete
+
 ## What Comes Next
 
 The next major phase should build on these foundations instead of replacing them.
