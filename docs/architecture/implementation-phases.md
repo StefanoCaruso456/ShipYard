@@ -115,7 +115,43 @@ The agent can now inspect code with enough precision to support surgical edits l
 
 Complete
 
-## Phase 4: Surgical File Editing Engine
+## Phase 4: Context Assembler
+
+### What
+
+The runtime can assemble role-scoped context payloads for planner, executor, and verifier workflows.
+
+### Why
+
+Good execution depends on the model seeing the right objective, constraints, rules, files, failures, and validation targets at the right time. Without structured context assembly, prompts become noisy, incomplete, or inconsistent across roles.
+
+### How
+
+- build a shared runtime context from live run state
+- derive role-specific payloads for planner, executor, and verifier
+- include only the sections each role needs
+- track omitted sections explicitly so missing context is inspectable
+- render the assembled payload into a debuggable prompt surface
+
+### Purpose
+
+Create a reusable context layer that keeps runtime prompts structured, inspectable, and role-aware before full orchestration is added.
+
+### Outcome
+
+The backend can now produce planner, executor, and verifier context payloads from live run state and expose them for inspection through the runtime API.
+
+### Architecture
+
+- shared context derivation lives in `packages/agent-core/src/context`
+- role-specific builders live alongside the shared assembler in `packages/agent-core/src/context`
+- `apps/server` exposes assembled role payloads through the runtime routes
+
+### Status
+
+Complete
+
+## Phase 5: Surgical File Editing Engine
 
 ### What
 
@@ -151,7 +187,7 @@ The system can now create files, delete files, and surgically edit existing file
 
 Complete
 
-## Phase 5: Validation and Recovery Engine
+## Phase 6: Validation and Recovery Engine
 
 ### What
 
@@ -189,7 +225,7 @@ The backend can now reject invalid edits, restore the repo to its pre-edit state
 
 Complete
 
-## Phase 6: Phase Execution System
+## Phase 7: Phase Execution System
 
 ### What
 
