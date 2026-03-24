@@ -119,11 +119,11 @@ Complete
 
 ### What
 
-The runtime can assemble role-scoped context payloads for planner, executor, and verifier workflows.
+The runtime can build structured, role-scoped context payloads for planner, executor, and verifier workflows.
 
 ### Why
 
-Good execution depends on the model seeing the right objective, constraints, rules, files, failures, and validation targets at the right time. Without structured context assembly, prompts become noisy, incomplete, or inconsistent across roles.
+Execution quality depends on getting the right objective, rules, files, failures, and validation targets into the prompt at the right time. Without a dedicated assembler, prompts become inconsistent, noisy, and hard to inspect.
 
 ### How
 
@@ -131,25 +131,26 @@ Good execution depends on the model seeing the right objective, constraints, rul
 - derive role-specific payloads for planner, executor, and verifier
 - include only the sections each role needs
 - track omitted sections explicitly so missing context is inspectable
-- render the assembled payload into a debuggable prompt surface
+- render the assembled payload into a debuggable prompt surface and API view
 
 ### Purpose
 
-Create a reusable context layer that keeps runtime prompts structured, inspectable, and role-aware before full orchestration is added.
+Create one reusable context layer that keeps prompts structured, inspectable, and role-aware before full orchestration is added.
 
 ### Outcome
 
-The backend can now produce planner, executor, and verifier context payloads from live run state and expose them for inspection through the runtime API.
+The backend can now assemble planner, executor, and verifier payloads from live run state and expose them through the runtime API for inspection and debugging.
 
 ### Architecture
 
 - shared context derivation lives in `packages/agent-core/src/context`
 - role-specific builders live alongside the shared assembler in `packages/agent-core/src/context`
 - `apps/server` exposes assembled role payloads through the runtime routes
+- prompt wiring can build on this layer instead of reassembling context ad hoc
 
 ### Status
 
-Complete
+Complete as a context and inspection layer. Direct live execution wiring is the next integration step.
 
 ## Phase 5: Surgical File Editing Engine
 

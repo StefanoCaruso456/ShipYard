@@ -2,7 +2,7 @@
 
 ## Decision
 
-Use Langfuse as the primary tracing and observability stack for the product runtime.
+Use LangSmith as the primary tracing and observability backend for the product runtime, with local structured logs as the fallback path when tracing is disabled or unavailable.
 
 ## Goal
 
@@ -32,28 +32,20 @@ Log at minimum:
 - rollback events
 - token and cost data
 
-## Phase Guidance
+## Current focus
 
-### Phase 1
+The next observability phase should trace the runtime that already exists today:
 
-- keep the debug endpoint
-- keep startup/runtime logs clear
-- make instruction loading observable
+- root task runs
+- phase, story, and task execution
+- context assembly
+- repo tool calls
+- file edits
+- validation, retries, and rollbacks
+- model usage, latency, and cost when available
 
-### Phase 2
-
-- send structured traces to Langfuse
-- persist run and step metadata
-- include instruction injection records
-
-### Phase 3
-
-- dashboards
-- run comparisons
-- evaluation signals
-- cost and failure trend reporting
+Planner, executor, and verifier spans should be added once that orchestration path is the active runtime path.
 
 ## Important Constraint
 
-Observability must cover both LLM and non-LLM steps. File loading, parsing, validation, and retries matter just as much as model calls.
-
+Observability must cover both LLM and non-LLM steps. File loading, context assembly, validation, retries, and rollbacks matter just as much as model calls.
