@@ -14,6 +14,7 @@ import {
   createAudioTranscriber,
   resolveAudioTranscriptionConfig
 } from "./createAudioTranscriber";
+import { createTraceService } from "../observability/createTraceService";
 import {
   resolveOpenAIExecutorConfig,
   type OpenAIExecutorConfig
@@ -28,6 +29,8 @@ export type BootedRuntimeService = {
   openAI: OpenAIExecutorConfig;
   audioTranscriber: ReturnType<typeof createAudioTranscriber>;
   runtimeStatePath: string;
+  traceService: ReturnType<typeof createTraceService>;
+  traceLogPath: string;
 };
 
 export async function bootRuntimeService(): Promise<BootedRuntimeService> {
@@ -39,6 +42,10 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     config: resolveAudioTranscriptionConfig()
   });
   const runtimeStatePath = resolveRuntimeStatePath(rootDir);
+  const traceLogPath = resolveTraceLogPath(rootDir);
+  const traceService = createTraceService({
+    logPath: traceLogPath
+  });
   const repoToolset = createRepoToolset({
     rootDir
   });
@@ -54,6 +61,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
       store: createFileRunStore({
         filePath: runtimeStatePath
       }),
+      traceService,
       executeRun: createRuntimeExecutor({
         openAI,
         repoToolset
@@ -62,7 +70,9 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     contextAssembler,
     openAI,
     audioTranscriber,
-    runtimeStatePath
+    runtimeStatePath,
+    traceService,
+    traceLogPath
   };
 }
 
@@ -78,4 +88,18 @@ function resolveRuntimeStatePath(rootDir: string, env: NodeJS.ProcessEnv = proce
   }
 
   return path.resolve(rootDir, ".shipyard/runtime/runs.json");
+}
+
+function resolveTraceLogPath(rootDir: string, env: NodeJS.ProcessEnv = process.env) {
+  const configuredPath = env.SHIPYARD_TRACE_LOG_PATH?.trim();
+
+  if (configuredPath) {
+    return path.resolve(configuredPath);
+  }
+
+  if (env.NODE_ENV === "production") {
+    return path.resolve("/tmp/shipyard/runtime/traces.jsonl");
+  }
+
+  return path.resolve(rootDir, ".shipyard/runtime/traces.jsonl");
 }

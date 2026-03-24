@@ -46,6 +46,7 @@ export { buildPlannerContext } from "./context/buildPlannerContext";
 export { buildVerifierContext } from "./context/buildVerifierContext";
 export { createContextAssembler, runtimeContextPrecedence } from "./context/createContextAssembler";
 export { selectSkillSections } from "./context/selectSkillSections";
+export { getActiveTraceScope, runWithTraceScope } from "./observability/traceScope";
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
 export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
@@ -61,6 +62,21 @@ export {
   normalizePhaseExecutionState
 } from "./runtime/phaseExecution";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
+export type {
+  EndTraceSpanInput,
+  StartTraceRunInput,
+  StartTraceSpanInput,
+  TraceMetadata,
+  TraceRunLog,
+  TraceService,
+  TraceServiceStatus,
+  TraceSpan,
+  TraceSpanEvent,
+  TraceSpanSnapshot,
+  TraceSpanStatus,
+  TraceSpanType,
+  TraceValue
+} from "./observability/types";
 export type {
   ContextAssembler,
   ContextAssemblerRunInput,
@@ -108,6 +124,7 @@ export type {
   RepoMutationToolRequest,
   RepoMutationToolResult,
   RollingSummary,
+  RuntimeObservability,
   RunContextInput,
   RuntimeWorkerState,
   SubmitTaskInput,

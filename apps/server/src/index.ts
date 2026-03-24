@@ -5,7 +5,8 @@ import { createServer, type Server } from "node:http";
 import {
   starterDecisionBoard,
   type ContextAssembler,
-  type PersistentAgentRuntimeService
+  type PersistentAgentRuntimeService,
+  type TraceService
 } from "@shipyard/agent-core";
 import { projectBrief } from "@shipyard/shared";
 
@@ -22,6 +23,7 @@ type RuntimeBootState = {
   contextAssembler: ContextAssembler | null;
   openAI: OpenAIExecutorConfig | null;
   audioTranscription: AudioTranscriptionConfig | null;
+  traceService: TraceService | null;
 };
 
 const host = process.env.HOST?.trim() || "0.0.0.0";
@@ -36,7 +38,8 @@ async function startServer() {
     runtimeService: null,
     contextAssembler: null,
     openAI: null,
-    audioTranscription: null
+    audioTranscription: null,
+    traceService: null
   };
   const app = express();
 
@@ -103,7 +106,15 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
   });
 
   try {
-    const { runtimeService, contextAssembler, openAI, audioTranscriber, runtimeStatePath } =
+    const {
+      runtimeService,
+      contextAssembler,
+      openAI,
+      audioTranscriber,
+      runtimeStatePath,
+      traceService,
+      traceLogPath
+    } =
       await bootRuntimeService();
 
     bootState.status = "ready";
@@ -112,12 +123,21 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
     bootState.contextAssembler = contextAssembler;
     bootState.openAI = openAI;
     bootState.audioTranscription = audioTranscriber.config;
+    bootState.traceService = traceService;
 
-    registerRuntimeRoutes(app, runtimeService, openAI, audioTranscriber, contextAssembler);
+    registerRuntimeRoutes(
+      app,
+      runtimeService,
+      openAI,
+      audioTranscriber,
+      contextAssembler,
+      traceService
+    );
 
     console.log("Shipyard runtime boot complete.", {
       completedAt: bootState.completedAt,
       runtimeStatePath,
+      traceLogPath,
       skillId: runtimeService.instructionRuntime.skill.meta.id,
       openAIConfigured: openAI.configured,
       modelId: openAI.modelId
@@ -205,6 +225,7 @@ function createHealthPayload(bootState: RuntimeBootState) {
       modelId: bootState.openAI.modelId,
       apiKeySource: bootState.openAI.apiKeySource
     },
+    observability: bootState.traceService?.status ?? null,
     audioTranscription: {
       provider: bootState.audioTranscription.provider,
       configured: bootState.audioTranscription.configured,
@@ -230,13 +251,15 @@ function isRuntimeReady(
   contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
   audioTranscription: AudioTranscriptionConfig;
+  traceService: TraceService;
 } {
   return (
     bootState.status === "ready" &&
     bootState.runtimeService !== null &&
     bootState.contextAssembler !== null &&
     bootState.openAI !== null &&
-    bootState.audioTranscription !== null
+    bootState.audioTranscription !== null &&
+    bootState.traceService !== null
   );
 }
 

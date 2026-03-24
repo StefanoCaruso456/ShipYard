@@ -18,6 +18,7 @@
     "ai": "^6.0.137",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "langsmith": "^0.5.13",
     "multer": "^2.1.1"
   },
   "devDependencies": {

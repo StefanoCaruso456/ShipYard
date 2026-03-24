@@ -1,5 +1,6 @@
 import type { ContextAssembler, RoleContextPayload } from "../context/types";
 import type { AgentInstructionRuntime } from "../instructions/types";
+import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
 import type { RunEvent } from "../validation/types";
 import {
   cloneRunRecord,
@@ -78,17 +79,54 @@ export async function executeOrchestrationLoop(
       };
       persist(options.persistRun, options.run);
 
-      const plannerPayload = buildRolePayload(
+      const plannerPayload = await buildRolePayload(
         options.contextAssembler,
         "planner",
         options.run,
         options.getRuntimeStatus()
       );
-      plannerResult = planNextStep({
-        run: options.run,
-        task: options.task ?? null,
-        payload: plannerPayload,
-        iteration: orchestration.iteration + 1
+      const plannerTraceScope = getActiveTraceScope();
+      const plannerSpan = plannerTraceScope
+        ? await plannerTraceScope.activeSpan.startChild({
+            name: `planner:${options.run.id}:${orchestration.iteration + 1}`,
+            spanType: "role",
+            inputSummary: "Planner is selecting the next bounded step.",
+            metadata: {
+              role: "planner",
+              iteration: orchestration.iteration + 1
+            }
+          })
+        : null;
+      plannerResult =
+        plannerSpan && plannerTraceScope
+          ? await runWithTraceScope(
+              {
+                ...plannerTraceScope,
+                activeSpan: plannerSpan
+              },
+              async () =>
+                planNextStep({
+                  run: options.run,
+                  task: options.task ?? null,
+                  payload: plannerPayload,
+                  iteration: orchestration.iteration + 1
+                })
+            )
+          : planNextStep({
+              run: options.run,
+              task: options.task ?? null,
+              payload: plannerPayload,
+              iteration: orchestration.iteration + 1
+            });
+      plannerSpan?.annotate({
+        stepId: plannerResult.step.id,
+        consumedContextSectionIds: plannerResult.consumedContextSectionIds,
+        validationTargetCount: plannerResult.step.validationTargets.length,
+        toolName: plannerResult.step.requiredTool ?? null
+      });
+      await plannerSpan?.end({
+        status: "completed",
+        outputSummary: plannerResult.summary
       });
 
       orchestration.iteration += 1;
@@ -118,7 +156,7 @@ export async function executeOrchestrationLoop(
       );
     }
 
-    const executorPayload = buildRolePayload(
+    const executorPayload = await buildRolePayload(
       options.contextAssembler,
       "executor",
       options.run,
@@ -133,12 +171,53 @@ export async function executeOrchestrationLoop(
     };
     persist(options.persistRun, options.run);
 
-    const execution = await executeExecutorStep({
-      run: options.run,
-      plannerStep: plannerResult.step,
-      payload: executorPayload,
-      executeRun: options.executeRun,
-      instructionRuntime: options.instructionRuntime
+    const executorTraceScope = getActiveTraceScope();
+    const executorSpan = executorTraceScope
+      ? await executorTraceScope.activeSpan.startChild({
+          name: `executor:${plannerResult.step.id}`,
+          spanType: "role",
+          inputSummary: plannerResult.step.summary,
+          metadata: {
+            role: "executor",
+            stepId: plannerResult.step.id,
+            toolName: plannerResult.step.requiredTool ?? null,
+            validationTargets: plannerResult.step.validationTargets
+          }
+        })
+      : null;
+    const execution =
+      executorSpan && executorTraceScope
+        ? await runWithTraceScope(
+            {
+              ...executorTraceScope,
+              activeSpan: executorSpan
+            },
+            async () =>
+              executeExecutorStep({
+                run: options.run,
+                plannerStep: plannerResult.step,
+                payload: executorPayload,
+                executeRun: options.executeRun,
+                instructionRuntime: options.instructionRuntime
+              })
+          )
+        : await executeExecutorStep({
+            run: options.run,
+            plannerStep: plannerResult.step,
+            payload: executorPayload,
+            executeRun: options.executeRun,
+            instructionRuntime: options.instructionRuntime
+          });
+    executorSpan?.annotate({
+      consumedContextSectionIds: execution.executorResult.consumedContextSectionIds,
+      changedFiles: execution.executorResult.changedFiles,
+      success: execution.executorResult.success,
+      mode: execution.executorResult.mode ?? null
+    });
+    await executorSpan?.end({
+      status: execution.executorResult.success ? "completed" : "failed",
+      outputSummary: execution.executorResult.summary,
+      error: execution.executorResult.error?.message ?? null
     });
 
     orchestration.lastExecutorResult = execution.executorResult;
@@ -164,19 +243,60 @@ export async function executeOrchestrationLoop(
     };
     persist(options.persistRun, options.run);
 
-    const verifierPayload = buildRolePayload(
+    const verifierPayload = await buildRolePayload(
       options.contextAssembler,
       "verifier",
       options.run,
       options.getRuntimeStatus()
     );
-    const verifierResult = verifyStepResult({
-      run: options.run,
-      task: options.task ?? null,
-      plannerResult,
-      executorResult: execution.executorResult,
-      executionResult: execution.result,
-      payload: verifierPayload
+    const verifierTraceScope = getActiveTraceScope();
+    const verifierSpan = verifierTraceScope
+      ? await verifierTraceScope.activeSpan.startChild({
+          name: `verifier:${plannerResult.step.id}`,
+          spanType: "role",
+          inputSummary: `Verifier is checking ${plannerResult.step.id}.`,
+          metadata: {
+            role: "verifier",
+            stepId: plannerResult.step.id
+          }
+        })
+      : null;
+    const verifierResult =
+      verifierSpan && verifierTraceScope
+        ? await runWithTraceScope(
+            {
+              ...verifierTraceScope,
+              activeSpan: verifierSpan
+            },
+            async () =>
+              verifyStepResult({
+                run: options.run,
+                task: options.task ?? null,
+                plannerResult,
+                executorResult: execution.executorResult,
+                executionResult: execution.result,
+                payload: verifierPayload
+              })
+          )
+        : verifyStepResult({
+            run: options.run,
+            task: options.task ?? null,
+            plannerResult,
+            executorResult: execution.executorResult,
+            executionResult: execution.result,
+            payload: verifierPayload
+          });
+    verifierSpan?.annotate({
+      decision: verifierResult.decision,
+      intentMatched: verifierResult.intentMatched,
+      targetMatched: verifierResult.targetMatched,
+      validationPassed: verifierResult.validationPassed,
+      sideEffectsDetected: verifierResult.sideEffectsDetected,
+      consumedContextSectionIds: verifierResult.consumedContextSectionIds
+    });
+    await verifierSpan?.end({
+      status: verifierResult.decision === "fail" ? "failed" : "completed",
+      outputSummary: verifierResult.summary
     });
 
     orchestration.lastVerifierResult = verifierResult;
@@ -499,18 +619,71 @@ async function executeExecutorStep(input: {
   }
 }
 
-function buildRolePayload(
+async function buildRolePayload(
   contextAssembler: ContextAssembler | undefined,
   role: "planner" | "executor" | "verifier",
   run: AgentRunRecord,
   runtimeStatus: AgentRuntimeStatus
 ) {
-  return contextAssembler
-    ? contextAssembler.buildRolePayload(role, {
-        run,
-        runtimeStatus
+  if (!contextAssembler) {
+    return null;
+  }
+
+  const traceScope = getActiveTraceScope();
+  const contextSpan = traceScope
+    ? await traceScope.activeSpan.startChild({
+        name: `context:${role}:${run.id}`,
+        spanType: "context",
+        inputSummary: `Assemble ${role} context payload.`,
+        metadata: {
+          role,
+          runId: run.id
+        }
       })
     : null;
+
+  try {
+    const payload =
+      contextSpan && traceScope
+        ? await runWithTraceScope(
+            {
+              ...traceScope,
+              activeSpan: contextSpan
+            },
+            () =>
+              contextAssembler.buildRolePayload(role, {
+                run,
+                runtimeStatus
+              })
+          )
+        : contextAssembler.buildRolePayload(role, {
+            run,
+            runtimeStatus
+          });
+
+    contextSpan?.annotate({
+      sectionIds: payload.sections.map((section) => section.id),
+      omittedSectionIds: payload.omittedSections.map((section) => section.id),
+      promptLength: payload.prompt.length,
+      selectedFiles: run.context.relevantFiles.map((file) => ({
+        path: file.path,
+        source: file.source ?? null,
+        reason: file.reason ?? null
+      }))
+    });
+    await contextSpan?.end({
+      status: "completed",
+      outputSummary: `Assembled ${role} context with ${payload.sections.length} section(s).`
+    });
+
+    return payload;
+  } catch (error) {
+    await contextSpan?.end({
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 function deriveValidationTargets(
@@ -902,6 +1075,27 @@ function applyExecutionValidationState(run: AgentRunRecord, execution: ExecutorS
 }
 
 function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
+  const traceScope = getActiveTraceScope();
+
+  if (traceScope) {
+    for (const event of events) {
+      traceScope.activeSpan.addEvent(event.type, {
+        message: event.message,
+        metadata: {
+          at: event.at,
+          stepId: event.stepId ?? null,
+          phaseId: event.phaseId ?? null,
+          storyId: event.storyId ?? null,
+          taskId: event.taskId ?? null,
+          gateId: event.gateId ?? null,
+          path: event.path ?? null,
+          toolName: event.toolName ?? null,
+          retryCount: event.retryCount ?? null
+        }
+      });
+    }
+  }
+
   run.events = [...run.events, ...events];
 }
 
