@@ -166,6 +166,7 @@ function createRun(
     retryCount: overrides.retryCount ?? 0,
     validationStatus: overrides.validationStatus ?? "not_run",
     lastValidationResult: overrides.lastValidationResult ?? null,
+    orchestration: overrides.orchestration ?? null,
     rollingSummary: overrides.rollingSummary ?? null,
     events: overrides.events ?? [],
     error: overrides.error ?? null,

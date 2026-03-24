@@ -51,6 +51,11 @@ export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
 export {
+  executeOrchestrationLoop,
+  planNextStep,
+  verifyStepResult
+} from "./runtime/orchestration";
+export {
   executePhaseExecutionRun,
   normalizePhaseExecutionInput,
   normalizePhaseExecutionState
@@ -81,7 +86,12 @@ export type {
   AgentRunStatus,
   AgentRunStore,
   AgentRuntimeStatus,
+  ExecutorStepResult,
   ExecuteRun,
+  OrchestrationAction,
+  OrchestrationState,
+  OrchestrationStatus,
+  OrchestrationStepKind,
   Phase,
   PhaseExecutionInput,
   PhaseExecutionPointer,
@@ -89,6 +99,8 @@ export type {
   PhaseExecutionRetryPolicy,
   PhaseExecutionState,
   PhaseStatus,
+  PlannerStep,
+  PlannerStepResult,
   PersistentAgentRuntimeService,
   RelevantFileContext,
   RunAttachment,
@@ -106,7 +118,9 @@ export type {
   UserStoryInput,
   ValidationGate,
   ValidationGateKind,
-  ValidationGateResult
+  ValidationGateResult,
+  VerifierDecision,
+  VerifierStepResult
 } from "./runtime/types";
 export type {
   CreateFileInput,

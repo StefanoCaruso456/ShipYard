@@ -83,15 +83,20 @@ Meaning:
 
 ## Current State
 
-Phases 1 through 4 are complete:
+Phases 1 through 7 are now complete in the current backend:
 
 - runtime instruction loading
-- persistent runtime loop skeleton
+- persistent runtime loop
 - repo inspection tools
 - surgical file editing
+- validation and recovery
+- role-scoped context assembly
+- phase/story/task workflow execution
+- live planner/executor/verifier orchestration with verifier-gated progression
 
 Still not built:
 
-- full planner/executor/verifier orchestration
 - durable database-backed runtime state
 - richer trace storage and review flows
+- broader validation targets such as lint, typecheck, and targeted test execution
+- approval and review flows around diffs and execution

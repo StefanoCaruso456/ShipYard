@@ -98,6 +98,88 @@ export type ValidationGateResult = {
   expectedValue?: string | null;
 };
 
+export type OrchestrationStepKind = "repo_tool" | "model_response";
+
+export type OrchestrationAction = "plan" | "continue" | "retry_step" | "replan" | "fail";
+
+export type OrchestrationStatus =
+  | "idle"
+  | "planning"
+  | "executing"
+  | "verifying"
+  | "completed"
+  | "failed";
+
+export type PlannerStep = {
+  id: string;
+  title: string;
+  kind: OrchestrationStepKind;
+  rationale: string;
+  summary: string;
+  successCriteria: string[];
+  requiredInputs: string[];
+  requiredTool?: RepoToolName | null;
+  toolRequest?: RepoMutationToolRequest | null;
+  validationTargets: string[];
+};
+
+export type PlannerStepResult = {
+  role: "planner";
+  at: string;
+  summary: string;
+  step: PlannerStep;
+  consumedContextSectionIds: string[];
+};
+
+export type ExecutorStepResult = {
+  role: "executor";
+  at: string;
+  stepId: string;
+  success: boolean;
+  mode: AgentRunResult["mode"] | null;
+  summary: string;
+  responseText?: string | null;
+  toolResult?: RepoMutationToolResult | null;
+  changedFiles: string[];
+  validationTargets: string[];
+  consumedContextSectionIds: string[];
+  error?: AgentRunFailure | null;
+};
+
+export type VerifierDecision = Extract<
+  OrchestrationAction,
+  "continue" | "retry_step" | "replan" | "fail"
+>;
+
+export type VerifierStepResult = {
+  role: "verifier";
+  at: string;
+  stepId: string;
+  decision: VerifierDecision;
+  summary: string;
+  reasons: string[];
+  intentMatched: boolean;
+  targetMatched: boolean;
+  validationPassed: boolean | null;
+  sideEffectsDetected: boolean;
+  validationGateResults?: ValidationGateResult[] | null;
+  consumedContextSectionIds: string[];
+};
+
+export type OrchestrationState = {
+  status: OrchestrationStatus;
+  iteration: number;
+  stepRetryCount: number;
+  replanCount: number;
+  maxStepRetries: number;
+  maxReplans: number;
+  nextAction: OrchestrationAction | null;
+  currentStep: PlannerStep | null;
+  lastPlannerResult: PlannerStepResult | null;
+  lastExecutorResult: ExecutorStepResult | null;
+  lastVerifierResult: VerifierStepResult | null;
+};
+
 export type RelevantFileContext = {
   path: string;
   excerpt?: string | null;
@@ -142,6 +224,7 @@ export type PhaseInput = {
 export type PhaseExecutionRetryPolicy = {
   maxTaskRetries: number;
   maxStoryRetries: number;
+  maxReplans: number;
 };
 
 export type PhaseExecutionInput = {
@@ -228,7 +311,7 @@ export type SubmitTaskInput = {
 
 export type AgentRunFailure = {
   message: string;
-  code?: RepoToolErrorCode | "execution_failed";
+  code?: RepoToolErrorCode | "execution_failed" | "planning_failed" | "verification_failed";
   toolName?: RepoToolName;
   path?: string;
   validationResult?: ValidationResult | null;
@@ -241,6 +324,7 @@ export type AgentRunResult = {
   instructionEcho: string;
   skillId: string;
   completedAt: string;
+  orchestration?: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
   responseText?: string | null;
   provider?: "openai" | null;
@@ -263,6 +347,7 @@ export type AgentRunRecord = {
   retryCount: number;
   validationStatus: ValidationStatus;
   lastValidationResult: ValidationResult | null;
+  orchestration: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];
@@ -287,6 +372,9 @@ export type ExecuteRun = (
   run: AgentRunRecord,
   context: {
     instructionRuntime: AgentInstructionRuntime;
+    roleContextPrompt?: string | null;
+    roleContextSectionIds?: string[];
+    plannedStep?: PlannerStep | null;
   }
 ) => Promise<AgentRunResult>;
 

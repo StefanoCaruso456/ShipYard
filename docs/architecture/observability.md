@@ -15,6 +15,8 @@ Every run should be explainable after the fact:
 - what changed
 - what validation ran
 - why the run stopped, retried, or failed
+- what the planner proposed
+- what the verifier decided next
 
 ## Required Runtime Signals
 
@@ -23,11 +25,14 @@ Log at minimum:
 - run id
 - task id
 - role (`planner`, `executor`, `verifier`)
+- planner step id and step summary
 - active skill id and version
 - injected section ids
 - tool calls and outputs
 - edit attempts
 - validation commands and results
+- verifier decision (`continue`, `retry_step`, `replan`, `fail`)
+- current next action and retry counts
 - retries
 - rollback events
 - token and cost data
