@@ -226,39 +226,61 @@ The backend can now reject invalid edits, restore the repo to its pre-edit state
 
 Complete
 
-## Phase 7: Phase Execution System
+## Phase 7: Planner / Executor / Verifier Orchestration Loop
 
 ### What
 
-The runtime can now execute ordered phases, user stories, and tasks with validation gates between each step.
+The runtime now runs a real planner -> executor -> verifier loop inside live execution, while keeping the existing phase/story/task engine as the outer workflow shell.
 
 ### Why
 
-Sequential task execution alone is not enough for larger delivery work. The system needs to know what phase it is in, which story is active, which task is next, and whether each step actually satisfied its completion gate before moving forward.
+The repo already had structured execution through phases, stories, and tasks, but it still lacked true role transitions. A predefined task list is not the same thing as a runtime that can plan a bounded step, execute it, verify it, and branch based on that verification before it advances.
 
 ### How
 
-- define phases made of user stories and tasks
-- track current phase, story, and task pointers inside runtime state
-- execute tasks in order without skipping unfinished work
-- validate tasks and stories through structured validation gates
-- retry failed task gates and story gates within configured limits
-- record phase, story, task, gate, and retry events for inspection
+- keep phases, stories, and tasks as the higher-level workflow structure
+- invoke a planner step at live runtime to propose one bounded step at a time
+- execute the planned step through a real executor step handler
+- run a real verifier step that inspects planner intent, executor output, validation state, and retry history
+- branch in runtime based on verifier output: continue, retry the step, replan, or fail
+- consume planner, executor, and verifier context payloads from the Context Assembler during live execution
+- expose orchestration state through runtime task inspection APIs
 
 ### Purpose
 
-Add a structured execution backbone that prevents the runtime from claiming a larger body of work is complete when only part of it succeeded.
+Close the gap between workflow structure and true orchestration so the runtime only marks work complete after a verifier approves the execution result.
 
 ### Outcome
 
-The backend can now run a multi-step implementation plan, validate each task and story before advancing, and fail the run conservatively when retries are exhausted.
+The backend can now:
+
+- plan one bounded step at a time
+- execute that step through tools or model execution
+- verify whether the step actually matched intent
+- retry or replan when the verifier rejects the result
+- gate task completion on verifier approval instead of raw execution success alone
+- continue to use the existing phase/story/task engine for larger structured delivery work
 
 ### Architecture
 
-- phase execution state lives in `packages/agent-core/src/runtime`
-- phase validation gates and retry policy are enforced inside the persistent runtime service
-- `apps/server` accepts phase execution plans through the runtime task API
-- executor prompts and context payloads can now reflect the active phase, story, and task
+- orchestration state and branching logic live in `packages/agent-core/src/runtime`
+- phase/story/task execution still lives in `packages/agent-core/src/runtime` and now delegates task execution into the orchestration loop
+- role-scoped context payloads from `packages/agent-core/src/context` are now consumed during live planner, executor, and verifier execution
+- `apps/server` provides the runtime executor and exposes orchestration state through existing task APIs
+
+### Before This Phase
+
+Already present before this phase:
+
+- instruction runtime
+- persistent runtime loop
+- repo inspection tools
+- surgical editing
+- validation and recovery
+- context assembler
+- structured phase/story/task execution
+
+This phase adds the missing live role orchestration on top of those foundations.
 
 ### Status
 
@@ -270,7 +292,6 @@ The next major phase should build on these foundations instead of replacing them
 
 Likely next work:
 
-- planner, executor, and verifier step orchestration
 - richer prompt and context assembly
 - richer validation targets such as lint, typecheck, and targeted test execution
 - trace-level observability for edit attempts and recovery

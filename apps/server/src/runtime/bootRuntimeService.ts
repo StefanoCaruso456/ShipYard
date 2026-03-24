@@ -50,6 +50,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   return {
     runtimeService: createPersistentRuntimeService({
       instructionRuntime,
+      contextAssembler,
       store: createFileRunStore({
         filePath: runtimeStatePath
       }),

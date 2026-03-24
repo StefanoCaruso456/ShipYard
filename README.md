@@ -23,7 +23,7 @@ Keep the docs set small and intentional:
 
 - A persistent coding agent with a client, server, and shared packages
 - A repo structure that is ready for ongoing implementation phases
-- A starter contract for agent architecture, tracing, and product intent
+- A live backend runtime that now executes planner -> executor -> verifier orchestration on top of the existing phase/story/task workflow engine
 
 ## Why
 
@@ -32,13 +32,13 @@ The assignment is not about generating code quickly. It is about designing an ag
 ## How
 
 - `apps/client` is the operator-facing UI shell
-- `apps/server` is the future orchestration layer for the agent loop, tools, and traces
+- `apps/server` is the runtime host for task intake, orchestration, tools, and trace/debug APIs
 - `packages/shared` keeps the product brief and shared contracts in one place
-- `packages/agent-core` holds the starter agent decisions and runtime types
+- `packages/agent-core` holds instruction loading, context assembly, phase execution, orchestration, and runtime contracts
 
 ## Outcome
 
-This repo is now wired as a lean monorepo so we can keep building the coding agent on top of a clean structure.
+This repo now has a real backend orchestration loop: planner proposes a bounded step, executor performs it, verifier approves or rejects it, and the runtime branches accordingly while phases/stories/tasks provide the outer workflow structure.
 
 ## Tree
 

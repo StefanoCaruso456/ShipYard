@@ -2,6 +2,7 @@ import {
   cloneRunRecord,
   type AgentRunRecord,
   type AgentRunResult,
+  type AgentRuntimeStatus,
   type ExecuteRun,
   type Phase,
   type PhaseExecutionInput,
@@ -17,7 +18,9 @@ import {
   type ValidationGateKind,
   type ValidationGateResult
 } from "./types";
+import { executeOrchestrationLoop } from "./orchestration";
 import type { AgentInstructionRuntime } from "../instructions/types";
+import type { ContextAssembler } from "../context/types";
 import type { RunEvent } from "../validation/types";
 
 const DEFAULT_TASK_RETRIES = 1;
@@ -26,8 +29,10 @@ const DEFAULT_STORY_RETRIES = 1;
 type ExecutePhaseExecutionOptions = {
   run: AgentRunRecord;
   instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
   executeRun: ExecuteRun;
   persistRun: (run: AgentRunRecord) => void;
+  getRuntimeStatus: () => AgentRuntimeStatus;
 };
 
 type ExecutionFailure = Error & {
@@ -196,8 +201,10 @@ export async function executePhaseExecutionRun(
             story,
             task,
             instructionRuntime: options.instructionRuntime,
+            contextAssembler: options.contextAssembler,
             executeRun: options.executeRun,
-            persistRun: options.persistRun
+            persistRun: options.persistRun,
+            getRuntimeStatus: options.getRuntimeStatus
           });
         }
 
@@ -444,132 +451,97 @@ async function executeTask(options: {
   story: UserStory;
   task: Task;
   instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
   executeRun: ExecuteRun;
   persistRun: (run: AgentRunRecord) => void;
+  getRuntimeStatus: () => AgentRuntimeStatus;
 }) {
   const { run, phaseExecution, phase, story, task } = options;
+  task.status = "running";
+  task.failureReason = null;
+  phaseExecution.current = {
+    phaseId: phase.id,
+    storyId: story.id,
+    taskId: task.id
+  };
+  updateProgress(phaseExecution);
+  run.rollingSummary = {
+    text: `Executing ${phase.name} -> ${story.title} -> ${task.id}`,
+    updatedAt: new Date().toISOString(),
+    source: "result"
+  };
+  appendRunEvents(run, {
+    at: new Date().toISOString(),
+    type: "task_started",
+    phaseId: phase.id,
+    storyId: story.id,
+    taskId: task.id,
+    message: `Task ${task.id} started.`,
+    retryCount: task.retryCount
+  });
+  persist(options.persistRun, run);
 
-  while (true) {
-    task.status = "running";
-    task.failureReason = null;
-    phaseExecution.current = {
-      phaseId: phase.id,
-      storyId: story.id,
-      taskId: task.id
-    };
-    updateProgress(phaseExecution);
-    run.rollingSummary = {
-      text: `Executing ${phase.name} -> ${story.title} -> ${task.id}`,
-      updatedAt: new Date().toISOString(),
-      source: "result"
-    };
+  let result: AgentRunResult;
+
+  try {
+    result = await executeOrchestrationLoop({
+      run: createTaskScopedRun(run, phaseExecution, phase, story, task),
+      task,
+      instructionRuntime: options.instructionRuntime,
+      contextAssembler: options.contextAssembler,
+      executeRun: options.executeRun,
+      persistRun: (updatedRun) => {
+        run.orchestration = updatedRun.orchestration;
+        run.result = updatedRun.result;
+        run.error = updatedRun.error;
+        run.events = updatedRun.events;
+        run.validationStatus = updatedRun.validationStatus;
+        run.lastValidationResult = updatedRun.lastValidationResult;
+        run.rollingSummary = updatedRun.rollingSummary;
+        run.phaseExecution = phaseExecution;
+        persist(options.persistRun, run);
+      },
+      getRuntimeStatus: options.getRuntimeStatus,
+      maxStepRetries: phaseExecution.retryPolicy.maxTaskRetries,
+      maxReplans: phaseExecution.retryPolicy.maxReplans
+    });
+  } catch (error) {
+    const failure = createExecutionFailure(
+      error instanceof Error ? error.message : "Task execution failed unexpectedly."
+    );
+    task.retryCount = run.orchestration?.stepRetryCount ?? task.retryCount;
+    task.lastValidationResults = run.orchestration?.lastVerifierResult?.validationGateResults ?? null;
+    task.status = "failed";
+    task.failureReason = failure.message;
     appendRunEvents(run, {
       at: new Date().toISOString(),
-      type: "task_started",
+      type: "task_failed",
       phaseId: phase.id,
       storyId: story.id,
       taskId: task.id,
-      message: `Task ${task.id} started.`,
+      stepId: run.orchestration?.currentStep?.id ?? null,
+      message: failure.message,
       retryCount: task.retryCount
     });
     persist(options.persistRun, run);
+    throw failure;
+  }
 
-    let result: AgentRunResult;
+  const taskGateResults =
+    run.orchestration?.lastVerifierResult?.validationGateResults ?? evaluateTaskGates(task, result);
 
-    try {
-      result = await options.executeRun(createTaskScopedRun(run, phaseExecution, phase, story, task), {
-        instructionRuntime: options.instructionRuntime
-      });
-    } catch (error) {
-      const failure = createExecutionFailure(
-        error instanceof Error ? error.message : "Task execution failed unexpectedly."
-      );
-      task.status = "failed";
-      task.failureReason = failure.message;
-      appendRunEvents(run, {
-        at: new Date().toISOString(),
-        type: "task_failed",
-        phaseId: phase.id,
-        storyId: story.id,
-        taskId: task.id,
-        message: failure.message,
-        retryCount: task.retryCount
-      });
-      persist(options.persistRun, run);
+  task.retryCount = run.orchestration?.stepRetryCount ?? task.retryCount;
+  task.lastValidationResults = taskGateResults;
+  task.result = result;
+  run.result = result;
 
-      if (task.retryCount >= phaseExecution.retryPolicy.maxTaskRetries) {
-        throw failure;
-      }
-
-      task.retryCount += 1;
-      task.status = "pending";
-      appendRunEvents(run, {
-        at: new Date().toISOString(),
-        type: "retry_scheduled",
-        phaseId: phase.id,
-        storyId: story.id,
-        taskId: task.id,
-        message: `Retrying task ${task.id} after execution failure.`,
-        retryCount: task.retryCount
-      });
-      run.rollingSummary = {
-        text: `Retry scheduled for task ${task.id}`,
-        updatedAt: new Date().toISOString(),
-        source: "retry"
-      };
-      persist(options.persistRun, run);
-      continue;
-    }
-
-    const taskGateResults = evaluateTaskGates(task, result);
-    task.lastValidationResults = taskGateResults;
-    task.result = result;
-    run.result = result;
-
-    if (result.mode === "repo-tool" && result.toolResult?.ok) {
-      const validationResult = result.toolResult.data.validationResult ?? null;
-      run.lastValidationResult = validationResult;
-      run.validationStatus = validationResult?.success === false ? "failed" : "passed";
-    }
-
-    if (taskGateResults.every((gate) => gate.success)) {
-      task.status = "completed";
-      task.failureReason = null;
-      appendRunEvents(
-        run,
-        ...createGateEvents({
-          type: "validation_gate_passed",
-          phaseId: phase.id,
-          storyId: story.id,
-          taskId: task.id,
-          results: taskGateResults
-        }),
-        {
-          at: new Date().toISOString(),
-          type: "task_completed",
-          phaseId: phase.id,
-          storyId: story.id,
-          taskId: task.id,
-          message: `Task ${task.id} completed.`,
-          retryCount: task.retryCount
-        }
-      );
-      updateProgress(phaseExecution);
-      persist(options.persistRun, run);
-      return;
-    }
-
-    const taskFailureMessage = taskGateResults
-      .filter((gate) => !gate.success)
-      .map((gate) => gate.message)
-      .join(" ");
-
-    task.status = "failed";
-    task.failureReason = taskFailureMessage;
+  if (taskGateResults.every((gate) => gate.success)) {
+    task.status = "completed";
+    task.failureReason = null;
     appendRunEvents(
       run,
       ...createGateEvents({
-        type: "validation_gate_failed",
+        type: "validation_gate_passed",
         phaseId: phase.id,
         storyId: story.id,
         taskId: task.id,
@@ -577,39 +549,50 @@ async function executeTask(options: {
       }),
       {
         at: new Date().toISOString(),
-        type: "task_failed",
+        type: "task_completed",
         phaseId: phase.id,
         storyId: story.id,
         taskId: task.id,
-        message: taskFailureMessage,
+        stepId: run.orchestration?.currentStep?.id ?? null,
+        message: `Task ${task.id} completed.`,
         retryCount: task.retryCount
       }
     );
     updateProgress(phaseExecution);
     persist(options.persistRun, run);
+    return;
+  }
 
-    if (task.retryCount >= phaseExecution.retryPolicy.maxTaskRetries) {
-      throw createExecutionFailure(taskFailureMessage);
-    }
+  const taskFailureMessage = taskGateResults
+    .filter((gate) => !gate.success)
+    .map((gate) => gate.message)
+    .join(" ");
 
-    task.retryCount += 1;
-    task.status = "pending";
-    appendRunEvents(run, {
-      at: new Date().toISOString(),
-      type: "retry_scheduled",
+  task.status = "failed";
+  task.failureReason = taskFailureMessage;
+  appendRunEvents(
+    run,
+    ...createGateEvents({
+      type: "validation_gate_failed",
       phaseId: phase.id,
       storyId: story.id,
       taskId: task.id,
-      message: `Retrying task ${task.id} after validation gate failure.`,
+      results: taskGateResults
+    }),
+    {
+      at: new Date().toISOString(),
+      type: "task_failed",
+      phaseId: phase.id,
+      storyId: story.id,
+      taskId: task.id,
+      stepId: run.orchestration?.currentStep?.id ?? null,
+      message: taskFailureMessage,
       retryCount: task.retryCount
-    });
-    run.rollingSummary = {
-      text: `Retry scheduled for task ${task.id}`,
-      updatedAt: new Date().toISOString(),
-      source: "retry"
-    };
-    persist(options.persistRun, run);
-  }
+    }
+  );
+  updateProgress(phaseExecution);
+  persist(options.persistRun, run);
+  throw createExecutionFailure(taskFailureMessage);
 }
 
 function evaluateTaskGates(task: Task, result: AgentRunResult): ValidationGateResult[] {
@@ -802,6 +785,7 @@ function createTaskScopedRun(
     objective: task.expectedOutcome || story.title || phase.name,
     constraints: story.acceptanceCriteria.map((criterion) => `Acceptance criterion: ${criterion}`)
   });
+  scopedRun.orchestration = null;
   scopedRun.phaseExecution = phaseExecution;
 
   return scopedRun;
@@ -963,7 +947,11 @@ function normalizeRetryPolicy(
     maxStoryRetries:
       typeof value?.maxStoryRetries === "number" && value.maxStoryRetries >= 0
         ? value.maxStoryRetries
-        : DEFAULT_STORY_RETRIES
+        : DEFAULT_STORY_RETRIES,
+    maxReplans:
+      typeof value?.maxReplans === "number" && value.maxReplans >= 0
+        ? value.maxReplans
+        : DEFAULT_TASK_RETRIES
   };
 }
 

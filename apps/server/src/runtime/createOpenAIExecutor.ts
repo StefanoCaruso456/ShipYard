@@ -58,7 +58,10 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     const { text } = await generateTextImpl({
       model: openai(options.config.modelId),
       system: buildSystemPrompt(context.instructionRuntime),
-      prompt: buildTaskPrompt(run)
+      prompt: buildTaskPrompt(run, {
+        roleContextPrompt: context.roleContextPrompt ?? null,
+        plannedStep: context.plannedStep ?? null
+      })
     });
     const responseText = text.trim();
     const completedAt = new Date().toISOString();
@@ -87,14 +90,45 @@ function buildSystemPrompt(instructionRuntime: AgentInstructionRuntime) {
   ].join("\n\n");
 }
 
-function buildTaskPrompt(run: AgentRunRecord) {
+function buildTaskPrompt(
+  run: AgentRunRecord,
+  input: {
+    roleContextPrompt: string | null;
+    plannedStep: {
+      id: string;
+      title: string;
+      summary: string;
+      successCriteria: string[];
+      validationTargets: string[];
+    } | null;
+  }
+) {
   return [
     "Produce the next execution response for the operator.",
     run.title ? `Thread title: ${run.title}` : null,
     `Task instruction:\n${run.instruction}`,
+    input.plannedStep
+      ? [
+          "Planned step:",
+          `Step id: ${input.plannedStep.id}`,
+          `Title: ${input.plannedStep.title}`,
+          `Summary: ${input.plannedStep.summary}`,
+          input.plannedStep.successCriteria.length > 0
+            ? `Success criteria:\n${input.plannedStep.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}`
+            : null,
+          input.plannedStep.validationTargets.length > 0
+            ? `Planned validation targets:\n${input.plannedStep.validationTargets
+                .map((target) => `- ${target}`)
+                .join("\n")}`
+            : null
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : null,
     renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
     renderRunContext(run),
+    input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]

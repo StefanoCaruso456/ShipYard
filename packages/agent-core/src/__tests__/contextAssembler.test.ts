@@ -130,7 +130,8 @@ test("executor payload reflects the active phase execution task", async () => {
         },
         retryPolicy: {
           maxTaskRetries: 1,
-          maxStoryRetries: 1
+          maxStoryRetries: 1,
+          maxReplans: 1
         },
         lastFailureReason: null,
         phases: [
@@ -203,12 +204,38 @@ async function createAssemblerForTests() {
 }
 
 function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
+  const baseContext = {
+    objective: "Assemble role-scoped runtime context.",
+    constraints: ["Do not build orchestration yet.", "Keep the payload inspectable."],
+    relevantFiles: [
+      {
+        path: "src/example.ts",
+        excerpt: "export function greet() {}",
+        startLine: 1,
+        endLine: 1,
+        source: "read_file_range",
+        reason: "Target file for the next edit."
+      }
+    ],
+    validationTargets: ["pnpm --filter @shipyard/server typecheck"]
+  };
+
+  const baseResult: NonNullable<AgentRunRecord["result"]> = {
+    mode: "placeholder-execution",
+    summary: "Context assembly completed.",
+    instructionEcho: "Build the context assembler.",
+    skillId: "coding-agent",
+    completedAt: "2026-03-24T12:02:00.000Z"
+  };
+
   return {
-    id: "run-123",
-    title: "Implement context assembly",
-    instruction: "Build the context assembler and expose it through a debug route.",
-    simulateFailure: false,
-    toolRequest: {
+    id: overrides.id ?? "run-123",
+    title: overrides.title ?? "Implement context assembly",
+    instruction:
+      overrides.instruction ??
+      "Build the context assembler and expose it through a debug route.",
+    simulateFailure: overrides.simulateFailure ?? false,
+    toolRequest: overrides.toolRequest ?? {
       toolName: "edit_file_region",
       input: {
         path: "src/example.ts",
@@ -218,28 +245,17 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
       }
     },
     attachments: overrides.attachments ?? [],
-    context: {
-      objective: "Assemble role-scoped runtime context.",
-      constraints: ["Do not build orchestration yet.", "Keep the payload inspectable."],
-      relevantFiles: [
-        {
-          path: "src/example.ts",
-          excerpt: "export function greet() {}",
-          startLine: 1,
-          endLine: 1,
-          source: "read_file_range",
-          reason: "Target file for the next edit."
-        }
-      ],
-      validationTargets: ["pnpm --filter @shipyard/server typecheck"]
-    },
-    status: "completed",
-    createdAt: "2026-03-24T12:00:00.000Z",
-    startedAt: "2026-03-24T12:01:00.000Z",
-    completedAt: "2026-03-24T12:02:00.000Z",
-    retryCount: 0,
-    validationStatus: "passed",
-    lastValidationResult: {
+    context: overrides.context ?? baseContext,
+    status: overrides.status ?? "completed",
+    createdAt: overrides.createdAt ?? "2026-03-24T12:00:00.000Z",
+    startedAt: overrides.startedAt ?? "2026-03-24T12:01:00.000Z",
+    completedAt: overrides.completedAt ?? "2026-03-24T12:02:00.000Z",
+    retryCount: overrides.retryCount ?? 0,
+    validationStatus: overrides.validationStatus ?? "passed",
+    lastValidationResult:
+      "lastValidationResult" in overrides
+        ? overrides.lastValidationResult ?? null
+        : {
       success: true,
       type: "file",
       path: "src/example.ts",
@@ -247,21 +263,19 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
         unchangedOutsideRegion: true
       }
     },
-    rollingSummary: {
+    orchestration: overrides.orchestration ?? null,
+    phaseExecution: overrides.phaseExecution ?? undefined,
+    rollingSummary:
+      "rollingSummary" in overrides
+        ? overrides.rollingSummary ?? null
+        : {
       text: "Edited src/example.ts and validated the change.",
       updatedAt: "2026-03-24T12:02:00.000Z",
       source: "result"
     },
-    events: [],
-    error: null,
-    result: {
-      mode: "placeholder-execution",
-      summary: "Context assembly completed.",
-      instructionEcho: "Build the context assembler.",
-      skillId: "coding-agent",
-      completedAt: "2026-03-24T12:02:00.000Z"
-    },
-    ...overrides
+    events: overrides.events ?? [],
+    error: overrides.error ?? null,
+    result: "result" in overrides ? overrides.result ?? null : baseResult
   };
 }
 

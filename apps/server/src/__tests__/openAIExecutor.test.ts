@@ -103,6 +103,7 @@ function createRun(instruction: string): AgentRunRecord {
     retryCount: 0,
     validationStatus: "not_run",
     lastValidationResult: null,
+    orchestration: null,
     rollingSummary: null,
     events: [],
     error: null,

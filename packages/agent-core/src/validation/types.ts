@@ -39,6 +39,10 @@ export type RunEventType =
   | "validation_failed"
   | "rollback_succeeded"
   | "rollback_failed"
+  | "planner_step_proposed"
+  | "executor_step_completed"
+  | "verifier_decision_made"
+  | "replan_requested"
   | "retry_scheduled"
   | "execution_failed";
 
@@ -46,6 +50,7 @@ export type RunEvent = {
   at: string;
   type: RunEventType;
   message: string;
+  stepId?: string | null;
   phaseId?: string | null;
   storyId?: string | null;
   taskId?: string | null;

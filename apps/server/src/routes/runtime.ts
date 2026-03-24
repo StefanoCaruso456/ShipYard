@@ -373,6 +373,7 @@ function serializeRun(run: AgentRunRecord) {
     retryCount: run.retryCount,
     validationStatus: run.validationStatus,
     lastValidationResult: run.lastValidationResult,
+    orchestration: run.orchestration,
     phaseExecution: run.phaseExecution ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
@@ -924,6 +925,7 @@ function parseRetryPolicy(
   const candidate = value as {
     maxTaskRetries?: unknown;
     maxStoryRetries?: unknown;
+    maxReplans?: unknown;
   };
 
   if (
@@ -944,10 +946,20 @@ function parseRetryPolicy(
     };
   }
 
+  if (
+    candidate.maxReplans !== undefined &&
+    (typeof candidate.maxReplans !== "number" || candidate.maxReplans < 0)
+  ) {
+    return {
+      error: "phaseExecution.retryPolicy.maxReplans must be a non-negative number."
+    };
+  }
+
   return {
     value: {
       maxTaskRetries: candidate.maxTaskRetries as number | undefined,
-      maxStoryRetries: candidate.maxStoryRetries as number | undefined
+      maxStoryRetries: candidate.maxStoryRetries as number | undefined,
+      maxReplans: candidate.maxReplans as number | undefined
     }
   };
 }

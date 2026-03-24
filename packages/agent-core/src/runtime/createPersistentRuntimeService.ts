@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { ContextAssembler } from "../context/types";
+import { executeOrchestrationLoop } from "./orchestration";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
@@ -22,6 +24,7 @@ import type { RunEvent, ValidationResult } from "../validation/types";
 
 type CreatePersistentRuntimeServiceOptions = {
   instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
   store?: AgentRunStore;
   executeRun?: ExecuteRun;
 };
@@ -65,6 +68,7 @@ export function createPersistentRuntimeService(
       retryCount: 0,
       validationStatus: "not_run",
       lastValidationResult: null,
+      orchestration: null,
       phaseExecution: normalizePhaseExecutionInput(input.phaseExecution),
       rollingSummary: null,
       events: [],
@@ -222,13 +226,22 @@ export function createPersistentRuntimeService(
             ? await executePhaseExecutionRun({
                 run: runningRun,
                 instructionRuntime: options.instructionRuntime,
+                contextAssembler: options.contextAssembler,
                 executeRun,
                 persistRun: (updatedRun) => {
                   store.update(normalizeRunRecord(updatedRun));
-                }
+                },
+                getRuntimeStatus: () => getStatus()
               })
-            : await executeRun(runningRun, {
-                instructionRuntime: options.instructionRuntime
+            : await executeOrchestrationLoop({
+                run: runningRun,
+                instructionRuntime: options.instructionRuntime,
+                contextAssembler: options.contextAssembler,
+                executeRun,
+                persistRun: (updatedRun) => {
+                  store.update(normalizeRunRecord(updatedRun));
+                },
+                getRuntimeStatus: () => getStatus()
               });
           const completedAt = new Date().toISOString();
           const validationResult = extractValidationResult(result);
@@ -377,11 +390,12 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     attachments: normalizeRunAttachments(run.attachments),
     context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
-    validationStatus: run.validationStatus ?? "not_run",
-    lastValidationResult: run.lastValidationResult ?? null,
-    phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
-    rollingSummary: normalizeRollingSummary(run.rollingSummary),
-    events: Array.isArray(run.events) ? run.events : []
+            validationStatus: run.validationStatus ?? "not_run",
+            lastValidationResult: run.lastValidationResult ?? null,
+            orchestration: normalizeOrchestrationState(run.orchestration),
+            phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
+            rollingSummary: normalizeRollingSummary(run.rollingSummary),
+            events: Array.isArray(run.events) ? run.events : []
   };
 }
 
@@ -444,6 +458,28 @@ function normalizeRollingSummary(rollingSummary: AgentRunRecord["rollingSummary"
     text: rollingSummary.text.trim(),
     updatedAt: rollingSummary.updatedAt,
     source: rollingSummary.source
+  };
+}
+
+function normalizeOrchestrationState(orchestration: AgentRunRecord["orchestration"]) {
+  if (!orchestration) {
+    return null;
+  }
+
+  return {
+    status: orchestration.status,
+    iteration: typeof orchestration.iteration === "number" ? orchestration.iteration : 0,
+    stepRetryCount:
+      typeof orchestration.stepRetryCount === "number" ? orchestration.stepRetryCount : 0,
+    replanCount: typeof orchestration.replanCount === "number" ? orchestration.replanCount : 0,
+    maxStepRetries:
+      typeof orchestration.maxStepRetries === "number" ? orchestration.maxStepRetries : 1,
+    maxReplans: typeof orchestration.maxReplans === "number" ? orchestration.maxReplans : 1,
+    nextAction: orchestration.nextAction ?? null,
+    currentStep: orchestration.currentStep ?? null,
+    lastPlannerResult: orchestration.lastPlannerResult ?? null,
+    lastExecutorResult: orchestration.lastExecutorResult ?? null,
+    lastVerifierResult: orchestration.lastVerifierResult ?? null
   };
 }
 
