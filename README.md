@@ -62,3 +62,5 @@ pnpm dev
 - Railway hosts `apps/server` and PostgreSQL using `railway.json`.
 - In Vercel, set `VITE_API_URL` to the Railway server origin so the client calls the live API in production.
 - The runtime server reads `OPENAI_KEY` for Vercel AI SDK OpenAI calls. If the backend stays on Railway, set `OPENAI_KEY` there too. A Vercel env var alone will not reach the Railway runtime.
+- GitHub Actions now includes a production Vercel deploy workflow in `.github/workflows/vercel-production.yml` that runs on every push to `main`.
+- To enable that workflow, add these GitHub repository secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID`.
