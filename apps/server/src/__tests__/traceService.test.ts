@@ -14,8 +14,23 @@ import {
 } from "@shipyard/agent-core";
 
 import { createTraceService } from "../observability/createTraceService";
+import { resolveLangSmithTraceConfig } from "../observability/langsmithTracer";
 import { resolveOpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import { createRuntimeExecutor } from "../runtime/createRuntimeExecutor";
+
+test("resolveLangSmithTraceConfig prefers WORKSPACE_ID over the legacy fallback", () => {
+  const config = resolveLangSmithTraceConfig({
+    LANGSMITH_TRACING: "true",
+    LANGSMITH_API_KEY: "lsv2_test",
+    WORKSPACE_ID: "workspace-preferred",
+    LANGSMITH_WORKSPACE_ID: "workspace-legacy",
+    LANGSMITH_PROJECT: "shipyard-runtime-observability"
+  });
+
+  assert.equal(config.workspaceId, "workspace-preferred");
+  assert.equal(config.project, "shipyard-runtime-observability");
+  assert.equal(config.enabled, true);
+});
 
 test("local trace service records root and child spans", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-trace-service-"));
