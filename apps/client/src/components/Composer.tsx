@@ -10,7 +10,6 @@ type ComposerProps = {
   attachments: ComposerAttachment[];
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
-  backendConnected: boolean;
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onAttachmentsChange: (attachments: ComposerAttachment[]) => void;
@@ -24,7 +23,6 @@ export function Composer({
   attachments,
   feedback,
   submitting,
-  backendConnected,
   onComposerModeChange,
   onComposerValueChange,
   onAttachmentsChange,
@@ -90,31 +88,10 @@ export function Composer({
             >
               <PlusIcon />
             </button>
-            <label htmlFor={fileInputId} className="composer__tool-button">
-              Upload
-            </label>
-            <button type="button" className="composer__tool-button" aria-label="Command menu">
-              <CommandIcon />
-              <span>Command</span>
-            </button>
-            <button
-              type="button"
-              className={`composer__tool-button ${composerMode === "text" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("text")}
-            >
-              Text
-            </button>
-            <button
-              type="button"
-              className={`composer__tool-button ${composerMode === "image" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("image")}
-            >
-              Image
-            </button>
             <button
               type="button"
               className={`composer__tool-button ${composerMode === "voice" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("voice")}
+              onClick={() => onComposerModeChange(composerMode === "voice" ? "text" : "voice")}
             >
               <MicIcon />
               <span>Mic</span>
@@ -122,9 +99,6 @@ export function Composer({
           </div>
 
           <div className="composer__actions">
-            <span className={`runtime-pill runtime-pill--${backendConnected ? "ok" : "error"}`}>
-              {backendConnected ? "idle" : "error"}
-            </span>
             <button
               type="submit"
               className="composer__submit"
@@ -170,21 +144,6 @@ function PlusIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CommandIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M6.5 5.5a1.7 1.7 0 1 1 0 3.4H5.2v2.2h1.3a1.7 1.7 0 1 1 0 3.4 1.7 1.7 0 1 1 0-3.4h1.3V8.9H6.5a1.7 1.7 0 1 1 0-3.4zM13.5 5.5a1.7 1.7 0 1 1 0 3.4h-1.3v2.2h1.3a1.7 1.7 0 1 1 0 3.4 1.7 1.7 0 1 1 0-3.4h-1.3V8.9h1.3a1.7 1.7 0 1 1 0-3.4z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

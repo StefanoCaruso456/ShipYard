@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { ThreadList } from "./ThreadList";
 
 import type { SidebarNavItemId, ThreadGroup } from "../types";
@@ -51,21 +49,6 @@ export function Sidebar({
         <span>New thread</span>
       </button>
 
-      <nav className="sidebar__nav">
-        <SidebarNavButton
-          icon={<ClockIcon />}
-          label="Automations"
-          active={activeNav === "automations"}
-          onClick={() => onSelectNav("automations")}
-        />
-        <SidebarNavButton
-          icon={<SparkIcon />}
-          label="Skills"
-          active={activeNav === "skills"}
-          onClick={() => onSelectNav("skills")}
-        />
-      </nav>
-
       <section className="sidebar__threads">
         <div className="sidebar__threads-header">
           <strong>Threads</strong>
@@ -94,25 +77,6 @@ export function Sidebar({
   );
 }
 
-function SidebarNavButton({
-  icon,
-  label,
-  active,
-  onClick
-}: {
-  icon: ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className={`sidebar__nav-item ${active ? "is-active" : ""}`} onClick={onClick}>
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}
-
 function ComposeIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -125,30 +89,6 @@ function ComposeIcon() {
         strokeLinejoin="round"
       />
       <path d="M11.7 5l2.9 2.9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M10 6.5v3.7l2.5 1.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SparkIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M6 5.5h8a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 14 14H6a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 6 5.5z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path d="M7.5 9.8h5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M10 7.3l1.3 2.5L10 12.3 8.7 9.8 10 7.3z" fill="currentColor" />
     </svg>
   );
 }

@@ -15,13 +15,11 @@ import {
   buildPreviewThreads,
   buildRuntimeThread,
   emptyProjectBrief,
-  modeOptions,
   workspaceProjects
 } from "./mockData";
 import type {
   ComposerAttachment,
   ComposerMode,
-  ModeOption,
   ProgressEvent,
   ProjectPayload,
   RuntimeHealthResponse,
@@ -52,7 +50,6 @@ function App() {
   const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
   const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
-  const [mode, setMode] = useState<ModeOption>("worktree");
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
@@ -433,24 +430,16 @@ function App() {
       <TaskWorkspace
         activeNav={activeNav}
         project={activeProject}
-        projects={visibleProjects}
         projectBrief={projectBrief}
         thread={activeThread}
         runtimeStatus={runtimeStatus}
         instructions={instructions}
-        mode={mode}
-        modeOptions={modeOptions}
         composerMode={composerMode}
         composerValue={composerValue}
         composerAttachments={composerAttachments}
         feedback={feedback}
         submitting={submitting}
         backendConnected={backendConnected}
-        onProjectChange={(projectId) => {
-          setSelectedProjectId(projectId);
-          setActiveNav("projects");
-        }}
-        onModeChange={setMode}
         onComposerModeChange={setComposerMode}
         onComposerValueChange={setComposerValue}
         onComposerAttachmentsChange={setComposerAttachments}
