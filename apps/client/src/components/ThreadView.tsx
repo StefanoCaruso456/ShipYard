@@ -1,4 +1,5 @@
 import type { WorkspaceProject, WorkspaceThread } from "../types";
+import { AgentActivityFeed } from "./AgentActivityFeed";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type SuggestionCard = {
@@ -60,6 +61,10 @@ export function ThreadView({
       <div className="thread-view__stream">
         <AttachmentPreviewList attachments={thread.attachments} />
 
+        {(thread.activity?.length ?? 0) > 0 || thread.source === "live" ? (
+          <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
+        ) : null}
+
         {thread.progress.map((event) => (
           <div key={event.id} className={`event-row event-row--${event.tone}`}>
             <strong>{event.label}</strong>
@@ -77,11 +82,6 @@ export function ThreadView({
             <p>{message.body}</p>
           </article>
         ))}
-
-        <div className="agent-placeholder">
-          <strong>Agent updates</strong>
-          <p>Planner, executor, and verifier events will stream here as the runtime grows.</p>
-        </div>
       </div>
     </section>
   );

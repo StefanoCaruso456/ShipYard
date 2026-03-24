@@ -5,6 +5,7 @@ import type {
   AgentRunResult,
   ExecuteRun
 } from "@shipyard/agent-core";
+import { getActiveTraceScope } from "@shipyard/agent-core";
 import { generateText } from "ai";
 
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
@@ -52,30 +53,82 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     }
 
     if (!openai) {
+      getActiveTraceScope()?.activeSpan.addEvent("model_unavailable", {
+        message: "OPENAI_KEY is not configured on the runtime host.",
+        metadata: {
+          provider: options.config.provider,
+          modelId: options.config.modelId
+        }
+      });
       return createMissingKeyResult(run, context.instructionRuntime, options.config);
     }
 
-    const { text } = await generateTextImpl({
-      model: openai(options.config.modelId),
-      system: buildSystemPrompt(context.instructionRuntime),
-      prompt: buildTaskPrompt(run, {
-        roleContextPrompt: context.roleContextPrompt ?? null,
-        plannedStep: context.plannedStep ?? null
-      })
+    const traceScope = getActiveTraceScope();
+    const prompt = buildTaskPrompt(run, {
+      roleContextPrompt: context.roleContextPrompt ?? null,
+      plannedStep: context.plannedStep ?? null
     });
-    const responseText = text.trim();
-    const completedAt = new Date().toISOString();
+    const modelSpan = traceScope
+      ? await traceScope.activeSpan.startChild({
+          name: `model:${options.config.modelId}`,
+          spanType: "model",
+          inputSummary: context.plannedStep?.summary ?? summarizePrompt(run),
+          metadata: {
+            provider: options.config.provider,
+            modelId: options.config.modelId,
+            plannedStepId: context.plannedStep?.id ?? null,
+            roleContextSectionIds: context.roleContextSectionIds ?? [],
+            attachmentCount: run.attachments.length
+          }
+        })
+      : null;
 
-    return {
-      mode: "ai-sdk-openai",
-      summary: summarizeResponse(responseText),
-      responseText,
-      instructionEcho: run.instruction,
-      skillId: context.instructionRuntime.skill.meta.id,
-      completedAt,
-      provider: "openai",
-      modelId: options.config.modelId
-    };
+    try {
+      const generated = await generateTextImpl({
+        model: openai(options.config.modelId),
+        system: buildSystemPrompt(context.instructionRuntime),
+        prompt
+      });
+      const responseText = generated.text.trim();
+      const completedAt = new Date().toISOString();
+      const usage = {
+        inputTokens: generated.usage?.inputTokens ?? null,
+        outputTokens: generated.usage?.outputTokens ?? null,
+        totalTokens: generated.usage?.totalTokens ?? null,
+        providerLatencyMs: null,
+        estimatedCostUsd: null
+      };
+
+      modelSpan?.annotate({
+        provider: options.config.provider,
+        modelId: options.config.modelId,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens
+      });
+      await modelSpan?.end({
+        status: "completed",
+        outputSummary: summarizeResponse(responseText)
+      });
+
+      return {
+        mode: "ai-sdk-openai",
+        summary: summarizeResponse(responseText),
+        responseText,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt,
+        provider: "openai",
+        modelId: options.config.modelId,
+        usage
+      };
+    } catch (error) {
+      await modelSpan?.end({
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
   };
 }
 
@@ -234,6 +287,16 @@ function summarizeResponse(text: string) {
   }
 
   return `${compact.slice(0, 177).trimEnd()}...`;
+}
+
+function summarizePrompt(run: AgentRunRecord) {
+  const compact = run.instruction.replace(/\s+/g, " ").trim();
+
+  if (compact.length <= 120) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 117).trimEnd()}...`;
 }
 
 function formatBytes(size: number) {

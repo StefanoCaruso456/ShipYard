@@ -180,6 +180,80 @@ export type RuntimeTaskResponse = {
   task: RuntimeTask;
 };
 
+export type RuntimeTraceSpanType =
+  | "run"
+  | "phase"
+  | "story"
+  | "task"
+  | "context"
+  | "role"
+  | "tool"
+  | "validation"
+  | "retry"
+  | "rollback"
+  | "model";
+
+export type RuntimeTraceSpanStatus = "running" | "completed" | "failed";
+
+export type RuntimeTraceSpanEvent = {
+  id: string;
+  at: string;
+  name: string;
+  message?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type RuntimeTraceSpan = {
+  id: string;
+  runId: string;
+  parentId: string | null;
+  name: string;
+  spanType: RuntimeTraceSpanType;
+  status: RuntimeTraceSpanStatus;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  inputSummary: string | null;
+  outputSummary: string | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+  tags: string[];
+  events: RuntimeTraceSpanEvent[];
+};
+
+export type RuntimeTraceRunLog = {
+  runId: string;
+  rootSpanId: string | null;
+  updatedAt: string;
+  spans: RuntimeTraceSpan[];
+};
+
+export type RuntimeTraceResponse = {
+  runId: string;
+  observability: {
+    enabled: boolean;
+    backend: "local" | "local+langsmith";
+    localLogPath: string | null;
+    langsmithEnabled: boolean;
+    langsmithProject: string | null;
+    workspaceScoped: boolean;
+  } | null;
+  trace: RuntimeTraceRunLog;
+};
+
+export type AgentActivityItem = {
+  id: string;
+  kind: "span" | "event" | "summary";
+  badge: string;
+  label: string;
+  detail: string;
+  timestamp: string;
+  tone: "default" | "info" | "success" | "warning" | "danger";
+  depth: number;
+  status?: RuntimeTraceSpanStatus;
+  meta?: string[];
+};
+
 export type RuntimeInstructionResponse = {
   loadedAt: string;
   instructionPrecedence: string[];
@@ -308,6 +382,7 @@ export type WorkspaceThread = {
   attachments: AttachmentCard[];
   messages: ThreadMessage[];
   progress: ProgressEvent[];
+  activity?: AgentActivityItem[];
 };
 
 export type ThreadGroup = {

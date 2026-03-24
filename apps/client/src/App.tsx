@@ -6,6 +6,7 @@ import {
   fetchRuntimeHealth,
   fetchRuntimeInstructions,
   fetchRuntimeStatus,
+  fetchRuntimeTrace,
   fetchRuntimeTasks,
   submitRuntimeTask,
   transcribeRuntimeAudio
@@ -28,6 +29,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTraceRunLog,
   RuntimeTask,
   SidebarNavItemId,
   ThreadGroup,
@@ -47,6 +49,9 @@ function App() {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
   const [instructions, setInstructions] = useState<RuntimeInstructionResponse | null>(null);
   const [runtimeTasks, setRuntimeTasks] = useState<RuntimeTask[]>([]);
+  const [runtimeTracesByTaskId, setRuntimeTracesByTaskId] = useState<
+    Record<string, RuntimeTraceRunLog>
+  >({});
   const [selectedProjectId, setSelectedProjectId] = useState(workspaceProjects[0]?.id ?? "");
   const [selectedThreadIds, setSelectedThreadIds] = useState<Record<string, string | null>>({});
   const [draftThreadsByProject, setDraftThreadsByProject] = useState<Record<string, WorkspaceThread[]>>({});
@@ -185,10 +190,17 @@ function App() {
           candidate,
           runtimeTasks,
           draftThreadsByProject[candidate.id] ?? [],
-          runtimeAttachmentPreviewsByTaskId
+          runtimeAttachmentPreviewsByTaskId,
+          runtimeTracesByTaskId
         )
       })),
-    [draftThreadsByProject, runtimeAttachmentPreviewsByTaskId, runtimeTasks, visibleProjects]
+    [
+      draftThreadsByProject,
+      runtimeAttachmentPreviewsByTaskId,
+      runtimeTasks,
+      runtimeTracesByTaskId,
+      visibleProjects
+    ]
   );
 
   const activeProject =
@@ -201,6 +213,10 @@ function App() {
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
+  const activeRuntimeTask =
+    activeProject?.kind === "live" && activeThreadId
+      ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
+      : null;
 
   useEffect(() => {
     if (!activeProject || !activeThreadId) {
@@ -218,6 +234,62 @@ function App() {
       [activeProject.id]: null
     }));
   }, [activeGroup, activeProject, activeThreadId]);
+
+  useEffect(() => {
+    if (!activeRuntimeTask) {
+      return;
+    }
+
+    const cancelled = { value: false };
+    const activeTaskId = activeRuntimeTask.id;
+    const activeTaskStatus = activeRuntimeTask.status;
+
+    async function loadTraceSnapshot() {
+      try {
+        const payload = await fetchRuntimeTrace(activeTaskId);
+
+        if (cancelled.value) {
+          return;
+        }
+
+        setRuntimeTracesByTaskId((current) => ({
+          ...current,
+          [activeTaskId]: payload.trace
+        }));
+      } catch {
+        if (cancelled.value) {
+          return;
+        }
+
+        setRuntimeTracesByTaskId((current) => {
+          if (!(activeTaskId in current)) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[activeTaskId];
+          return next;
+        });
+      }
+    }
+
+    void loadTraceSnapshot();
+
+    if (activeTaskStatus !== "pending" && activeTaskStatus !== "running") {
+      return () => {
+        cancelled.value = true;
+      };
+    }
+
+    const interval = window.setInterval(() => {
+      void loadTraceSnapshot();
+    }, 2500);
+
+    return () => {
+      cancelled.value = true;
+      window.clearInterval(interval);
+    };
+  }, [activeRuntimeTask?.id, activeRuntimeTask?.status]);
 
   function buildInstructionPayload() {
     const trimmed = composerValue.trim();
@@ -533,13 +605,18 @@ function buildThreadsForProject(
   project: WorkspaceProject,
   runtimeTasks: RuntimeTask[],
   draftThreads: WorkspaceThread[],
-  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>,
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>
 ) {
   if (project.kind === "live") {
     return [
       ...draftThreads,
       ...runtimeTasks.map((task) =>
-        buildRuntimeThread(task, runtimeAttachmentPreviewsByTaskId[task.id] ?? [])
+        buildRuntimeThread(
+          task,
+          runtimeAttachmentPreviewsByTaskId[task.id] ?? [],
+          runtimeTracesByTaskId[task.id] ?? null
+        )
       )
     ];
   }
