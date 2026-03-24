@@ -42,6 +42,7 @@ export type RunEventType =
   | "planner_step_proposed"
   | "executor_step_completed"
   | "verifier_decision_made"
+  | "coordination_conflict_detected"
   | "replan_requested"
   | "retry_scheduled"
   | "execution_failed";

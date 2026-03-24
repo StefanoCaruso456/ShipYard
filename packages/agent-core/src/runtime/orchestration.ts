@@ -2,6 +2,20 @@ import type { ContextAssembler, RoleContextPayload } from "../context/types";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
 import type { RunEvent } from "../validation/types";
+import type { ExecutorAgentOutput } from "./agents/types";
+import { invokeExecutorAgent } from "./agents/executorAgent";
+import { invokePlannerAgent } from "./agents/plannerAgent";
+import { invokeVerifierAgent } from "./agents/verifierAgent";
+import type {
+  AgentHandoff
+} from "./coordinator/handoffs";
+import { createAgentHandoff, createAgentInvocation } from "./coordinator/handoffs";
+import {
+  collectVerificationConflicts,
+  createConflictRecord,
+  recordCoordinationConflicts
+} from "./coordinator/conflicts";
+import { mergeExecutorResult, mergePlannerResult, mergeVerifierResult } from "./coordinator/merge";
 import {
   cloneRunRecord,
   type AgentRunFailure,
@@ -34,11 +48,6 @@ type ExecuteOrchestrationLoopOptions = {
   getRuntimeStatus: () => AgentRuntimeStatus;
   maxStepRetries?: number;
   maxReplans?: number;
-};
-
-type ExecutorStepExecution = {
-  executorResult: ExecutorStepResult;
-  result: AgentRunResult | null;
 };
 
 type VerificationInput = {
@@ -85,66 +94,53 @@ export async function executeOrchestrationLoop(
         options.run,
         options.getRuntimeStatus()
       );
-      const plannerTraceScope = getActiveTraceScope();
-      const plannerSpan = plannerTraceScope
-        ? await plannerTraceScope.activeSpan.startChild({
-            name: `planner:${options.run.id}:${orchestration.iteration + 1}`,
-            spanType: "role",
-            inputSummary: "Planner is selecting the next bounded step.",
-            metadata: {
-              role: "planner",
-              iteration: orchestration.iteration + 1
-            }
-          })
-        : null;
-      plannerResult =
-        plannerSpan && plannerTraceScope
-          ? await runWithTraceScope(
-              {
-                ...plannerTraceScope,
-                activeSpan: plannerSpan
-              },
-              async () =>
-                planNextStep({
-                  run: options.run,
-                  task: options.task ?? null,
-                  payload: plannerPayload,
-                  iteration: orchestration.iteration + 1
-                })
-            )
-          : planNextStep({
-              run: options.run,
-              task: options.task ?? null,
-              payload: plannerPayload,
-              iteration: orchestration.iteration + 1
-            });
-      plannerSpan?.annotate({
-        stepId: plannerResult.step.id,
-        consumedContextSectionIds: plannerResult.consumedContextSectionIds,
-        validationTargetCount: plannerResult.step.validationTargets.length,
-        toolName: plannerResult.step.requiredTool ?? null
-      });
-      await plannerSpan?.end({
-        status: "completed",
-        outputSummary: plannerResult.summary
+      const plannerHandoff = createAgentHandoff({
+        runId: options.run.id,
+        stepId: null,
+        source: "coordinator",
+        target: "planner",
+        purpose: "plan_next_step",
+        payload: {
+          run: options.run,
+          task: options.task ?? null,
+          payload: plannerPayload,
+          iteration: orchestration.iteration + 1
+        }
       });
 
-      orchestration.iteration += 1;
-      orchestration.currentStep = plannerResult.step;
-      orchestration.lastPlannerResult = plannerResult;
-      orchestration.nextAction = null;
-      orchestration.status = "executing";
-      appendRunEvents(options.run, {
-        at: plannerResult.at,
-        type: "planner_step_proposed",
-        stepId: plannerResult.step.id,
-        message: plannerResult.summary
+      await traceHandoffCreation(plannerHandoff);
+
+      const plannerAgentResult = await invokePlannerAgent({
+        invocation: createAgentInvocation(plannerHandoff),
+        execute: planNextStep
       });
-      options.run.rollingSummary = {
-        text: plannerResult.summary,
-        updatedAt: plannerResult.at,
-        source: "result"
-      };
+
+      traceAgentResultReceipt(plannerAgentResult);
+
+      const plannedStepResult = requireAgentOutput({
+        result: plannerAgentResult,
+        failureCode: "planning_failed",
+        fallbackMessage: "Planner did not produce a bounded next step.",
+        run: options.run
+      });
+      plannerResult = plannedStepResult;
+
+      await runMergeWithTrace(
+        {
+          role: "planner",
+          stepId: plannedStepResult.step.id,
+          correlationId: plannerHandoff.correlationId,
+          summary: plannedStepResult.summary
+        },
+        async () => {
+          mergePlannerResult({
+            run: options.run,
+            orchestration,
+            plannerResult: plannedStepResult,
+            appendEvents: appendRunEvents
+          });
+        }
+      );
       persist(options.persistRun, options.run);
     }
 
@@ -171,76 +167,54 @@ export async function executeOrchestrationLoop(
     };
     persist(options.persistRun, options.run);
 
-    const executorTraceScope = getActiveTraceScope();
-    const executorSpan = executorTraceScope
-      ? await executorTraceScope.activeSpan.startChild({
-          name: `executor:${plannerResult.step.id}`,
-          spanType: "role",
-          inputSummary: plannerResult.step.summary,
-          metadata: {
-            role: "executor",
-            stepId: plannerResult.step.id,
-            toolName: plannerResult.step.requiredTool ?? null,
-            validationTargets: plannerResult.step.validationTargets
-          }
-        })
-      : null;
-    const execution =
-      executorSpan && executorTraceScope
-        ? await runWithTraceScope(
-            {
-              ...executorTraceScope,
-              activeSpan: executorSpan
-            },
-            async () =>
-              executeExecutorStep({
-                run: options.run,
-                plannerStep: plannerResult.step,
-                payload: executorPayload,
-                executeRun: options.executeRun,
-                instructionRuntime: options.instructionRuntime
-              })
-          )
-        : await executeExecutorStep({
-            run: options.run,
-            plannerStep: plannerResult.step,
-            payload: executorPayload,
-            executeRun: options.executeRun,
-            instructionRuntime: options.instructionRuntime
-          });
-    executorSpan?.annotate({
-      consumedContextSectionIds: execution.executorResult.consumedContextSectionIds,
-      changedFiles: execution.executorResult.changedFiles,
-      success: execution.executorResult.success,
-      mode: execution.executorResult.mode ?? null
-    });
-    await executorSpan?.end({
-      status: execution.executorResult.success ? "completed" : "failed",
-      outputSummary: execution.executorResult.summary,
-      error: execution.executorResult.error?.message ?? null
+    const executorHandoff = createAgentHandoff({
+      runId: options.run.id,
+      stepId: plannerResult.step.id,
+      source: "planner",
+      target: "executor",
+      purpose: "execute_planned_step",
+      payload: {
+        run: options.run,
+        plannerStep: plannerResult.step,
+        payload: executorPayload,
+        executeRun: options.executeRun,
+        instructionRuntime: options.instructionRuntime
+      }
     });
 
-    orchestration.lastExecutorResult = execution.executorResult;
-    orchestration.status = "verifying";
-    options.run.result = execution.result;
-    options.run.error = execution.executorResult.error ?? null;
-    applyExecutionValidationState(options.run, execution);
-    appendRunEvents(options.run, {
-      at: execution.executorResult.at,
-      type: "executor_step_completed",
-      stepId: execution.executorResult.stepId,
-      message: execution.executorResult.summary,
-      path: execution.executorResult.changedFiles[0] ?? execution.executorResult.error?.path ?? null,
-      toolName:
-        execution.executorResult.toolResult?.toolName ??
-        execution.executorResult.error?.toolName ??
-        null
+    await traceHandoffCreation(executorHandoff);
+
+    const executorAgentResult = await invokeExecutorAgent({
+      invocation: createAgentInvocation(executorHandoff),
+      execute: executeExecutorStep
     });
-    options.run.rollingSummary = {
-      text: execution.executorResult.summary,
-      updatedAt: execution.executorResult.at,
-      source: execution.executorResult.success ? "result" : "failure"
-    };
+
+    traceAgentResultReceipt(executorAgentResult);
+
+    const execution = requireAgentOutput({
+      result: executorAgentResult,
+      failureCode: "execution_failed",
+      fallbackMessage: "Executor agent failed unexpectedly.",
+      run: options.run
+    });
+
+    await runMergeWithTrace(
+      {
+        role: "executor",
+        stepId: plannerResult.step.id,
+        correlationId: executorHandoff.correlationId,
+        summary: execution.executorResult.summary
+      },
+      async () => {
+        mergeExecutorResult({
+          run: options.run,
+          orchestration,
+          execution,
+          appendEvents: appendRunEvents,
+          applyExecutionValidationState
+        });
+      }
+    );
     persist(options.persistRun, options.run);
 
     const verifierPayload = await buildRolePayload(
@@ -249,87 +223,74 @@ export async function executeOrchestrationLoop(
       options.run,
       options.getRuntimeStatus()
     );
-    const verifierTraceScope = getActiveTraceScope();
-    const verifierSpan = verifierTraceScope
-      ? await verifierTraceScope.activeSpan.startChild({
-          name: `verifier:${plannerResult.step.id}`,
-          spanType: "role",
-          inputSummary: `Verifier is checking ${plannerResult.step.id}.`,
-          metadata: {
-            role: "verifier",
-            stepId: plannerResult.step.id
-          }
-        })
-      : null;
-    const verifierResult =
-      verifierSpan && verifierTraceScope
-        ? await runWithTraceScope(
-            {
-              ...verifierTraceScope,
-              activeSpan: verifierSpan
-            },
-            async () =>
-              verifyStepResult({
-                run: options.run,
-                task: options.task ?? null,
-                plannerResult,
-                executorResult: execution.executorResult,
-                executionResult: execution.result,
-                payload: verifierPayload
-              })
-          )
-        : verifyStepResult({
-            run: options.run,
-            task: options.task ?? null,
-            plannerResult,
-            executorResult: execution.executorResult,
-            executionResult: execution.result,
-            payload: verifierPayload
-          });
-    verifierSpan?.annotate({
-      decision: verifierResult.decision,
-      intentMatched: verifierResult.intentMatched,
-      targetMatched: verifierResult.targetMatched,
-      validationPassed: verifierResult.validationPassed,
-      sideEffectsDetected: verifierResult.sideEffectsDetected,
-      consumedContextSectionIds: verifierResult.consumedContextSectionIds
-    });
-    await verifierSpan?.end({
-      status: verifierResult.decision === "fail" ? "failed" : "completed",
-      outputSummary: verifierResult.summary
+    const verifierHandoff = createAgentHandoff({
+      runId: options.run.id,
+      stepId: plannerResult.step.id,
+      source: "executor",
+      target: "verifier",
+      purpose: "verify_step_execution",
+      payload: {
+        run: options.run,
+        task: options.task ?? null,
+        plannerResult,
+        executorResult: execution.executorResult,
+        executionResult: execution.result,
+        payload: verifierPayload
+      }
     });
 
-    orchestration.lastVerifierResult = verifierResult;
-    orchestration.nextAction = verifierResult.decision;
-    if (verifierResult.validationGateResults?.some((gate) => !gate.success)) {
-      appendRunEvents(
-        options.run,
-        ...verifierResult.validationGateResults
-          .filter((gate) => !gate.success)
-          .map<RunEvent>((gate) => ({
-            at: verifierResult.at,
-            type: "validation_gate_failed",
-            stepId: verifierResult.stepId,
-            gateId: gate.gateId,
-            message: gate.message
-          }))
-      );
-    }
-    appendRunEvents(options.run, {
-      at: verifierResult.at,
-      type: "verifier_decision_made",
-      stepId: verifierResult.stepId,
-      message: verifierResult.summary
+    await traceHandoffCreation(verifierHandoff);
+
+    const verifierAgentResult = await invokeVerifierAgent({
+      invocation: createAgentInvocation(verifierHandoff),
+      execute: verifyStepResult
     });
-    options.run.rollingSummary = {
-      text: verifierResult.summary,
-      updatedAt: verifierResult.at,
-      source: verifierResult.decision === "continue" ? "result" : "failure"
-    };
+
+    traceAgentResultReceipt(verifierAgentResult);
+
+    const verifierResult = requireAgentOutput({
+      result: verifierAgentResult,
+      failureCode: "verification_failed",
+      fallbackMessage: "Verifier did not produce a decision.",
+      run: options.run
+    });
+    const conflicts = collectVerificationConflicts({
+      plannerResult,
+      execution,
+      verifierResult
+    });
+
+    await runMergeWithTrace(
+      {
+        role: "verifier",
+        stepId: plannerResult.step.id,
+        correlationId: verifierHandoff.correlationId,
+        summary: verifierResult.summary
+      },
+      async () => {
+        mergeVerifierResult({
+          run: options.run,
+          orchestration,
+          verifierResult,
+          appendEvents: appendRunEvents
+        });
+        recordCoordinationConflicts({
+          run: options.run,
+          conflicts,
+          appendEvents: appendRunEvents
+        });
+      }
+    );
     persist(options.persistRun, options.run);
 
     switch (verifierResult.decision) {
       case "continue": {
+        await traceCoordinatorDecision({
+          stepId: plannerResult.step.id,
+          decision: "continue",
+          summary: verifierResult.summary,
+          correlationId: verifierHandoff.correlationId
+        });
         orchestration.status = "completed";
         orchestration.nextAction = "continue";
         const completedResult =
@@ -353,6 +314,29 @@ export async function executeOrchestrationLoop(
       }
       case "retry_step":
         if (orchestration.stepRetryCount >= orchestration.maxStepRetries) {
+          const conflict = createConflictRecord({
+            type: "retry_cap_exceeded",
+            stepId: plannerResult.step.id,
+            reason: `${verifierResult.summary} Retry cap reached.`,
+            metadata: {
+              maxStepRetries: orchestration.maxStepRetries,
+              stepRetryCount: orchestration.stepRetryCount
+            }
+          });
+
+          recordCoordinationConflicts({
+            run: options.run,
+            conflicts: [conflict],
+            appendEvents: appendRunEvents
+          });
+          persist(options.persistRun, options.run);
+          await traceCoordinatorDecision({
+            stepId: plannerResult.step.id,
+            decision: "fail",
+            summary: `${verifierResult.summary} Retry cap reached.`,
+            correlationId: verifierHandoff.correlationId,
+            failed: true
+          });
           orchestration.status = "failed";
           throw createOrchestrationFailure(
             "verification_failed",
@@ -361,6 +345,12 @@ export async function executeOrchestrationLoop(
           );
         }
 
+        await traceCoordinatorDecision({
+          stepId: plannerResult.step.id,
+          decision: "retry_step",
+          summary: verifierResult.summary,
+          correlationId: verifierHandoff.correlationId
+        });
         orchestration.stepRetryCount += 1;
         options.run.retryCount += 1;
         orchestration.status = "executing";
@@ -380,6 +370,29 @@ export async function executeOrchestrationLoop(
         continue;
       case "replan":
         if (orchestration.replanCount >= orchestration.maxReplans) {
+          const conflict = createConflictRecord({
+            type: "replan_cap_exceeded",
+            stepId: plannerResult.step.id,
+            reason: `${verifierResult.summary} Replan cap reached.`,
+            metadata: {
+              maxReplans: orchestration.maxReplans,
+              replanCount: orchestration.replanCount
+            }
+          });
+
+          recordCoordinationConflicts({
+            run: options.run,
+            conflicts: [conflict],
+            appendEvents: appendRunEvents
+          });
+          persist(options.persistRun, options.run);
+          await traceCoordinatorDecision({
+            stepId: plannerResult.step.id,
+            decision: "fail",
+            summary: `${verifierResult.summary} Replan cap reached.`,
+            correlationId: verifierHandoff.correlationId,
+            failed: true
+          });
           orchestration.status = "failed";
           throw createOrchestrationFailure(
             "verification_failed",
@@ -388,6 +401,12 @@ export async function executeOrchestrationLoop(
           );
         }
 
+        await traceCoordinatorDecision({
+          stepId: plannerResult.step.id,
+          decision: "replan",
+          summary: verifierResult.summary,
+          correlationId: verifierHandoff.correlationId
+        });
         orchestration.replanCount += 1;
         options.run.retryCount += 1;
         orchestration.stepRetryCount = 0;
@@ -407,6 +426,13 @@ export async function executeOrchestrationLoop(
         persist(options.persistRun, options.run);
         continue;
       case "fail":
+        await traceCoordinatorDecision({
+          stepId: plannerResult.step.id,
+          decision: "fail",
+          summary: verifierResult.summary,
+          correlationId: verifierHandoff.correlationId,
+          failed: true
+        });
         orchestration.status = "failed";
         throw createOrchestrationFailure("verification_failed", verifierResult.summary, options.run);
     }
@@ -565,7 +591,7 @@ async function executeExecutorStep(input: {
   payload: RoleContextPayload | null;
   executeRun: ExecuteRun;
   instructionRuntime: AgentInstructionRuntime;
-}): Promise<ExecutorStepExecution> {
+}): Promise<ExecutorAgentOutput> {
   const at = new Date().toISOString();
   const scopedRun = cloneRunRecord(input.run);
 
@@ -1054,7 +1080,7 @@ function createOrchestrationFailure(
   return error;
 }
 
-function applyExecutionValidationState(run: AgentRunRecord, execution: ExecutorStepExecution) {
+function applyExecutionValidationState(run: AgentRunRecord, execution: ExecutorAgentOutput) {
   if (execution.result?.mode === "repo-tool" && execution.result.toolResult?.ok) {
     run.lastValidationResult = execution.result.toolResult.data.validationResult ?? null;
     run.validationStatus = execution.result.toolResult.data.validationResult.success ? "passed" : "failed";
@@ -1101,6 +1127,147 @@ function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
 
 function persist(persistRun: (run: AgentRunRecord) => void, run: AgentRunRecord) {
   persistRun(cloneRunRecord(run));
+}
+
+function requireAgentOutput<Output>(input: {
+  result: {
+    status: "success" | "failure";
+    output: Output | null;
+    error?: string | null;
+  };
+  failureCode: NonNullable<AgentRunFailure["code"]>;
+  fallbackMessage: string;
+  run: AgentRunRecord;
+}) {
+  if (input.result.status === "failure" || input.result.output === null) {
+    throw createOrchestrationFailure(
+      input.failureCode,
+      input.result.error ?? input.fallbackMessage,
+      input.run
+    );
+  }
+
+  return input.result.output;
+}
+
+async function traceHandoffCreation(handoff: AgentHandoff<unknown>) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  const span = await traceScope.activeSpan.startChild({
+    name: `handoff:${handoff.source}->${handoff.target}:${handoff.stepId ?? handoff.runId}`,
+    spanType: "handoff",
+    inputSummary: handoff.purpose,
+    metadata: {
+      source: handoff.source,
+      target: handoff.target,
+      stepId: handoff.stepId,
+      correlationId: handoff.correlationId
+    }
+  });
+
+  await span.end({
+    status: "completed",
+    outputSummary: `${handoff.source} -> ${handoff.target}: ${handoff.purpose}`
+  });
+}
+
+function traceAgentResultReceipt(input: {
+  role: string;
+  stepId: string | null;
+  status: "success" | "failure";
+  correlationId: string;
+  metadata?: Record<string, unknown>;
+  error?: string | null;
+}) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  traceScope.activeSpan.addEvent("agent_result_received", {
+    message: `${input.role} agent returned ${input.status}.`,
+    metadata: {
+      role: input.role,
+      stepId: input.stepId,
+      correlationId: input.correlationId,
+      ...(input.metadata ?? {}),
+      error: input.error ?? null
+    }
+  });
+}
+
+async function runMergeWithTrace(
+  input: {
+    role: "planner" | "executor" | "verifier";
+    stepId: string | null;
+    correlationId: string;
+    summary: string;
+  },
+  callback: () => Promise<void> | void
+) {
+  const traceScope = getActiveTraceScope();
+  const span = traceScope
+    ? await traceScope.activeSpan.startChild({
+        name: `merge:${input.role}:${input.stepId ?? "pending"}`,
+        spanType: "merge",
+        inputSummary: `Merge ${input.role} result into canonical run state.`,
+        metadata: {
+          role: input.role,
+          stepId: input.stepId,
+          correlationId: input.correlationId
+        }
+      })
+    : null;
+
+  try {
+    await callback();
+    await span?.end({
+      status: "completed",
+      outputSummary: input.summary
+    });
+  } catch (error) {
+    await span?.end({
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+}
+
+async function traceCoordinatorDecision(input: {
+  stepId: string | null;
+  decision: "continue" | "retry_step" | "replan" | "fail";
+  summary: string;
+  correlationId: string;
+  failed?: boolean;
+}) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  const span = await traceScope.activeSpan.startChild({
+    name: `coordinator:${input.decision}:${input.stepId ?? "pending"}`,
+    spanType: "coordinator",
+    inputSummary: input.summary,
+    metadata: {
+      decision: input.decision,
+      stepId: input.stepId,
+      correlationId: input.correlationId
+    }
+  });
+
+  await span.end({
+    status: input.failed ? "failed" : "completed",
+    outputSummary: input.summary,
+    error: input.failed ? input.summary : null
+  });
 }
 
 function extractSectionContent(payload: RoleContextPayload | null, sectionId: string) {

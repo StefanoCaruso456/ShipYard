@@ -315,17 +315,18 @@ export function createPersistentRuntimeService(
           } catch (error) {
             const failure = toRunFailure(error);
             const retrying = shouldRetryRun(runningRun, failure);
+            const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
             const nextRun = normalizeRunRecord({
-              ...(store.get(run.id) ?? runningRun),
+              ...latestStoredRun,
               status: retrying ? "pending" : "failed",
               completedAt: retrying ? null : new Date().toISOString(),
-              retryCount: retrying ? runningRun.retryCount + 1 : runningRun.retryCount,
-              validationStatus: deriveValidationStatus(runningRun, failure),
+              retryCount: retrying ? latestStoredRun.retryCount + 1 : latestStoredRun.retryCount,
+              validationStatus: deriveValidationStatus(latestStoredRun, failure),
               lastValidationResult:
-                failure.validationResult ?? runningRun.lastValidationResult ?? null,
+                failure.validationResult ?? latestStoredRun.lastValidationResult ?? null,
               events: appendRunEvents(
-                runningRun,
-                ...createFailureEvents(failure, runningRun.retryCount, retrying)
+                latestStoredRun,
+                ...createFailureEvents(failure, latestStoredRun.retryCount, retrying)
               ),
               rollingSummary: createFailureRollingSummary(failure, retrying),
               error: retrying ? null : failure,

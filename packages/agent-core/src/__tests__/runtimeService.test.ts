@@ -313,6 +313,7 @@ test("persistent runtime retries task validation gates before failing the full r
   assert.equal(task?.status, "completed");
   assert.ok(completedRun.events.some((event) => event.type === "validation_gate_failed"));
   assert.ok(completedRun.events.some((event) => event.type === "retry_scheduled"));
+  assert.ok(completedRun.events.some((event) => event.type === "coordination_conflict_detected"));
 });
 
 async function createInstructionRuntimeForTests() {
