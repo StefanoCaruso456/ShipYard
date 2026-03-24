@@ -64,6 +64,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     }
 
     const traceScope = getActiveTraceScope();
+    const startedAtMs = Date.now();
     const prompt = buildTaskPrompt(run, {
       roleContextPrompt: context.roleContextPrompt ?? null,
       plannedStep: context.plannedStep ?? null
@@ -92,10 +93,10 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       const responseText = generated.text.trim();
       const completedAt = new Date().toISOString();
       const usage = {
-        inputTokens: generated.usage?.inputTokens ?? null,
-        outputTokens: generated.usage?.outputTokens ?? null,
-        totalTokens: generated.usage?.totalTokens ?? null,
-        providerLatencyMs: null,
+        inputTokens: generated.totalUsage?.inputTokens ?? generated.usage?.inputTokens ?? null,
+        outputTokens: generated.totalUsage?.outputTokens ?? generated.usage?.outputTokens ?? null,
+        totalTokens: generated.totalUsage?.totalTokens ?? generated.usage?.totalTokens ?? null,
+        providerLatencyMs: Date.now() - startedAtMs,
         estimatedCostUsd: null
       };
 
@@ -104,11 +105,17 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         modelId: options.config.modelId,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
-        totalTokens: usage.totalTokens
+        totalTokens: usage.totalTokens,
+        providerLatencyMs: usage.providerLatencyMs,
+        providerMetadataPresent: generated.providerMetadata != null
       });
       await modelSpan?.end({
         status: "completed",
-        outputSummary: summarizeResponse(responseText)
+        outputSummary: summarizeResponse(responseText),
+        metadata: {
+          finishReason: generated.finishReason,
+          providerLatencyMs: usage.providerLatencyMs
+        }
       });
 
       return {
@@ -125,7 +132,10 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     } catch (error) {
       await modelSpan?.end({
         status: "failed",
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        metadata: {
+          providerLatencyMs: Date.now() - startedAtMs
+        }
       });
       throw error;
     }
@@ -271,7 +281,14 @@ function createMissingKeyResult(
     skillId: instructionRuntime.skill.meta.id,
     completedAt,
     provider: config.provider,
-    modelId: config.modelId
+    modelId: config.modelId,
+    usage: {
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      providerLatencyMs: null,
+      estimatedCostUsd: null
+    }
   };
 }
 
