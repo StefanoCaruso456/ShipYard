@@ -176,12 +176,17 @@ export type WorkspaceThread = {
   title: string;
   summary: string;
   status: WorkspaceThreadStatus;
-  source: "live" | "guide" | "preview";
+  source: "live" | "guide" | "preview" | "draft";
   createdLabel: string;
   updatedLabel: string;
   tags: string[];
   messages: ThreadMessage[];
   progress: ProgressEvent[];
+};
+
+export type ThreadGroup = {
+  project: WorkspaceProject;
+  threads: WorkspaceThread[];
 };
 
 export type SkillCatalogItem = {

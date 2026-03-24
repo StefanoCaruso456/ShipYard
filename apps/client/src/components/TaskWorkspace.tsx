@@ -1,25 +1,26 @@
 import type { FormEvent } from "react";
-import { useId, useRef } from "react";
 
+import { buildSkillCatalog, seededAutomations } from "../mockData";
 import type {
   ComposerAttachment,
   ComposerMode,
   ModeOption,
   ProjectPayload,
-  RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
   SidebarNavItemId,
   WorkspaceProject,
   WorkspaceThread
 } from "../types";
+import { Composer } from "./Composer";
+import { ThreadView } from "./ThreadView";
 
 type TaskWorkspaceProps = {
   activeNav: SidebarNavItemId;
   project: WorkspaceProject | null;
+  projects: WorkspaceProject[];
   projectBrief: ProjectPayload;
   thread: WorkspaceThread | null;
-  runtimeHealth: RuntimeHealthResponse | null;
   runtimeStatus: RuntimeStatusResponse | null;
   instructions: RuntimeInstructionResponse | null;
   mode: ModeOption;
@@ -29,25 +30,29 @@ type TaskWorkspaceProps = {
   composerAttachments: ComposerAttachment[];
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
-  simulateFailure: boolean;
   backendConnected: boolean;
-  repositoryUrl: string;
+  onProjectChange: (projectId: string) => void;
   onModeChange: (mode: ModeOption) => void;
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onComposerAttachmentsChange: (attachments: ComposerAttachment[]) => void;
-  onSimulateFailureChange: (value: boolean) => void;
+  onSelectSuggestion: (prompt: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onHandoff: () => void;
-  onOpenSettings: () => void;
+};
+
+const navTitles: Record<SidebarNavItemId, string> = {
+  projects: "Workspace",
+  skills: "Skills",
+  automations: "Automations",
+  settings: "Settings"
 };
 
 export function TaskWorkspace({
   activeNav,
   project,
+  projects,
   projectBrief,
   thread,
-  runtimeHealth,
   runtimeStatus,
   instructions,
   mode,
@@ -57,53 +62,56 @@ export function TaskWorkspace({
   composerAttachments,
   feedback,
   submitting,
-  simulateFailure,
   backendConnected,
-  repositoryUrl,
+  onProjectChange,
   onModeChange,
   onComposerModeChange,
   onComposerValueChange,
   onComposerAttachmentsChange,
-  onSimulateFailureChange,
-  onSubmit,
-  onHandoff,
-  onOpenSettings
+  onSelectSuggestion,
+  onSubmit
 }: TaskWorkspaceProps) {
-  const fileInputId = useId();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  function handleFileSelection(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) {
-      return;
-    }
-
-    const nextAttachments = Array.from(fileList).map((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || inferFileType(file.name)
-    }));
-
-    onComposerAttachmentsChange([...composerAttachments, ...nextAttachments]);
-  }
-
-  const composerPlaceholder =
-    composerMode === "image"
-      ? "Describe the image task or attach media..."
-      : composerMode === "voice"
-        ? "Voice mode is staged. Type the instruction or attach files..."
-        : "Ask for follow-up changes";
+  const runtimeState = backendConnected
+    ? runtimeStatus?.workerState === "running"
+      ? "running"
+      : "idle"
+    : "error";
+  const runtimeLabel = backendConnected
+    ? runtimeState === "running"
+      ? "Running"
+      : "Idle"
+    : "Error";
+  const activeTitle =
+    activeNav === "projects" ? thread?.title ?? "New thread" : navTitles[activeNav];
+  const suggestionCards = buildSuggestions(project);
+  const skills = buildSkillCatalog(instructions);
 
   return (
     <section className="workspace">
       <header className="workspace__header">
-        <div className="workspace__title">
-          <p>{project?.name ?? "Shipyard"}</p>
-          <h2>{thread?.title ?? "New thread"}</h2>
+        <div className="workspace__header-main">
+          <label className="workspace__project-select">
+            <span className="workspace__project-label">Project</span>
+            <select
+              value={project?.id ?? ""}
+              onChange={(event) => onProjectChange(event.target.value)}
+            >
+              {projects.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="workspace__title">
+            <p>{project?.environment ?? "Workspace"}</p>
+            <h2>{activeTitle}</h2>
+          </div>
         </div>
 
         <div className="workspace__actions">
-          <div className="workspace__modes">
+          <div className="workspace__modes" aria-label="Execution mode">
             {modeOptions.map((option) => (
               <button
                 key={option.id}
@@ -117,229 +125,185 @@ export function TaskWorkspace({
             ))}
           </div>
 
-          <button type="button" className="workspace__action-button" onClick={onHandoff}>
-            Handoff
-          </button>
-          <a className="workspace__action-button" href={repositoryUrl} target="_blank" rel="noreferrer">
-            Repo
-          </a>
-          <button type="button" className="workspace__icon-button" aria-label="Open settings" onClick={onOpenSettings}>
-            <PanelIcon />
-          </button>
+          <span className={`workspace__runtime workspace__runtime--${runtimeState}`}>
+            {runtimeLabel}
+          </span>
+
+          <div className="workspace__utility-buttons" aria-label="Utility controls">
+            <button type="button" className="workspace__icon-button" aria-label="Open thread history">
+              <HistoryIcon />
+            </button>
+            <button type="button" className="workspace__icon-button" aria-label="Open repo overview">
+              <RepoIcon />
+            </button>
+            <button type="button" className="workspace__icon-button" aria-label="Open split view">
+              <SplitIcon />
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="workspace__content">
-        {activeNav === "settings" ? (
-          <section className="settings-panel">
-            <div className="settings-panel__row">
-              <strong>Runtime</strong>
-              <span>{backendConnected ? "Live" : "Offline"}</span>
+        {activeNav === "projects" ? (
+          <ThreadView
+            project={project}
+            thread={thread}
+            runtimeState={runtimeState}
+            suggestions={suggestionCards}
+            onSelectSuggestion={onSelectSuggestion}
+          />
+        ) : activeNav === "skills" ? (
+          <section className="workspace-panel">
+            <div className="workspace-panel__header">
+              <h3>Skills</h3>
+              <span>{skills.length} available</span>
             </div>
-            <div className="settings-panel__row">
-              <strong>Worker</strong>
-              <span>{runtimeStatus?.workerState ?? "offline"}</span>
+            <div className="workspace-panel__stack">
+              {skills.map((skill) => (
+                <article key={skill.id} className="workspace-card">
+                  <strong>{skill.name}</strong>
+                  <p>{skill.description}</p>
+                  <div className="workspace-card__meta">
+                    <span>{skill.scope}</span>
+                    <span>{skill.status}</span>
+                  </div>
+                </article>
+              ))}
             </div>
-            <div className="settings-panel__row">
-              <strong>Queued runs</strong>
-              <span>{runtimeStatus?.queuedRuns ?? 0}</span>
+          </section>
+        ) : activeNav === "automations" ? (
+          <section className="workspace-panel">
+            <div className="workspace-panel__header">
+              <h3>Automations</h3>
+              <span>Preview surfaces</span>
             </div>
-            <div className="settings-panel__row">
-              <strong>Total runs</strong>
-              <span>{runtimeStatus?.totalRuns ?? 0}</span>
-            </div>
-            <div className="settings-panel__row">
-              <strong>Skill</strong>
-              <span>{instructions?.skill.meta.name ?? "Unavailable"}</span>
-            </div>
-            <div className="settings-panel__row">
-              <strong>Direction</strong>
-              <span>{projectBrief.nextStep}</span>
-            </div>
-            <div className="settings-panel__row">
-              <strong>Instruction runtime</strong>
-              <span>{runtimeHealth?.instructions.loadedAt ?? "Unavailable"}</span>
+            <div className="workspace-panel__stack">
+              {seededAutomations.map((automation) => (
+                <article key={automation.id} className="workspace-card">
+                  <strong>{automation.name}</strong>
+                  <p>{automation.note}</p>
+                  <div className="workspace-card__meta">
+                    <span>{automation.schedule}</span>
+                    <span>{automation.workspace}</span>
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         ) : (
-          <section className="conversation">
-            <div className="conversation__status">
-              <span>{backendConnected ? "Runtime live" : "Runtime offline"}</span>
-              <span>{thread?.updatedLabel ?? "No session selected"}</span>
+          <section className="workspace-panel">
+            <div className="workspace-panel__header">
+              <h3>Runtime settings</h3>
+              <span>{backendConnected ? "Connected" : "Offline"}</span>
             </div>
-
-            <div className="conversation__scroll">
-              {thread?.messages.length ? (
-                thread.messages.map((message) => (
-                  <article key={message.id} className={`message message--${message.role}`}>
-                    <div className="message__meta">
-                      <strong>{message.label}</strong>
-                      <span>{message.timestamp}</span>
-                    </div>
-                    <p>{message.body}</p>
-                  </article>
-                ))
-              ) : (
-                <div className="conversation__empty">
-                  <h3>Start a thread</h3>
-                  <p>Use the composer below to send a task to the runtime.</p>
-                </div>
-              )}
+            <div className="settings-grid">
+              <div className="settings-grid__row">
+                <span>Status</span>
+                <strong>{runtimeLabel}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Queued runs</span>
+                <strong>{runtimeStatus?.queuedRuns ?? 0}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Total runs</span>
+                <strong>{runtimeStatus?.totalRuns ?? 0}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Instruction skill</span>
+                <strong>{instructions?.skill.meta.name ?? "Unavailable"}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Next step</span>
+                <strong>{projectBrief.nextStep}</strong>
+              </div>
             </div>
           </section>
         )}
       </div>
 
-      <form className="composer" onSubmit={onSubmit}>
-        {composerAttachments.length > 0 ? (
-          <div className="composer__attachments">
-            {composerAttachments.map((attachment) => (
-              <span key={attachment.id} className="attachment-chip">
-                <span>{attachment.name}</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onComposerAttachmentsChange(
-                      composerAttachments.filter((candidate) => candidate.id !== attachment.id)
-                    )
-                  }
-                  aria-label={`Remove ${attachment.name}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        <div className="composer__field">
-          <textarea
-            value={composerValue}
-            onChange={(event) => onComposerValueChange(event.target.value)}
-            placeholder={composerPlaceholder}
-            rows={5}
-          />
-        </div>
-
-        <div className="composer__toolbar">
-          <div className="composer__tools">
-            <button
-              type="button"
-              className="composer__tool-button composer__tool-button--icon"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Upload files"
-            >
-              <PlusIcon />
-            </button>
-
-            <label htmlFor={fileInputId} className="composer__file-trigger">
-              Upload
-            </label>
-
-            <button
-              type="button"
-              className={`composer__tool-button ${composerMode === "text" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("text")}
-            >
-              Text
-            </button>
-            <button
-              type="button"
-              className={`composer__tool-button ${composerMode === "image" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("image")}
-            >
-              Image
-            </button>
-            <button
-              type="button"
-              className={`composer__tool-button ${composerMode === "voice" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange("voice")}
-            >
-              <MicIcon />
-              <span>Mic</span>
-            </button>
-
-            <label className="composer__toggle">
-              <input
-                type="checkbox"
-                checked={simulateFailure}
-                onChange={(event) => onSimulateFailureChange(event.target.checked)}
-              />
-              <span>Fail path</span>
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            className="composer__submit"
-            disabled={submitting || project?.kind !== "live" || !backendConnected}
-          >
-            {submitting ? "Sending..." : "Send"}
-          </button>
-        </div>
-
-        {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
-
-        <input
-          id={fileInputId}
-          ref={fileInputRef}
-          className="composer__file-input"
-          type="file"
-          multiple
-          accept=".png,.pdf,.csv,image/*"
-          onChange={(event) => {
-            handleFileSelection(event.target.files);
-            event.currentTarget.value = "";
-          }}
-        />
-      </form>
+      <Composer
+        project={project}
+        composerMode={composerMode}
+        composerValue={composerValue}
+        attachments={composerAttachments}
+        feedback={feedback}
+        submitting={submitting}
+        backendConnected={backendConnected}
+        onComposerModeChange={onComposerModeChange}
+        onComposerValueChange={onComposerValueChange}
+        onAttachmentsChange={onComposerAttachmentsChange}
+        onSubmit={onSubmit}
+      />
     </section>
   );
 }
 
-function inferFileType(fileName: string) {
-  if (fileName.toLowerCase().endsWith(".pdf")) {
-    return "application/pdf";
-  }
+function buildSuggestions(project: WorkspaceProject | null) {
+  const label = project?.name ?? "Shipyard";
 
-  if (fileName.toLowerCase().endsWith(".csv")) {
-    return "text/csv";
-  }
-
-  return "application/octet-stream";
+  return [
+    {
+      id: "suggestion-1",
+      title: "Plan the next feature",
+      prompt: `Map the next implementation step for ${label} and keep it scoped.`
+    },
+    {
+      id: "suggestion-2",
+      title: "Review runtime status",
+      prompt: `Summarize the current runtime state for ${label} and identify the next backend task.`
+    },
+    {
+      id: "suggestion-3",
+      title: "Refine the frontend shell",
+      prompt: `Review the current workspace shell against the frontend UI rules and suggest the next improvement.`
+    },
+    {
+      id: "suggestion-4",
+      title: "Draft a coding task",
+      prompt: `Create a clear task prompt for the next coding step in ${label}.`
+    }
+  ];
 }
 
-function PanelIcon() {
+function HistoryIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path
-        d="M4.5 5.5h4.3v9H4.5zM11.2 5.5h4.3v4.3h-4.3zM11.2 11.2h4.3v3.8h-4.3z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MicIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path
-        d="M10 4.5a2 2 0 0 1 2 2v3a2 2 0 0 1-4 0v-3a2 2 0 0 1 2-2zM6.5 9.8a3.5 3.5 0 0 0 7 0M10 13.3v2.2M7.8 15.5h4.4"
+        d="M5.5 6.5V3.8M5.5 3.8H8M5.5 3.8A7 7 0 1 1 3 9.2"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 6.7v3.4l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RepoIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M6.2 5h7.6A1.2 1.2 0 0 1 15 6.2v7.6a1.2 1.2 0 0 1-1.2 1.2H6.2A1.2 1.2 0 0 1 5 13.8V6.2A1.2 1.2 0 0 1 6.2 5z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path d="M7.5 8h5M7.5 10.5h5M7.5 13h3.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SplitIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M4.8 5.2h10.4A1.2 1.2 0 0 1 16.4 6.4v7.2a1.2 1.2 0 0 1-1.2 1.2H4.8a1.2 1.2 0 0 1-1.2-1.2V6.4a1.2 1.2 0 0 1 1.2-1.2zM10 5.2v9.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
       />
     </svg>
   );

@@ -12,7 +12,6 @@ import {
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import {
-  buildGuideThread,
   buildPreviewThreads,
   buildRuntimeThread,
   emptyProjectBrief,
@@ -23,41 +22,44 @@ import type {
   ComposerAttachment,
   ComposerMode,
   ModeOption,
+  ProgressEvent,
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
   RuntimeTask,
   SidebarNavItemId,
+  ThreadGroup,
+  ThreadMessage,
   WorkspaceProject,
   WorkspaceThread
 } from "./types";
 
-const repositoryUrl = "https://github.com/StefanoCaruso456/ShipYard";
+type Feedback = {
+  tone: "success" | "danger" | "info";
+  text: string;
+};
 
 function App() {
-  const [project, setProject] = useState<ProjectPayload>(emptyProjectBrief);
+  const [projectBrief, setProjectBrief] = useState<ProjectPayload>(emptyProjectBrief);
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealthResponse | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
   const [instructions, setInstructions] = useState<RuntimeInstructionResponse | null>(null);
   const [runtimeTasks, setRuntimeTasks] = useState<RuntimeTask[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("shipyard-runtime");
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(workspaceProjects[0]?.id ?? "");
+  const [selectedThreadIds, setSelectedThreadIds] = useState<Record<string, string | null>>({});
+  const [draftThreadsByProject, setDraftThreadsByProject] = useState<Record<string, WorkspaceThread[]>>({});
+  const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
+  const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
   const [mode, setMode] = useState<ModeOption>("worktree");
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
-  const [simulateFailure, setSimulateFailure] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
-  const [submissionFeedback, setSubmissionFeedback] = useState<{
-    tone: "success" | "danger" | "info";
-    text: string;
-  } | null>(null);
+  const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
-  const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
 
   async function loadProjectData(cancelled?: { value: boolean }) {
     try {
@@ -67,7 +69,7 @@ function App() {
         return;
       }
 
-      setProject(payload);
+      setProjectBrief(payload);
       setProjectError(null);
     } catch (error) {
       if (cancelled?.value) {
@@ -77,7 +79,7 @@ function App() {
       setProjectError(
         error instanceof Error
           ? error.message
-          : "Project brief unavailable. Rendering the seeded shell instead."
+          : "Project brief unavailable. Falling back to the local shell copy."
       );
     }
   }
@@ -115,11 +117,7 @@ function App() {
     setRuntimeStatus(statusResult.status === "fulfilled" ? statusResult.value : null);
     setRuntimeTasks(tasksResult.status === "fulfilled" ? tasksResult.value.tasks : []);
 
-    if (
-      healthResult.status === "fulfilled" &&
-      statusResult.status === "fulfilled" &&
-      tasksResult.status === "fulfilled"
-    ) {
+    if (statusResult.status === "fulfilled" || healthResult.status === "fulfilled") {
       setRuntimeError(null);
       return;
     }
@@ -165,48 +163,56 @@ function App() {
     [hiddenProjectIds, renamedProjectIds]
   );
 
+  useEffect(() => {
+    if (!visibleProjects.length) {
+      return;
+    }
+
+    if (!visibleProjects.some((project) => project.id === selectedProjectId)) {
+      setSelectedProjectId(visibleProjects[0].id);
+    }
+  }, [selectedProjectId, visibleProjects]);
+
+  const threadGroups = useMemo<ThreadGroup[]>(
+    () =>
+      visibleProjects.map((candidate) => ({
+        project: candidate,
+        threads: buildThreadsForProject(candidate, runtimeTasks, draftThreadsByProject[candidate.id] ?? [])
+      })),
+    [draftThreadsByProject, runtimeTasks, visibleProjects]
+  );
+
   const activeProject =
     visibleProjects.find((candidate) => candidate.id === selectedProjectId) ?? visibleProjects[0] ?? null;
-
-  useEffect(() => {
-    if (!activeProject) {
-      return;
-    }
-
-    if (activeProject.id !== selectedProjectId) {
-      setSelectedProjectId(activeProject.id);
-    }
-  }, [activeProject, selectedProjectId]);
-
-  const allThreads = activeProject
-    ? buildThreads(activeProject, project, runtimeHealth, runtimeStatus, instructions, runtimeTasks)
-    : [];
-
-  useEffect(() => {
-    if (allThreads.length === 0) {
-      setSelectedThreadId(null);
-      return;
-    }
-
-    if (!selectedThreadId || !allThreads.some((thread) => thread.id === selectedThreadId)) {
-      setSelectedThreadId(allThreads[0].id);
-    }
-  }, [allThreads, selectedThreadId]);
-
-  const activeThread = allThreads.find((thread) => thread.id === selectedThreadId) ?? null;
+  const activeThreadId = activeProject ? selectedThreadIds[activeProject.id] ?? null : null;
+  const activeGroup = activeProject
+    ? threadGroups.find((candidate) => candidate.project.id === activeProject.id) ?? null
+    : null;
+  const activeThread =
+    activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
+  const backendConnected =
+    runtimeStatus !== null || runtimeHealth?.status === "ok";
   const runtimeTone =
-    runtimeHealth?.status === "ok"
-      ? runtimeStatus?.workerState === "running"
-        ? "busy"
-        : "ready"
-      : "offline";
+    !backendConnected ? "offline" : runtimeStatus?.workerState === "running" ? "busy" : "ready";
   const runtimeLabel =
-    runtimeHealth?.status === "ok"
-      ? runtimeStatus?.workerState === "running"
-        ? "Processing"
-        : "Healthy"
-      : "Offline";
-  const backendConnected = runtimeHealth?.status === "ok";
+    !backendConnected ? "Offline" : runtimeStatus?.workerState === "running" ? "Running" : "Healthy";
+
+  useEffect(() => {
+    if (!activeProject || !activeThreadId) {
+      return;
+    }
+
+    const threadExists = activeGroup?.threads.some((candidate) => candidate.id === activeThreadId);
+
+    if (threadExists) {
+      return;
+    }
+
+    setSelectedThreadIds((current) => ({
+      ...current,
+      [activeProject.id]: null
+    }));
+  }, [activeGroup, activeProject, activeThreadId]);
 
   function buildInstructionPayload() {
     const trimmed = composerValue.trim();
@@ -218,26 +224,32 @@ function App() {
     return [trimmed, attachmentSummary].filter(Boolean).join("\n\n");
   }
 
-  async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  function handleCreateThread() {
     if (!activeProject) {
       return;
     }
 
-    if (activeProject.kind !== "live") {
-      setSubmissionFeedback({
-        tone: "info",
-        text: "Switch to Shipyard Runtime to submit a live task. Preview workspaces stay UI-only."
-      });
-      return;
-    }
+    const thread = createDraftThread(activeProject.name);
 
-    if (!backendConnected) {
-      setSubmissionFeedback({
-        tone: "danger",
-        text: "Runtime API is offline. Start the server or point VITE_API_URL at the live backend."
-      });
+    setDraftThreadsByProject((current) => ({
+      ...current,
+      [activeProject.id]: [thread, ...(current[activeProject.id] ?? [])]
+    }));
+    setSelectedThreadIds((current) => ({
+      ...current,
+      [activeProject.id]: thread.id
+    }));
+    setActiveNav("projects");
+    setComposerValue("");
+    setComposerAttachments([]);
+    setComposerMode("text");
+    setSubmissionFeedback(null);
+  }
+
+  async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!activeProject) {
       return;
     }
 
@@ -251,35 +263,81 @@ function App() {
       return;
     }
 
+    const draftId = activeThread?.source === "draft" ? activeThread.id : createDraftId();
+    const optimisticThread = buildDraftSubmissionThread({
+      existingThread: activeThread?.source === "draft" ? activeThread : null,
+      threadId: draftId,
+      instruction,
+      backendConnected: activeProject.kind === "live" && backendConnected
+    });
+
+    setDraftThreadsByProject((current) => ({
+      ...current,
+      [activeProject.id]: [
+        optimisticThread,
+        ...(current[activeProject.id] ?? []).filter((candidate) => candidate.id !== draftId)
+      ]
+    }));
+    setSelectedThreadIds((current) => ({
+      ...current,
+      [activeProject.id]: draftId
+    }));
+    setActiveNav("projects");
+    setComposerValue("");
+    setComposerAttachments([]);
+    setComposerMode("text");
+
+    if (activeProject.kind !== "live" || !backendConnected) {
+      setSubmissionFeedback({
+        tone: "info",
+        text:
+          activeProject.kind === "live"
+            ? "Saved locally. Start the runtime to send live tasks."
+            : "Saved locally in this preview workspace."
+      });
+      return;
+    }
+
     setSubmitting(true);
     setSubmissionFeedback(null);
 
     try {
       const response = await submitRuntimeTask({
         instruction,
-        simulateFailure
+        title: optimisticThread.title
       });
 
-      setSelectedProjectId("shipyard-runtime");
-      setSelectedThreadId(response.task.id);
-      setActiveNav("projects");
-      setComposerValue("");
-      setComposerAttachments([]);
-      setComposerMode("text");
-      setSimulateFailure(false);
+      await loadRuntimeSnapshot();
+
+      setDraftThreadsByProject((current) => ({
+        ...current,
+        [activeProject.id]: (current[activeProject.id] ?? []).filter(
+          (candidate) => candidate.id !== draftId
+        )
+      }));
+      setSelectedThreadIds((current) => ({
+        ...current,
+        [activeProject.id]: response.task.id
+      }));
       setSubmissionFeedback({
         tone: "success",
         text: "Thread accepted by the persistent runtime."
       });
-
-      await loadRuntimeSnapshot();
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Task submission failed. Check the runtime API and try again.";
+
+      setDraftThreadsByProject((current) => ({
+        ...current,
+        [activeProject.id]: (current[activeProject.id] ?? []).map((candidate) =>
+          candidate.id === draftId ? markDraftThreadFailed(candidate, message) : candidate
+        )
+      }));
       setSubmissionFeedback({
         tone: "danger",
-        text:
-          error instanceof Error
-            ? error.message
-            : "Task submission failed. Check the runtime API and try again."
+        text: message
       });
     } finally {
       setSubmitting(false);
@@ -309,59 +367,75 @@ function App() {
     if (visibleProjects.length <= 1) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Keep at least one session visible in the sidebar."
+        text: "Keep at least one project visible in the sidebar."
       });
       return;
     }
 
-    const nextProjects = visibleProjects.filter((candidate) => candidate.id !== projectId);
-
     setHiddenProjectIds((current) => [...current, projectId]);
+    setDraftThreadsByProject((current) => {
+      const next = { ...current };
+      delete next[projectId];
+      return next;
+    });
 
-    if (selectedProjectId === projectId && nextProjects[0]) {
-      setSelectedProjectId(nextProjects[0].id);
-      setActiveNav("projects");
+    if (selectedProjectId === projectId) {
+      const nextProject = visibleProjects.find((candidate) => candidate.id !== projectId);
+
+      if (nextProject) {
+        setSelectedProjectId(nextProject.id);
+        setActiveNav("projects");
+      }
     }
   }
+
+  const feedback =
+    submissionFeedback ??
+    (runtimeError
+      ? {
+          tone: "danger" as const,
+          text: runtimeError
+        }
+      : projectError
+        ? {
+            tone: "info" as const,
+            text: projectError
+          }
+        : null);
 
   return (
     <main className="app-shell">
       <Sidebar
-        projects={visibleProjects}
-        threads={allThreads}
+        groups={threadGroups}
         activeProjectId={activeProject?.id ?? null}
-        activeThreadId={selectedThreadId}
+        activeThreadId={activeThreadId}
+        activeNav={activeNav}
         runtimeTone={runtimeTone}
         runtimeLabel={runtimeLabel}
         onSelectProject={(projectId) => {
           setSelectedProjectId(projectId);
           setActiveNav("projects");
         }}
-        onSelectThread={(threadId) => {
-          setSelectedThreadId(threadId);
+        onSelectThread={(projectId, threadId) => {
+          setSelectedProjectId(projectId);
+          setSelectedThreadIds((current) => ({
+            ...current,
+            [projectId]: threadId
+          }));
           setActiveNav("projects");
         }}
-        onCreateThread={() => {
-          setActiveNav("projects");
-          setComposerValue("");
-          setComposerAttachments([]);
-          setComposerMode("text");
-          setSubmissionFeedback({
-            tone: "info",
-            text: "Compose a new task below and send it to the runtime."
-          });
-        }}
+        onCreateThread={handleCreateThread}
         onRenameProject={handleRenameProject}
         onDeleteProject={handleDeleteProject}
-        onOpenSettings={() => setActiveNav("settings")}
+        onSelectNav={setActiveNav}
       />
 
       <TaskWorkspace
         activeNav={activeNav}
         project={activeProject}
-        projectBrief={project}
+        projects={visibleProjects}
+        projectBrief={projectBrief}
         thread={activeThread}
-        runtimeHealth={runtimeHealth}
         runtimeStatus={runtimeStatus}
         instructions={instructions}
         mode={mode}
@@ -369,58 +443,178 @@ function App() {
         composerMode={composerMode}
         composerValue={composerValue}
         composerAttachments={composerAttachments}
-        feedback={
-          submissionFeedback ??
-          (runtimeError
-            ? {
-                tone: "danger" as const,
-                text: runtimeError
-              }
-            : projectError
-              ? {
-                  tone: "info" as const,
-                  text: projectError
-                }
-              : null)
-        }
+        feedback={feedback}
         submitting={submitting}
-        simulateFailure={simulateFailure}
         backendConnected={backendConnected}
-        repositoryUrl={repositoryUrl}
+        onProjectChange={(projectId) => {
+          setSelectedProjectId(projectId);
+          setActiveNav("projects");
+        }}
         onModeChange={setMode}
         onComposerModeChange={setComposerMode}
         onComposerValueChange={setComposerValue}
         onComposerAttachmentsChange={setComposerAttachments}
-        onSimulateFailureChange={setSimulateFailure}
+        onSelectSuggestion={(prompt) => {
+          setActiveNav("projects");
+          setComposerMode("text");
+          setComposerValue(prompt);
+        }}
         onSubmit={handleSubmitTask}
-        onHandoff={() =>
-          setSubmissionFeedback({
-            tone: "info",
-            text: "Handoff is a shell control right now. Run transfer behavior lands in the next phase."
-          })
-        }
-        onOpenSettings={() => setActiveNav("settings")}
       />
     </main>
   );
 }
 
-function buildThreads(
-  activeProject: WorkspaceProject,
-  project: ProjectPayload,
-  runtimeHealth: RuntimeHealthResponse | null,
-  runtimeStatus: RuntimeStatusResponse | null,
-  instructions: RuntimeInstructionResponse | null,
-  runtimeTasks: RuntimeTask[]
-): WorkspaceThread[] {
-  if (activeProject.kind === "live") {
-    return [
-      buildGuideThread(project, runtimeHealth, runtimeStatus, instructions),
-      ...runtimeTasks.map((task) => buildRuntimeThread(task))
-    ];
+function buildThreadsForProject(
+  project: WorkspaceProject,
+  runtimeTasks: RuntimeTask[],
+  draftThreads: WorkspaceThread[]
+) {
+  if (project.kind === "live") {
+    return [...draftThreads, ...runtimeTasks.map((task) => buildRuntimeThread(task))];
   }
 
-  return buildPreviewThreads(activeProject.id);
+  return [...draftThreads, ...buildPreviewThreads(project.id)];
+}
+
+function createDraftThread(projectName: string): WorkspaceThread {
+  return {
+    id: createDraftId(),
+    title: "New thread",
+    summary: `Start a task for ${projectName}.`,
+    status: "draft",
+    source: "draft",
+    createdLabel: "Just now",
+    updatedLabel: "Draft",
+    tags: ["draft"],
+    messages: [],
+    progress: []
+  };
+}
+
+function buildDraftSubmissionThread({
+  existingThread,
+  threadId,
+  instruction,
+  backendConnected
+}: {
+  existingThread: WorkspaceThread | null;
+  threadId: string;
+  instruction: string;
+  backendConnected: boolean;
+}): WorkspaceThread {
+  const timestamp = formatShellTimestamp(new Date());
+  const statusMessage = backendConnected
+    ? "Request queued locally and sent to the runtime service."
+    : "Saved in the local shell. Connect the runtime to run this thread live.";
+  const nextThread = existingThread ?? {
+    id: threadId,
+    title: deriveThreadTitle(instruction),
+    summary: instruction,
+    status: backendConnected ? "pending" : "draft",
+    source: "draft" as const,
+    createdLabel: timestamp,
+    updatedLabel: timestamp,
+    tags: backendConnected ? ["pending"] : ["draft"],
+    messages: [],
+    progress: []
+  };
+
+  return {
+    ...nextThread,
+    title:
+      nextThread.title === "New thread" || nextThread.messages.length === 0
+        ? deriveThreadTitle(instruction)
+        : nextThread.title,
+    summary: instruction,
+    status: backendConnected ? "pending" : "draft",
+    updatedLabel: timestamp,
+    tags: backendConnected ? ["pending", "live-request"] : ["draft", "local"],
+    messages: [
+      ...nextThread.messages,
+      createMessage({
+        id: `${threadId}-${nextThread.messages.length + 1}`,
+        role: "user",
+        label: "You",
+        body: instruction,
+        timestamp,
+        tone: "default"
+      }),
+      createMessage({
+        id: `${threadId}-${nextThread.messages.length + 2}`,
+        role: "system",
+        label: backendConnected ? "Runtime" : "Local draft",
+        body: statusMessage,
+        timestamp,
+        tone: backendConnected ? "info" : "default"
+      })
+    ],
+    progress: [
+      ...nextThread.progress,
+      createProgress({
+        id: `${threadId}-${nextThread.progress.length + 1}`,
+        label: backendConnected ? "Queued" : "Saved locally",
+        detail: statusMessage,
+        timestamp,
+        tone: backendConnected ? "info" : "default"
+      })
+    ]
+  };
+}
+
+function markDraftThreadFailed(thread: WorkspaceThread, errorMessage: string): WorkspaceThread {
+  const timestamp = formatShellTimestamp(new Date());
+
+  return {
+    ...thread,
+    status: "failed",
+    updatedLabel: timestamp,
+    tags: ["failed", "retry"],
+    messages: [
+      ...thread.messages,
+      createMessage({
+        id: `${thread.id}-failure`,
+        role: "assistant",
+        label: "Runtime error",
+        body: errorMessage,
+        timestamp,
+        tone: "danger"
+      })
+    ],
+    progress: [
+      ...thread.progress,
+      createProgress({
+        id: `${thread.id}-failure`,
+        label: "Submission failed",
+        detail: errorMessage,
+        timestamp,
+        tone: "danger"
+      })
+    ]
+  };
+}
+
+function deriveThreadTitle(instruction: string) {
+  return instruction.split(/\s+/).slice(0, 6).join(" ") || "New thread";
+}
+
+function createDraftId() {
+  return `draft-${crypto.randomUUID()}`;
+}
+
+function formatShellTimestamp(date: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function createMessage(message: ThreadMessage): ThreadMessage {
+  return message;
+}
+
+function createProgress(event: ProgressEvent): ProgressEvent {
+  return event;
 }
 
 export default App;

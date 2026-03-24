@@ -7,7 +7,8 @@ import type {
   RuntimeTaskResponse
 } from "./types";
 
-const apiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, "") ?? "";
+const configuredApiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, "");
+const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.DEV ? "http://127.0.0.1:8787" : "");
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
