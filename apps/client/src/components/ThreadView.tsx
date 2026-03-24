@@ -1,4 +1,5 @@
 import type { WorkspaceProject, WorkspaceThread } from "../types";
+import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type SuggestionCard = {
   id: string;
@@ -57,6 +58,8 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
+        <AttachmentPreviewList attachments={thread.attachments} />
+
         {thread.progress.map((event) => (
           <div key={event.id} className={`event-row event-row--${event.tone}`}>
             <strong>{event.label}</strong>

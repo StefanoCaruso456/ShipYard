@@ -92,11 +92,54 @@ function buildTaskPrompt(run: AgentRunRecord) {
     "Produce the next execution response for the operator.",
     run.title ? `Thread title: ${run.title}` : null,
     `Task instruction:\n${run.instruction}`,
+    renderAttachmentContext(run),
+    renderRunContext(run),
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function renderAttachmentContext(run: AgentRunRecord) {
+  if (run.attachments.length === 0) {
+    return null;
+  }
+
+  return [
+    "Attachment context:",
+    ...run.attachments.map((attachment, index) =>
+      [
+        `${index + 1}. ${attachment.name} (${attachment.kind}, ${formatBytes(attachment.size)})`,
+        `Summary: ${attachment.analysis.summary}`,
+        attachment.analysis.excerpt ? `Excerpt:\n${attachment.analysis.excerpt}` : null,
+        attachment.analysis.warnings.length > 0
+          ? `Warnings: ${attachment.analysis.warnings.join(" ")}`
+          : null
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+  ].join("\n\n");
+}
+
+function renderRunContext(run: AgentRunRecord) {
+  const contextParts = [
+    run.context.objective ? `Objective: ${run.context.objective}` : null,
+    run.context.constraints.length > 0
+      ? `Constraints:\n${run.context.constraints.map((constraint) => `- ${constraint}`).join("\n")}`
+      : null,
+    run.context.relevantFiles.length > 0
+      ? `Relevant files:\n${run.context.relevantFiles
+          .map((file) => `- ${file.path}${file.reason ? ` (${file.reason})` : ""}`)
+          .join("\n")}`
+      : null,
+    run.context.validationTargets.length > 0
+      ? `Validation targets:\n${run.context.validationTargets.map((target) => `- ${target}`).join("\n")}`
+      : null
+  ].filter(Boolean);
+
+  return contextParts.length > 0 ? contextParts.join("\n\n") : null;
 }
 
 function createMissingKeyResult(
@@ -131,4 +174,16 @@ function summarizeResponse(text: string) {
   }
 
   return `${compact.slice(0, 177).trimEnd()}...`;
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

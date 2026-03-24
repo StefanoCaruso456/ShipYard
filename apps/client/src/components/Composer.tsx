@@ -1,7 +1,9 @@
 import type { FormEvent } from "react";
 import { useId, useRef } from "react";
 
+import { buildComposerAttachments } from "../attachments";
 import type { ComposerAttachment, ComposerMode, WorkspaceProject } from "../types";
+import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type ComposerProps = {
   project: WorkspaceProject | null;
@@ -39,39 +41,24 @@ export function Composer({
         ? "Mic mode is staged. Type the instruction or attach files..."
         : "Ask Codex anything...";
 
-  function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
       return;
     }
 
-    const nextAttachments = Array.from(fileList).map((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || inferFileType(file.name)
-    }));
+    const nextAttachments = await buildComposerAttachments(fileList);
 
     onAttachmentsChange([...attachments, ...nextAttachments]);
   }
 
   return (
     <form className="composer" onSubmit={onSubmit}>
-      {attachments.length > 0 ? (
-        <div className="composer__attachments">
-          {attachments.map((attachment) => (
-            <span key={attachment.id} className="attachment-chip">
-              <span>{attachment.name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${attachment.name}`}
-                onClick={() => onAttachmentsChange(attachments.filter((candidate) => candidate.id !== attachment.id))}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <AttachmentPreviewList
+        attachments={attachments}
+        onRemove={(attachmentId) =>
+          onAttachmentsChange(attachments.filter((candidate) => candidate.id !== attachmentId))
+        }
+      />
 
       <div className="composer__field">
         <textarea
@@ -121,26 +108,13 @@ export function Composer({
         className="composer__file-input"
         type="file"
         multiple
-        accept=".png,.pdf,.csv,image/*"
         onChange={(event) => {
-          handleFiles(event.target.files);
+          void handleFiles(event.target.files);
           event.currentTarget.value = "";
         }}
       />
     </form>
   );
-}
-
-function inferFileType(fileName: string) {
-  if (fileName.toLowerCase().endsWith(".pdf")) {
-    return "application/pdf";
-  }
-
-  if (fileName.toLowerCase().endsWith(".csv")) {
-    return "text/csv";
-  }
-
-  return "application/octet-stream";
 }
 
 function PlusIcon() {

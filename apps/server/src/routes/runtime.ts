@@ -1,4 +1,5 @@
-import type { Express, Request } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
+import multer from "multer";
 
 import type {
   AgentRunRecord,
@@ -10,6 +11,19 @@ import type {
 } from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
+import { analyzeTaskAttachments } from "../runtime/analyzeTaskAttachments";
+
+type RuntimeTaskRequest = Request & {
+  files?: Express.Multer.File[];
+};
+
+const attachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 8,
+    fileSize: 15 * 1024 * 1024
+  }
+});
 
 export function registerRuntimeRoutes(
   app: Express,
@@ -24,8 +38,8 @@ export function registerRuntimeRoutes(
     });
   });
 
-  app.post("/api/runtime/tasks", (request, response) => {
-    const submission = parseTaskSubmission(request);
+  app.post("/api/runtime/tasks", parseMultipartAttachments, (request, response) => {
+    const submission = parseTaskSubmission(request as RuntimeTaskRequest);
 
     if ("error" in submission) {
       response.status(400).json(submission);
@@ -143,7 +157,25 @@ function serializeOpenAIConfig(openAI: OpenAIExecutorConfig) {
   };
 }
 
-function parseTaskSubmission(request: Request): SubmitTaskInput | { error: string } {
+function parseMultipartAttachments(request: Request, response: Response, next: NextFunction) {
+  if (!request.is("multipart/form-data")) {
+    next();
+    return;
+  }
+
+  attachmentUpload.array("attachments", 8)(request, response, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Attachment upload failed."
+    });
+  });
+}
+
+function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { error: string } {
   const body = request.body as {
     instruction?: unknown;
     title?: unknown;
@@ -164,19 +196,21 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
     };
   }
 
-  if (body.simulateFailure !== undefined && typeof body.simulateFailure !== "boolean") {
+  const simulateFailure = parseBooleanField(body.simulateFailure);
+
+  if (body.simulateFailure !== undefined && simulateFailure === null) {
     return {
       error: "simulateFailure must be a boolean when provided."
     };
   }
 
-  const toolRequest = parseToolRequest(body.toolRequest);
+  const toolRequest = parseToolRequest(parseUnknownJson(body.toolRequest));
 
   if ("error" in toolRequest) {
     return toolRequest;
   }
 
-  const context = parseRunContextInput(body.context);
+  const context = parseRunContextInput(parseUnknownJson(body.context));
 
   if ("error" in context) {
     return context;
@@ -185,8 +219,18 @@ function parseTaskSubmission(request: Request): SubmitTaskInput | { error: strin
   return {
     instruction: body.instruction,
     title: body.title,
-    simulateFailure: body.simulateFailure,
+    simulateFailure: simulateFailure ?? false,
     toolRequest: toolRequest.value,
+    attachments: analyzeTaskAttachments(
+      Array.isArray(request.files)
+        ? request.files.map((file) => ({
+            name: file.originalname,
+            mimeType: file.mimetype || null,
+            size: file.size,
+            buffer: file.buffer
+          }))
+        : []
+    ),
     context: context.value
   };
 }
@@ -198,6 +242,7 @@ function serializeRun(run: AgentRunRecord) {
     instruction: run.instruction,
     simulateFailure: run.simulateFailure,
     toolRequest: run.toolRequest,
+    attachments: run.attachments,
     context: run.context,
     status: run.status,
     createdAt: run.createdAt,
@@ -215,6 +260,36 @@ function serializeRun(run: AgentRunRecord) {
 
 function parseRole(value: string): AgentRole | null {
   return value === "planner" || value === "executor" || value === "verifier" ? value : null;
+}
+
+function parseUnknownJson(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function parseBooleanField(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    if (value === "true") {
+      return true;
+    }
+
+    if (value === "false") {
+      return false;
+    }
+  }
+
+  return null;
 }
 
 function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context"] } | { error: string } {

@@ -141,6 +141,7 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
         replacementText: "after"
       }
     },
+    attachments: overrides.attachments ?? [],
     context: {
       objective: "Assemble role-scoped runtime context.",
       constraints: ["Do not build orchestration yet.", "Keep the payload inspectable."],

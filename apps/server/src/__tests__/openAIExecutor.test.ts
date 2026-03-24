@@ -89,6 +89,7 @@ function createRun(instruction: string): AgentRunRecord {
     instruction,
     simulateFailure: false,
     toolRequest: null,
+    attachments: [],
     context: {
       objective: null,
       constraints: [],

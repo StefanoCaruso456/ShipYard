@@ -1,4 +1,5 @@
 import type {
+  ComposerAttachment,
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
@@ -11,11 +12,14 @@ const configuredApiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/,
 const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.DEV ? "http://127.0.0.1:8787" : "");
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    },
+    headers: isFormData
+      ? init?.headers
+      : {
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {})
+        },
     ...init
   });
 
@@ -50,7 +54,33 @@ export function submitRuntimeTask(input: {
   instruction: string;
   title?: string;
   simulateFailure?: boolean;
+  attachments?: ComposerAttachment[];
 }) {
+  const attachments = input.attachments ?? [];
+
+  if (attachments.length > 0) {
+    const formData = new FormData();
+
+    formData.append("instruction", input.instruction);
+
+    if (input.title) {
+      formData.append("title", input.title);
+    }
+
+    if (input.simulateFailure !== undefined) {
+      formData.append("simulateFailure", String(input.simulateFailure));
+    }
+
+    for (const attachment of attachments) {
+      formData.append("attachments", attachment.file, attachment.name);
+    }
+
+    return requestJson<RuntimeTaskResponse>("/api/runtime/tasks", {
+      method: "POST",
+      body: formData
+    });
+  }
+
   return requestJson<RuntimeTaskResponse>("/api/runtime/tasks", {
     method: "POST",
     body: JSON.stringify(input)

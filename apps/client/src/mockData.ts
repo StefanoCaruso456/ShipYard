@@ -1,5 +1,7 @@
+import { toAttachmentCard } from "./attachments";
 import type {
   AutomationItem,
+  ComposerAttachment,
   GitChange,
   ModeOption,
   ProjectPayload,
@@ -105,6 +107,7 @@ const previewThreadsByProject: Record<string, WorkspaceThread[]> = {
       createdLabel: "Preview flow",
       updatedLabel: "Refined 14m ago",
       tags: ["editing", "recovery", "phase-3"],
+      attachments: [],
       messages: [
         createMessage(
           "lab-1-system",
@@ -143,6 +146,7 @@ const previewThreadsByProject: Record<string, WorkspaceThread[]> = {
       createdLabel: "Draft brief",
       updatedLabel: "Queued for review",
       tags: ["planner", "context", "token-budget"],
+      attachments: [],
       messages: [
         createMessage(
           "lab-2-system",
@@ -168,6 +172,7 @@ const previewThreadsByProject: Record<string, WorkspaceThread[]> = {
       createdLabel: "Automation draft",
       updatedLabel: "Waiting on backend",
       tags: ["automation", "reporting", "ops"],
+      attachments: [],
       messages: [
         createMessage(
           "ops-1-system",
@@ -264,6 +269,7 @@ export function buildGuideThread(
     createdLabel: "Always available",
     updatedLabel: runtimeStatus ? "Updated live" : "Waiting on backend",
     tags: ["overview", "runtime", runtimeBadge],
+    attachments: [],
     messages: [
       createMessage(
         "guide-assistant",
@@ -278,9 +284,15 @@ export function buildGuideThread(
   };
 }
 
-export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
+export function buildRuntimeThread(
+  task: RuntimeTask,
+  previewAttachments: ComposerAttachment[] = []
+): WorkspaceThread {
   const title = task.title?.trim() || task.instruction.split(/\s+/).slice(0, 5).join(" ");
   const completionLabel = task.completedAt ? formatDateTime(task.completedAt) : "Awaiting finish";
+  const previewLookup = Object.fromEntries(
+    previewAttachments.map((attachment) => [attachment.name, attachment])
+  );
 
   const messages: ThreadMessage[] = [
     createMessage(
@@ -390,6 +402,7 @@ export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
     createdLabel: formatShortDate(task.createdAt),
     updatedLabel: completionLabel,
     tags: [task.status, task.simulateFailure ? "failure-path" : "live-run"],
+    attachments: task.attachments.map((attachment) => toAttachmentCard(attachment, previewLookup)),
     messages,
     progress
   };

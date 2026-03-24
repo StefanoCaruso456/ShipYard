@@ -20,6 +20,34 @@ export type AgentRunStatus = "pending" | "running" | "completed" | "failed";
 
 export type RuntimeWorkerState = "idle" | "running";
 
+export type RunAttachmentKind =
+  | "image"
+  | "text"
+  | "code"
+  | "csv"
+  | "json"
+  | "pdf"
+  | "document"
+  | "audio"
+  | "video"
+  | "archive"
+  | "binary"
+  | "unknown";
+
+export type RunAttachment = {
+  id: string;
+  name: string;
+  mimeType: string | null;
+  size: number;
+  kind: RunAttachmentKind;
+  analysis: {
+    status: "analyzed" | "metadata_only";
+    summary: string;
+    excerpt: string | null;
+    warnings: string[];
+  };
+};
+
 export type RepoMutationToolRequest =
   | {
       toolName: "edit_file_region";
@@ -66,6 +94,7 @@ export type SubmitTaskInput = {
   title?: string;
   simulateFailure?: boolean;
   toolRequest?: RepoMutationToolRequest | null;
+  attachments?: RunAttachment[];
   context?: RunContextInput | null;
 };
 
@@ -96,6 +125,7 @@ export type AgentRunRecord = {
   instruction: string;
   simulateFailure: boolean;
   toolRequest: RepoMutationToolRequest | null;
+  attachments: RunAttachment[];
   context: RunContextInput;
   status: AgentRunStatus;
   createdAt: string;

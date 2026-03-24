@@ -51,6 +51,7 @@ export function createPersistentRuntimeService(
       instruction,
       simulateFailure: input.simulateFailure ?? false,
       toolRequest: input.toolRequest ?? null,
+      attachments: normalizeRunAttachments(input.attachments),
       context: normalizeRunContextInput(input.context),
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -357,6 +358,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   return {
     ...run,
     toolRequest: run.toolRequest ?? null,
+    attachments: normalizeRunAttachments(run.attachments),
     context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
     validationStatus: run.validationStatus ?? "not_run",
@@ -364,6 +366,30 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
   };
+}
+
+function normalizeRunAttachments(attachments: AgentRunRecord["attachments"] | SubmitTaskInput["attachments"]) {
+  return Array.isArray(attachments)
+    ? attachments
+        .filter((attachment) => typeof attachment?.name === "string" && attachment.name.trim())
+        .map((attachment) => ({
+          id: attachment.id,
+          name: attachment.name.trim(),
+          mimeType: attachment.mimeType?.trim() ? attachment.mimeType.trim() : null,
+          size: typeof attachment.size === "number" ? attachment.size : 0,
+          kind: attachment.kind ?? "unknown",
+          analysis: {
+            status: attachment.analysis?.status ?? "metadata_only",
+            summary: attachment.analysis?.summary?.trim()
+              ? attachment.analysis.summary.trim()
+              : "Attachment uploaded without a detailed analysis summary.",
+            excerpt: attachment.analysis?.excerpt?.trim() ? attachment.analysis.excerpt.trim() : null,
+            warnings: Array.isArray(attachment.analysis?.warnings)
+              ? attachment.analysis.warnings.map((warning) => warning.trim()).filter(Boolean)
+              : []
+          }
+        }))
+    : [];
 }
 
 function normalizeRunContextInput(

@@ -152,6 +152,7 @@ function createRun(
     instruction: overrides.instruction ?? `${overrides.id} instruction`,
     simulateFailure: overrides.simulateFailure ?? false,
     toolRequest: overrides.toolRequest ?? null,
+    attachments: overrides.attachments ?? [],
     context: overrides.context ?? {
       objective: null,
       constraints: [],
