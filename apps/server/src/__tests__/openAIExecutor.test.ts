@@ -89,6 +89,12 @@ function createRun(instruction: string): AgentRunRecord {
     instruction,
     simulateFailure: false,
     toolRequest: null,
+    context: {
+      objective: null,
+      constraints: [],
+      relevantFiles: [],
+      validationTargets: []
+    },
     status: "running",
     createdAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
@@ -96,6 +102,7 @@ function createRun(instruction: string): AgentRunRecord {
     retryCount: 0,
     validationStatus: "not_run",
     lastValidationResult: null,
+    rollingSummary: null,
     events: [],
     error: null,
     result: null

@@ -102,6 +102,10 @@ test("persistent runtime marks failures clearly and accepts follow-up tasks", as
     completedRecord.result?.summary ?? "",
     /Persistent runtime skeleton processed the task/
   );
+  assert.match(
+    completedRecord.rollingSummary?.text ?? "",
+    /Persistent runtime skeleton processed the task/
+  );
 
   const status = runtimeService.getStatus();
 
@@ -158,6 +162,7 @@ test("persistent runtime retries validation failures once and records rollback e
   assert.equal(failedRun.validationStatus, "rolled_back");
   assert.equal(failedRun.lastValidationResult?.success, false);
   assert.equal(failedRun.error?.code, "validation_failed");
+  assert.match(failedRun.rollingSummary?.text ?? "", /Run failed:/);
   assert.ok(failedRun.events.some((event) => event.type === "retry_scheduled"));
   assert.ok(failedRun.events.some((event) => event.type === "rollback_succeeded"));
 });

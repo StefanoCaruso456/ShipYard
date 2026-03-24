@@ -41,12 +41,27 @@ export type {
 export { loadSkill } from "./instructions/loadSkill";
 export { parseFrontmatter } from "./instructions/parseFrontmatter";
 export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
+export { buildExecutorContext } from "./context/buildExecutorContext";
+export { buildPlannerContext } from "./context/buildPlannerContext";
+export { buildVerifierContext } from "./context/buildVerifierContext";
+export { createContextAssembler, runtimeContextPrecedence } from "./context/createContextAssembler";
 export { selectSkillSections } from "./context/selectSkillSections";
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
 export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
+export type {
+  ContextAssembler,
+  ContextAssemblerRunInput,
+  ContextPayloadSection,
+  ContextSectionFormat,
+  OmittedContextSection,
+  ProjectRulesDocument,
+  RoleContextPayload,
+  RuntimeContextPrecedenceLayer,
+  SharedRoleContext
+} from "./context/types";
 export type {
   RollbackResult,
   RunEvent,
@@ -63,8 +78,11 @@ export type {
   AgentRuntimeStatus,
   ExecuteRun,
   PersistentAgentRuntimeService,
+  RelevantFileContext,
   RepoMutationToolRequest,
   RepoMutationToolResult,
+  RollingSummary,
+  RunContextInput,
   RuntimeWorkerState,
   SubmitTaskInput
 } from "./runtime/types";

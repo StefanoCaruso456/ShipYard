@@ -1,7 +1,9 @@
 import {
+  createContextAssembler,
   createFileRunStore,
   createPersistentRuntimeService,
   createRepoToolset,
+  type ContextAssembler,
   type PersistentAgentRuntimeService
 } from "@shipyard/agent-core";
 
@@ -13,10 +15,12 @@ import {
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
 import { createRuntimeExecutor } from "./createRuntimeExecutor";
+import { loadProjectRules } from "./loadProjectRules";
 import { resolveWorkspaceRoot } from "./resolveWorkspaceRoot";
 
 export type BootedRuntimeService = {
   runtimeService: PersistentAgentRuntimeService;
+  contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
   runtimeStatePath: string;
 };
@@ -24,10 +28,15 @@ export type BootedRuntimeService = {
 export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const rootDir = await resolveWorkspaceRoot();
   const instructionRuntime = await bootAgentRuntime(rootDir);
+  const projectRules = await loadProjectRules(rootDir);
   const openAI = resolveOpenAIExecutorConfig();
   const runtimeStatePath = resolveRuntimeStatePath(rootDir);
   const repoToolset = createRepoToolset({
     rootDir
+  });
+  const contextAssembler = createContextAssembler({
+    instructionRuntime,
+    projectRules
   });
 
   return {
@@ -41,6 +50,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
         repoToolset
       })
     }),
+    contextAssembler,
     openAI,
     runtimeStatePath
   };

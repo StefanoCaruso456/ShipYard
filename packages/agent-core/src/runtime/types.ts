@@ -39,11 +39,34 @@ export type RepoMutationToolResult =
   | CreateFileResult
   | DeleteFileResult;
 
+export type RelevantFileContext = {
+  path: string;
+  excerpt?: string | null;
+  startLine?: number | null;
+  endLine?: number | null;
+  source?: string | null;
+  reason?: string | null;
+};
+
+export type RunContextInput = {
+  objective?: string | null;
+  constraints: string[];
+  relevantFiles: RelevantFileContext[];
+  validationTargets: string[];
+};
+
+export type RollingSummary = {
+  text: string;
+  updatedAt: string;
+  source: "result" | "failure" | "retry";
+};
+
 export type SubmitTaskInput = {
   instruction: string;
   title?: string;
   simulateFailure?: boolean;
   toolRequest?: RepoMutationToolRequest | null;
+  context?: RunContextInput | null;
 };
 
 export type AgentRunFailure = {
@@ -73,6 +96,7 @@ export type AgentRunRecord = {
   instruction: string;
   simulateFailure: boolean;
   toolRequest: RepoMutationToolRequest | null;
+  context: RunContextInput;
   status: AgentRunStatus;
   createdAt: string;
   startedAt: string | null;
@@ -80,6 +104,7 @@ export type AgentRunRecord = {
   retryCount: number;
   validationStatus: ValidationStatus;
   lastValidationResult: ValidationResult | null;
+  rollingSummary: RollingSummary | null;
   events: RunEvent[];
   error: AgentRunFailure | null;
   result: AgentRunResult | null;

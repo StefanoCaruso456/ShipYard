@@ -2,7 +2,11 @@ import cors from "cors";
 import express from "express";
 import { createServer, type Server } from "node:http";
 
-import { starterDecisionBoard, type PersistentAgentRuntimeService } from "@shipyard/agent-core";
+import {
+  starterDecisionBoard,
+  type ContextAssembler,
+  type PersistentAgentRuntimeService
+} from "@shipyard/agent-core";
 import { projectBrief } from "@shipyard/shared";
 
 import { registerRuntimeRoutes } from "./routes/runtime";
@@ -14,6 +18,7 @@ type RuntimeBootState = {
   startedAt: string;
   completedAt: string | null;
   runtimeService: PersistentAgentRuntimeService | null;
+  contextAssembler: ContextAssembler | null;
   openAI: OpenAIExecutorConfig | null;
 };
 
@@ -27,6 +32,7 @@ async function startServer() {
     startedAt: new Date().toISOString(),
     completedAt: null,
     runtimeService: null,
+    contextAssembler: null,
     openAI: null
   };
   const app = express();
@@ -94,14 +100,15 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
   });
 
   try {
-    const { runtimeService, openAI, runtimeStatePath } = await bootRuntimeService();
+    const { runtimeService, contextAssembler, openAI, runtimeStatePath } = await bootRuntimeService();
 
     bootState.status = "ready";
     bootState.completedAt = new Date().toISOString();
     bootState.runtimeService = runtimeService;
+    bootState.contextAssembler = contextAssembler;
     bootState.openAI = openAI;
 
-    registerRuntimeRoutes(app, runtimeService, openAI);
+    registerRuntimeRoutes(app, runtimeService, openAI, contextAssembler);
 
     console.log("Shipyard runtime boot complete.", {
       completedAt: bootState.completedAt,
@@ -209,9 +216,15 @@ function isRuntimeReady(
 ): bootState is RuntimeBootState & {
   status: "ready";
   runtimeService: PersistentAgentRuntimeService;
+  contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
 } {
-  return bootState.status === "ready" && bootState.runtimeService !== null && bootState.openAI !== null;
+  return (
+    bootState.status === "ready" &&
+    bootState.runtimeService !== null &&
+    bootState.contextAssembler !== null &&
+    bootState.openAI !== null
+  );
 }
 
 function createBoundServer(

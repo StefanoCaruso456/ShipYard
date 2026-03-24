@@ -51,6 +51,7 @@ export function createPersistentRuntimeService(
       instruction,
       simulateFailure: input.simulateFailure ?? false,
       toolRequest: input.toolRequest ?? null,
+      context: normalizeRunContextInput(input.context),
       status: "pending",
       createdAt: new Date().toISOString(),
       startedAt: null,
@@ -58,6 +59,7 @@ export function createPersistentRuntimeService(
       retryCount: 0,
       validationStatus: "not_run",
       lastValidationResult: null,
+      rollingSummary: null,
       events: [],
       error: null,
       result: null
@@ -227,6 +229,7 @@ export function createPersistentRuntimeService(
             events: validationResult
               ? appendRunEvents(runningRun, createValidationSuccessEvent(result, validationResult))
               : runningRun.events,
+            rollingSummary: createResultRollingSummary(result, completedAt),
             error: null,
             result: {
               ...result,
@@ -251,6 +254,7 @@ export function createPersistentRuntimeService(
               runningRun,
               ...createFailureEvents(failure, runningRun.retryCount, retrying)
             ),
+            rollingSummary: createFailureRollingSummary(failure, retrying),
             error: retrying ? null : failure,
             result: null
           });
@@ -353,10 +357,50 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   return {
     ...run,
     toolRequest: run.toolRequest ?? null,
+    context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
     validationStatus: run.validationStatus ?? "not_run",
     lastValidationResult: run.lastValidationResult ?? null,
+    rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
+  };
+}
+
+function normalizeRunContextInput(
+  context: AgentRunRecord["context"] | SubmitTaskInput["context"]
+): AgentRunRecord["context"] {
+  return {
+    objective: context?.objective?.trim() ? context.objective.trim() : null,
+    constraints: Array.isArray(context?.constraints)
+      ? context.constraints.map((constraint) => constraint.trim()).filter(Boolean)
+      : [],
+    relevantFiles: Array.isArray(context?.relevantFiles)
+      ? context.relevantFiles
+          .filter((file) => typeof file?.path === "string" && file.path.trim())
+          .map((file) => ({
+            path: file.path.trim(),
+            excerpt: file.excerpt?.trim() ? file.excerpt.trim() : null,
+            startLine: typeof file.startLine === "number" ? file.startLine : null,
+            endLine: typeof file.endLine === "number" ? file.endLine : null,
+            source: file.source?.trim() ? file.source.trim() : null,
+            reason: file.reason?.trim() ? file.reason.trim() : null
+          }))
+      : [],
+    validationTargets: Array.isArray(context?.validationTargets)
+      ? context.validationTargets.map((target) => target.trim()).filter(Boolean)
+      : []
+  };
+}
+
+function normalizeRollingSummary(rollingSummary: AgentRunRecord["rollingSummary"]) {
+  if (!rollingSummary?.text?.trim()) {
+    return null;
+  }
+
+  return {
+    text: rollingSummary.text.trim(),
+    updatedAt: rollingSummary.updatedAt,
+    source: rollingSummary.source
   };
 }
 
@@ -475,4 +519,28 @@ function createFailureEvents(
   }
 
   return events;
+}
+
+function createResultRollingSummary(
+  result: AgentRunResult,
+  completedAt: string
+): NonNullable<AgentRunRecord["rollingSummary"]> {
+  return {
+    text: result.summary.trim() || "Run completed successfully.",
+    updatedAt: completedAt,
+    source: "result"
+  };
+}
+
+function createFailureRollingSummary(
+  failure: NonNullable<AgentRunRecord["error"]>,
+  retrying: boolean
+): NonNullable<AgentRunRecord["rollingSummary"]> {
+  return {
+    text: retrying
+      ? `Retry scheduled after failure: ${failure.message}`
+      : `Run failed: ${failure.message}`,
+    updatedAt: new Date().toISOString(),
+    source: retrying ? "retry" : "failure"
+  };
 }
