@@ -14,6 +14,7 @@ Keep the docs set small and intentional:
 - `docs/architecture/model-strategy.md`: model and provider direction
 - `docs/architecture/editing-strategy.md`: editing approach and guardrails
 - `docs/architecture/observability.md`: tracing direction
+- `instructions/prompts/phase-8-observability-task.md`: repo-ready builder prompt for the observability phase
 - `instructions/decisions`: locked architecture decisions
 - `instructions/rules/project-rules.md`: repo work rules
 - `instructions/rules/frontend-ui-rules.md`: frontend design rules
@@ -53,6 +54,7 @@ shipyard/
 │   └── architecture/
 ├── instructions/
 │   ├── decisions/
+│   ├── prompts/
 │   └── rules/
 ├── CONTRIBUTING.md
 ├── skill.md
