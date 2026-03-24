@@ -4,11 +4,28 @@ import {
 } from "@shipyard/agent-core";
 
 import { bootAgentRuntime } from "./bootAgentRuntime";
+import {
+  createOpenAIExecutor,
+  resolveOpenAIExecutorConfig,
+  type OpenAIExecutorConfig
+} from "./createOpenAIExecutor";
 
-export async function bootRuntimeService(): Promise<PersistentAgentRuntimeService> {
+export type BootedRuntimeService = {
+  runtimeService: PersistentAgentRuntimeService;
+  openAI: OpenAIExecutorConfig;
+};
+
+export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const instructionRuntime = await bootAgentRuntime();
+  const openAI = resolveOpenAIExecutorConfig();
 
-  return createPersistentRuntimeService({
-    instructionRuntime
-  });
+  return {
+    runtimeService: createPersistentRuntimeService({
+      instructionRuntime,
+      executeRun: createOpenAIExecutor({
+        config: openAI
+      })
+    }),
+    openAI
+  };
 }

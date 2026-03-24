@@ -6,12 +6,18 @@ import type {
   SubmitTaskInput
 } from "@shipyard/agent-core";
 
+import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
+
 export function registerRuntimeRoutes(
   app: Express,
-  runtimeService: PersistentAgentRuntimeService
+  runtimeService: PersistentAgentRuntimeService,
+  openAI: OpenAIExecutorConfig
 ) {
   app.get("/api/runtime/status", (_request, response) => {
-    response.json(runtimeService.getStatus());
+    response.json({
+      ...runtimeService.getStatus(),
+      model: serializeOpenAIConfig(openAI)
+    });
   });
 
   app.post("/api/runtime/tasks", (request, response) => {
@@ -86,6 +92,15 @@ export function registerRuntimeRoutes(
       )
     });
   });
+}
+
+function serializeOpenAIConfig(openAI: OpenAIExecutorConfig) {
+  return {
+    provider: openAI.provider,
+    configured: openAI.configured,
+    modelId: openAI.modelId,
+    apiKeySource: openAI.apiKeySource
+  };
 }
 
 function parseTaskSubmission(request: Request): SubmitTaskInput | { error: string } {

@@ -1,0 +1,146 @@
+import type { FormEvent } from "react";
+
+import type {
+  ComposerAttachment,
+  ComposerMode,
+  ProjectPayload,
+  RuntimeInstructionResponse,
+  RuntimeStatusResponse,
+  SidebarNavItemId,
+  WorkspaceProject,
+  WorkspaceThread
+} from "../types";
+import { Composer } from "./Composer";
+import { ThreadView } from "./ThreadView";
+
+type TaskWorkspaceProps = {
+  activeNav: SidebarNavItemId;
+  project: WorkspaceProject | null;
+  projectBrief: ProjectPayload;
+  thread: WorkspaceThread | null;
+  runtimeStatus: RuntimeStatusResponse | null;
+  instructions: RuntimeInstructionResponse | null;
+  composerMode: ComposerMode;
+  composerValue: string;
+  composerAttachments: ComposerAttachment[];
+  feedback: { tone: "success" | "danger" | "info"; text: string } | null;
+  submitting: boolean;
+  backendConnected: boolean;
+  onComposerModeChange: (mode: ComposerMode) => void;
+  onComposerValueChange: (value: string) => void;
+  onComposerAttachmentsChange: (attachments: ComposerAttachment[]) => void;
+  onSelectSuggestion: (prompt: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
+
+export function TaskWorkspace({
+  activeNav,
+  project,
+  projectBrief,
+  thread,
+  runtimeStatus,
+  instructions,
+  composerMode,
+  composerValue,
+  composerAttachments,
+  feedback,
+  submitting,
+  backendConnected,
+  onComposerModeChange,
+  onComposerValueChange,
+  onComposerAttachmentsChange,
+  onSelectSuggestion,
+  onSubmit
+}: TaskWorkspaceProps) {
+  const runtimeState = backendConnected
+    ? runtimeStatus?.workerState === "running"
+      ? "running"
+      : "idle"
+    : "error";
+  const suggestionCards = buildSuggestions(project);
+
+  return (
+    <section className="workspace">
+      <div className="workspace__content">
+        {activeNav === "settings" ? (
+          <section className="workspace-panel">
+            <div className="workspace-panel__header">
+              <h3>Runtime settings</h3>
+              <span>{backendConnected ? "Connected" : "Offline"}</span>
+            </div>
+            <div className="settings-grid">
+              <div className="settings-grid__row">
+                <span>Status</span>
+                <strong>{runtimeState}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Queued runs</span>
+                <strong>{runtimeStatus?.queuedRuns ?? 0}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Total runs</span>
+                <strong>{runtimeStatus?.totalRuns ?? 0}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Instruction skill</span>
+                <strong>{instructions?.skill.meta.name ?? "Unavailable"}</strong>
+              </div>
+              <div className="settings-grid__row">
+                <span>Next step</span>
+                <strong>{projectBrief.nextStep}</strong>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <ThreadView
+            project={project}
+            thread={thread}
+            runtimeState={runtimeState}
+            suggestions={suggestionCards}
+            onSelectSuggestion={onSelectSuggestion}
+          />
+        )}
+      </div>
+
+      <Composer
+        project={project}
+        composerMode={composerMode}
+        composerValue={composerValue}
+        attachments={composerAttachments}
+        feedback={feedback}
+        submitting={submitting}
+        onComposerModeChange={onComposerModeChange}
+        onComposerValueChange={onComposerValueChange}
+        onAttachmentsChange={onComposerAttachmentsChange}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
+
+function buildSuggestions(project: WorkspaceProject | null) {
+  const label = project?.name ?? "Shipyard";
+
+  return [
+    {
+      id: "suggestion-1",
+      title: "Plan the next feature",
+      prompt: `Map the next implementation step for ${label} and keep it scoped.`
+    },
+    {
+      id: "suggestion-2",
+      title: "Review runtime status",
+      prompt: `Summarize the current runtime state for ${label} and identify the next backend task.`
+    },
+    {
+      id: "suggestion-3",
+      title: "Refine the frontend shell",
+      prompt: `Review the current workspace shell against the frontend UI rules and suggest the next improvement.`
+    },
+    {
+      id: "suggestion-4",
+      title: "Draft a coding task",
+      prompt: `Create a clear task prompt for the next coding step in ${label}.`
+    }
+  ];
+}
