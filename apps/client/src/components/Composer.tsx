@@ -30,6 +30,8 @@ export function Composer({
 }: ComposerProps) {
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
+  const canSubmit = Boolean(project) && !submitting && hasDraftContent;
   const placeholder =
     composerMode === "image"
       ? "Describe the image task..."
@@ -101,10 +103,11 @@ export function Composer({
           <div className="composer__actions">
             <button
               type="submit"
-              className="composer__submit"
-              disabled={submitting || !project}
+              className={`composer__submit ${canSubmit ? "composer__submit--active" : ""}`}
+              disabled={!canSubmit}
+              aria-label={submitting ? "Sending" : "Send message"}
             >
-              {submitting ? "Sending..." : "Send"}
+              <ArrowUpIcon />
             </button>
           </div>
         </div>
@@ -157,6 +160,21 @@ function MicIcon() {
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ArrowUpIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 15.2V5.2M5.8 9.4 10 5.2l4.2 4.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
