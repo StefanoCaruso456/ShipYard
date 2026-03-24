@@ -8,6 +8,7 @@ import type {
   PersistentAgentRuntimeService,
   RepoMutationToolRequest,
   SubmitTaskInput,
+  TraceService,
   ValidationGate,
   ValidationGateKind
 } from "@shipyard/agent-core";
@@ -45,13 +46,15 @@ export function registerRuntimeRoutes(
   runtimeService: PersistentAgentRuntimeService,
   openAI: OpenAIExecutorConfig,
   audioTranscriber: ReturnType<typeof createAudioTranscriber>,
-  contextAssembler?: ContextAssembler
+  contextAssembler?: ContextAssembler,
+  traceService?: TraceService
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
       ...runtimeService.getStatus(),
       model: serializeOpenAIConfig(openAI),
-      audioTranscription: serializeAudioTranscriptionConfig(audioTranscriber.config)
+      audioTranscription: serializeAudioTranscriptionConfig(audioTranscriber.config),
+      observability: traceService?.status ?? null
     });
   });
 
@@ -229,6 +232,30 @@ export function registerRuntimeRoutes(
         run: task,
         runtimeStatus: runtimeService.getStatus()
       })
+    });
+  });
+
+  app.get("/api/runtime/traces/:id", (request, response) => {
+    if (!traceService) {
+      response.status(503).json({
+        error: "Runtime trace service is not available."
+      });
+      return;
+    }
+
+    const trace = traceService.getRunTrace(request.params.id);
+
+    if (!trace) {
+      response.status(404).json({
+        error: `Trace for task ${request.params.id} not found.`
+      });
+      return;
+    }
+
+    response.json({
+      runId: request.params.id,
+      observability: traceService.status,
+      trace
     });
   });
 }

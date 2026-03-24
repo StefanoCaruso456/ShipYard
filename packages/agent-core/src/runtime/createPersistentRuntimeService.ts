@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { ContextAssembler } from "../context/types";
+import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
+import type { TraceService } from "../observability/types";
 import { executeOrchestrationLoop } from "./orchestration";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
@@ -27,6 +29,7 @@ type CreatePersistentRuntimeServiceOptions = {
   contextAssembler?: ContextAssembler;
   store?: AgentRunStore;
   executeRun?: ExecuteRun;
+  traceService?: TraceService;
 };
 
 const runStatuses: AgentRunStatus[] = ["pending", "running", "completed", "failed"];
@@ -206,97 +209,166 @@ export function createPersistentRuntimeService(
 
   async function processRun(run: AgentRunRecord) {
     activeRunId = run.id;
+    const rootTrace = options.traceService
+      ? await options.traceService.startRun({
+          runId: run.id,
+          taskId: run.phaseExecution?.current.taskId ?? run.id,
+          name: run.title?.trim() || summarizeText(run.instruction, 80),
+          inputSummary: run.instruction,
+          metadata: {
+            runtimeVersion: "0.0.0",
+            roleFlow: run.phaseExecution ? "phase-execution" : "orchestration",
+            repoRoot: process.cwd(),
+            workspaceIdentifier: options.instructionRuntime.skill.meta.id,
+            attachmentCount: run.attachments.length,
+            queuedAt: run.createdAt
+          },
+          tags: ["shipyard", "runtime"]
+        })
+      : null;
 
     try {
-      let currentRun = normalizeRunRecord(run);
+      const executeTrackedRun = async () => {
+        let currentRun = normalizeRunRecord(run);
 
-      while (true) {
-        const runningRun: AgentRunRecord = normalizeRunRecord({
-          ...currentRun,
-          status: "running",
-          startedAt: currentRun.startedAt ?? new Date().toISOString(),
-          completedAt: null,
-          error: null
-        });
-
-        store.update(runningRun);
-
-        try {
-          const result = runningRun.phaseExecution
-            ? await executePhaseExecutionRun({
-                run: runningRun,
-                instructionRuntime: options.instructionRuntime,
-                contextAssembler: options.contextAssembler,
-                executeRun,
-                persistRun: (updatedRun) => {
-                  store.update(normalizeRunRecord(updatedRun));
-                },
-                getRuntimeStatus: () => getStatus()
-              })
-            : await executeOrchestrationLoop({
-                run: runningRun,
-                instructionRuntime: options.instructionRuntime,
-                contextAssembler: options.contextAssembler,
-                executeRun,
-                persistRun: (updatedRun) => {
-                  store.update(normalizeRunRecord(updatedRun));
-                },
-                getRuntimeStatus: () => getStatus()
-              });
-          const completedAt = new Date().toISOString();
-          const validationResult = extractValidationResult(result);
-          const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
-          const completedRun = normalizeRunRecord({
-            ...latestStoredRun,
-            status: "completed",
-            completedAt,
-            validationStatus: validationResult
-              ? validationResult.success
-                ? "passed"
-                : "failed"
-              : latestStoredRun.validationStatus,
-            lastValidationResult: validationResult ?? latestStoredRun.lastValidationResult,
-            events: validationResult
-              ? appendRunEvents(latestStoredRun, createValidationSuccessEvent(result, validationResult))
-              : latestStoredRun.events,
-            rollingSummary: createResultRollingSummary(result, completedAt),
-            error: null,
-            result: {
-              ...result,
-              completedAt
-            }
+        while (true) {
+          const runningRun: AgentRunRecord = normalizeRunRecord({
+            ...currentRun,
+            status: "running",
+            startedAt: currentRun.startedAt ?? new Date().toISOString(),
+            completedAt: null,
+            error: null
           });
 
-          store.update(completedRun);
-          return;
-        } catch (error) {
-          const failure = toRunFailure(error);
-          const retrying = shouldRetryRun(runningRun, failure);
-          const nextRun = normalizeRunRecord({
-            ...(store.get(run.id) ?? runningRun),
-            status: retrying ? "pending" : "failed",
-            completedAt: retrying ? null : new Date().toISOString(),
-            retryCount: retrying ? runningRun.retryCount + 1 : runningRun.retryCount,
-            validationStatus: deriveValidationStatus(runningRun, failure),
-            lastValidationResult:
-              failure.validationResult ?? runningRun.lastValidationResult ?? null,
-            events: appendRunEvents(
-              runningRun,
-              ...createFailureEvents(failure, runningRun.retryCount, retrying)
-            ),
-            rollingSummary: createFailureRollingSummary(failure, retrying),
-            error: retrying ? null : failure,
-            result: null
-          });
+          store.update(runningRun);
 
-          store.update(nextRun);
+          try {
+            const result = runningRun.phaseExecution
+              ? await executePhaseExecutionRun({
+                  run: runningRun,
+                  instructionRuntime: options.instructionRuntime,
+                  contextAssembler: options.contextAssembler,
+                  executeRun,
+                  persistRun: (updatedRun) => {
+                    store.update(normalizeRunRecord(updatedRun));
+                  },
+                  getRuntimeStatus: () => getStatus()
+                })
+              : await executeOrchestrationLoop({
+                  run: runningRun,
+                  instructionRuntime: options.instructionRuntime,
+                  contextAssembler: options.contextAssembler,
+                  executeRun,
+                  persistRun: (updatedRun) => {
+                    store.update(normalizeRunRecord(updatedRun));
+                  },
+                  getRuntimeStatus: () => getStatus()
+                });
+            const completedAt = new Date().toISOString();
+            const validationResult = extractValidationResult(result);
+            const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
+            const completedRun = normalizeRunRecord({
+              ...latestStoredRun,
+              status: "completed",
+              completedAt,
+              validationStatus: validationResult
+                ? validationResult.success
+                  ? "passed"
+                  : "failed"
+                : latestStoredRun.validationStatus,
+              lastValidationResult: validationResult ?? latestStoredRun.lastValidationResult,
+              events: validationResult
+                ? appendRunEvents(latestStoredRun, createValidationSuccessEvent(result, validationResult))
+                : latestStoredRun.events,
+              rollingSummary: createResultRollingSummary(result, completedAt),
+              error: null,
+              result: {
+                ...result,
+                completedAt
+              }
+            });
 
-          if (!retrying) {
+            store.update(completedRun);
+            rootTrace?.annotate({
+              finalStatus: completedRun.status,
+              retryCount: completedRun.retryCount,
+              validationStatus: completedRun.validationStatus,
+              inputTokens: completedRun.result?.usage?.inputTokens ?? null,
+              outputTokens: completedRun.result?.usage?.outputTokens ?? null,
+              totalTokens: completedRun.result?.usage?.totalTokens ?? null,
+              providerLatencyMs: completedRun.result?.usage?.providerLatencyMs ?? null,
+              estimatedCostUsd: completedRun.result?.usage?.estimatedCostUsd ?? null
+            });
+            await rootTrace?.end({
+              status: "completed",
+              outputSummary: completedRun.result?.summary ?? "Run completed successfully.",
+              metadata: {
+                completedAt,
+                totalDurationMs:
+                  completedRun.startedAt && completedRun.completedAt
+                    ? new Date(completedRun.completedAt).getTime() -
+                      new Date(completedRun.startedAt).getTime()
+                    : null
+              }
+            });
             return;
-          }
+          } catch (error) {
+            const failure = toRunFailure(error);
+            const retrying = shouldRetryRun(runningRun, failure);
+            const nextRun = normalizeRunRecord({
+              ...(store.get(run.id) ?? runningRun),
+              status: retrying ? "pending" : "failed",
+              completedAt: retrying ? null : new Date().toISOString(),
+              retryCount: retrying ? runningRun.retryCount + 1 : runningRun.retryCount,
+              validationStatus: deriveValidationStatus(runningRun, failure),
+              lastValidationResult:
+                failure.validationResult ?? runningRun.lastValidationResult ?? null,
+              events: appendRunEvents(
+                runningRun,
+                ...createFailureEvents(failure, runningRun.retryCount, retrying)
+              ),
+              rollingSummary: createFailureRollingSummary(failure, retrying),
+              error: retrying ? null : failure,
+              result: null
+            });
 
-          currentRun = nextRun;
+            store.update(nextRun);
+            rootTrace?.annotate({
+              retryCount: nextRun.retryCount,
+              validationStatus: nextRun.validationStatus
+            });
+
+            if (!retrying) {
+              await rootTrace?.end({
+                status: "failed",
+                outputSummary: failure.message,
+                error: failure.message,
+                metadata: {
+                  failureCode: failure.code ?? "execution_failed",
+                  toolName: failure.toolName ?? null,
+                  path: failure.path ?? null,
+                  completedAt: nextRun.completedAt
+                }
+              });
+              return;
+            }
+
+            currentRun = nextRun;
+          }
         }
+      };
+
+      if (rootTrace && options.traceService) {
+        await runWithTraceScope(
+          {
+            runId: run.id,
+            traceService: options.traceService,
+            activeSpan: rootTrace
+          },
+          executeTrackedRun
+        );
+      } else {
+        await executeTrackedRun();
       }
     } finally {
       activeRunId = null;
@@ -526,6 +598,27 @@ function deriveValidationStatus(
 }
 
 function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
+  const traceScope = getActiveTraceScope();
+
+  if (traceScope) {
+    for (const event of events) {
+      traceScope.activeSpan.addEvent(event.type, {
+        message: event.message,
+        metadata: {
+          at: event.at,
+          stepId: event.stepId ?? null,
+          phaseId: event.phaseId ?? null,
+          storyId: event.storyId ?? null,
+          taskId: event.taskId ?? null,
+          gateId: event.gateId ?? null,
+          path: event.path ?? null,
+          toolName: event.toolName ?? null,
+          retryCount: event.retryCount ?? null
+        }
+      });
+    }
+  }
+
   return [...run.events, ...events];
 }
 
@@ -626,4 +719,14 @@ function createFailureRollingSummary(
     updatedAt: new Date().toISOString(),
     source: retrying ? "retry" : "failure"
   };
+}
+
+function summarizeText(value: string, maxLength: number) {
+  const compact = value.replace(/\s+/g, " ").trim();
+
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+
+  return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }

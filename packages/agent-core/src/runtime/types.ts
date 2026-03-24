@@ -15,6 +15,7 @@ import type {
   ValidationResult,
   ValidationStatus
 } from "../validation/types";
+import type { TraceService } from "../observability/types";
 
 export type AgentRunStatus = "pending" | "running" | "completed" | "failed";
 
@@ -329,6 +330,13 @@ export type AgentRunResult = {
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
+  usage?: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+    providerLatencyMs: number | null;
+    estimatedCostUsd: number | null;
+  } | null;
   toolResult?: RepoMutationToolResult | null;
 };
 
@@ -391,6 +399,10 @@ export type PersistentAgentRuntimeService = {
   getRun(id: string): AgentRunRecord | null;
   listRuns(): AgentRunRecord[];
   getStatus(): AgentRuntimeStatus;
+};
+
+export type RuntimeObservability = {
+  traceService?: TraceService;
 };
 
 export function cloneRunRecord(run: AgentRunRecord): AgentRunRecord {
