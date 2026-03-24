@@ -7,8 +7,10 @@ import {
   fetchRuntimeInstructions,
   fetchRuntimeStatus,
   fetchRuntimeTasks,
-  submitRuntimeTask
+  submitRuntimeTask,
+  transcribeRuntimeAudio
 } from "./api";
+import { buildComposerAttachment } from "./attachments";
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import {
@@ -61,6 +63,7 @@ function App() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [transcribingAudio, setTranscribingAudio] = useState(false);
 
   async function loadProjectData(cancelled?: { value: boolean }) {
     try {
@@ -359,6 +362,54 @@ function App() {
     }
   }
 
+  async function handleVoiceCapture(file: File) {
+    const attachment = await buildComposerAttachment(file);
+
+    setComposerAttachments((current) => [...current, attachment]);
+    setComposerMode("voice");
+    setTranscribingAudio(true);
+    setSubmissionFeedback({
+      tone: "info",
+      text: "Transcribing voice note on the backend..."
+    });
+
+    try {
+      const response = await transcribeRuntimeAudio({
+        file
+      });
+      const transcript = response.transcription.text.trim();
+
+      setComposerAttachments((current) =>
+        current.map((candidate) =>
+          candidate.id === attachment.id
+            ? {
+                ...candidate,
+                summary: response.transcription.summary,
+                excerpt: response.transcription.excerpt
+              }
+            : candidate
+        )
+      );
+      setComposerValue((current) => mergeTranscript(current, transcript));
+      setComposerMode("text");
+      setSubmissionFeedback({
+        tone: "success",
+        text: "Voice note transcribed and added to the composer."
+      });
+    } catch (error) {
+      setSubmissionFeedback({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Voice note transcription failed."
+      });
+      throw error;
+    } finally {
+      setTranscribingAudio(false);
+    }
+  }
+
   function handleRenameProject(projectId: string) {
     const projectToRename = visibleProjects.find((candidate) => candidate.id === projectId);
 
@@ -455,10 +506,18 @@ function App() {
         composerAttachments={composerAttachments}
         feedback={feedback}
         submitting={submitting}
+        transcribingAudio={transcribingAudio}
         backendConnected={backendConnected}
         onComposerModeChange={setComposerMode}
         onComposerValueChange={setComposerValue}
         onComposerAttachmentsChange={setComposerAttachments}
+        onVoiceCapture={handleVoiceCapture}
+        onVoiceCaptureError={(message) =>
+          setSubmissionFeedback({
+            tone: "danger",
+            text: message
+          })
+        }
         onSelectSuggestion={(prompt) => {
           setActiveNav("projects");
           setComposerMode("text");
@@ -644,6 +703,21 @@ function toLocalAttachmentCard(attachment: ComposerAttachment): AttachmentCard {
     previewUrl: attachment.previewUrl,
     source: "local"
   };
+}
+
+function mergeTranscript(currentValue: string, transcript: string) {
+  const trimmedCurrent = currentValue.trim();
+  const trimmedTranscript = transcript.trim();
+
+  if (!trimmedTranscript) {
+    return trimmedCurrent;
+  }
+
+  if (!trimmedCurrent) {
+    return trimmedTranscript;
+  }
+
+  return `${trimmedCurrent}\n\nTranscript:\n${trimmedTranscript}`;
 }
 
 export default App;

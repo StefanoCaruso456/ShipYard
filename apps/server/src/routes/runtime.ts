@@ -12,6 +12,11 @@ import type {
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import { analyzeTaskAttachments } from "../runtime/analyzeTaskAttachments";
+import {
+  AudioTranscriptionError,
+  type AudioTranscriptionConfig,
+  type createAudioTranscriber
+} from "../runtime/createAudioTranscriber";
 
 type RuntimeTaskRequest = Request & {
   files?: Express.Multer.File[];
@@ -25,17 +30,95 @@ const attachmentUpload = multer({
   }
 });
 
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 1,
+    fileSize: 25 * 1024 * 1024
+  }
+});
+
 export function registerRuntimeRoutes(
   app: Express,
   runtimeService: PersistentAgentRuntimeService,
   openAI: OpenAIExecutorConfig,
+  audioTranscriber: ReturnType<typeof createAudioTranscriber>,
   contextAssembler?: ContextAssembler
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
       ...runtimeService.getStatus(),
-      model: serializeOpenAIConfig(openAI)
+      model: serializeOpenAIConfig(openAI),
+      audioTranscription: serializeAudioTranscriptionConfig(audioTranscriber.config)
     });
+  });
+
+  app.post("/api/runtime/audio/transcriptions", parseAudioUpload, async (request, response) => {
+    const audioFile = Array.isArray((request as RuntimeTaskRequest).files)
+      ? (request as RuntimeTaskRequest).files?.[0] ?? null
+      : null;
+
+    if (!audioFile) {
+      response.status(400).json({
+        error: "An audio file is required."
+      });
+      return;
+    }
+
+    if (!looksLikeAudioFile(audioFile)) {
+      response.status(400).json({
+        error: "Only audio uploads are supported on this route."
+      });
+      return;
+    }
+
+    const prompt =
+      typeof request.body?.prompt === "string" && request.body.prompt.trim()
+        ? request.body.prompt.trim()
+        : undefined;
+    const language =
+      typeof request.body?.language === "string" && request.body.language.trim()
+        ? request.body.language.trim()
+        : undefined;
+
+    try {
+      const transcription = await audioTranscriber.transcribe({
+        fileName: audioFile.originalname,
+        mimeType: audioFile.mimetype || null,
+        buffer: audioFile.buffer,
+        prompt,
+        language
+      });
+
+      response.status(200).json({
+        transcription: {
+          text: transcription.text,
+          summary: transcription.summary,
+          excerpt: transcription.excerpt,
+          language: transcription.language,
+          model: {
+            provider: transcription.provider,
+            modelId: transcription.modelId
+          },
+          file: {
+            name: audioFile.originalname,
+            mimeType: audioFile.mimetype || null,
+            size: audioFile.size
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof AudioTranscriptionError) {
+        response.status(error.statusCode).json({
+          error: error.message
+        });
+        return;
+      }
+
+      response.status(500).json({
+        error: error instanceof Error ? error.message : "Audio transcription failed."
+      });
+    }
   });
 
   app.post("/api/runtime/tasks", parseMultipartAttachments, (request, response) => {
@@ -157,6 +240,15 @@ function serializeOpenAIConfig(openAI: OpenAIExecutorConfig) {
   };
 }
 
+function serializeAudioTranscriptionConfig(config: AudioTranscriptionConfig) {
+  return {
+    provider: config.provider,
+    configured: config.configured,
+    modelId: config.modelId,
+    apiKeySource: config.apiKeySource
+  };
+}
+
 function parseMultipartAttachments(request: Request, response: Response, next: NextFunction) {
   if (!request.is("multipart/form-data")) {
     next();
@@ -171,6 +263,26 @@ function parseMultipartAttachments(request: Request, response: Response, next: N
 
     response.status(400).json({
       error: error instanceof Error ? error.message : "Attachment upload failed."
+    });
+  });
+}
+
+function parseAudioUpload(request: Request, response: Response, next: NextFunction) {
+  if (!request.is("multipart/form-data")) {
+    response.status(400).json({
+      error: "Audio uploads must use multipart/form-data."
+    });
+    return;
+  }
+
+  audioUpload.array("audio", 1)(request, response, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Audio upload failed."
     });
   });
 }
@@ -272,6 +384,14 @@ function parseUnknownJson(value: unknown) {
   } catch {
     return value;
   }
+}
+
+function looksLikeAudioFile(file: { originalname: string; mimetype: string }) {
+  if (file.mimetype?.toLowerCase().startsWith("audio/")) {
+    return true;
+  }
+
+  return /\.(mp3|mp4|m4a|wav|webm|ogg|oga)$/i.test(file.originalname);
 }
 
 function parseBooleanField(value: unknown) {

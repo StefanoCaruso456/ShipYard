@@ -37,6 +37,12 @@ export type RuntimeHealthResponse = {
     modelId: string;
     apiKeySource: "OPENAI_KEY" | "OPENAI_API_KEY" | null;
   };
+  audioTranscription?: {
+    provider: "openai";
+    configured: boolean;
+    modelId: string;
+    apiKeySource: "OPENAI_KEY" | "OPENAI_API_KEY" | null;
+  };
 };
 
 export type RuntimeWorkerState = "idle" | "running";
@@ -53,6 +59,12 @@ export type RuntimeStatusResponse = {
     loadedAt: string;
   };
   model?: {
+    provider: "openai";
+    configured: boolean;
+    modelId: string;
+    apiKeySource: "OPENAI_KEY" | "OPENAI_API_KEY" | null;
+  };
+  audioTranscription?: {
     provider: "openai";
     configured: boolean;
     modelId: string;
@@ -202,6 +214,24 @@ export type RuntimeInstructionResponse = {
       renderedText: string;
     }
   >;
+};
+
+export type RuntimeAudioTranscriptionResponse = {
+  transcription: {
+    text: string;
+    summary: string;
+    excerpt: string | null;
+    language: string | null;
+    model: {
+      provider: "openai";
+      modelId: string;
+    };
+    file: {
+      name: string;
+      mimeType: string | null;
+      size: number;
+    };
+  };
 };
 
 export type WorkspaceProject = {

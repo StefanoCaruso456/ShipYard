@@ -25,10 +25,13 @@ type TaskWorkspaceProps = {
   composerAttachments: ComposerAttachment[];
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
+  transcribingAudio: boolean;
   backendConnected: boolean;
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onComposerAttachmentsChange: (attachments: ComposerAttachment[]) => void;
+  onVoiceCapture: (file: File) => Promise<void>;
+  onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
@@ -45,10 +48,13 @@ export function TaskWorkspace({
   composerAttachments,
   feedback,
   submitting,
+  transcribingAudio,
   backendConnected,
   onComposerModeChange,
   onComposerValueChange,
   onComposerAttachmentsChange,
+  onVoiceCapture,
+  onVoiceCaptureError,
   onSelectSuggestion,
   onSubmit
 }: TaskWorkspaceProps) {
@@ -109,9 +115,12 @@ export function TaskWorkspace({
         attachments={composerAttachments}
         feedback={feedback}
         submitting={submitting}
+        transcribingAudio={transcribingAudio}
         onComposerModeChange={onComposerModeChange}
         onComposerValueChange={onComposerValueChange}
         onAttachmentsChange={onComposerAttachmentsChange}
+        onVoiceCapture={onVoiceCapture}
+        onVoiceCaptureError={onVoiceCaptureError}
         onSubmit={onSubmit}
       />
     </section>
