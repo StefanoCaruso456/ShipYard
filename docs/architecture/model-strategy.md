@@ -2,13 +2,13 @@
 
 ## Decision
 
-Use Vercel AI SDK as the model abstraction layer and Anthropic Claude as the primary coding model.
+Use Vercel AI SDK as the model abstraction layer and keep the runtime provider-agnostic.
 
 ## Why
 
 - Vercel AI SDK keeps provider access behind one integration surface.
-- Claude is the initial primary model for coding and reasoning-heavy agent work.
-- The runtime should remain provider-agnostic at the SDK layer even if Claude is the default.
+- The runtime should stay flexible as model needs change.
+- The current server wiring already supports OpenAI through the SDK.
 
 ## Design Rules
 
@@ -19,9 +19,9 @@ Use Vercel AI SDK as the model abstraction layer and Anthropic Claude as the pri
 
 ## Provider Strategy
 
-### Primary
+### Current Runtime Wiring
 
-- Anthropic Claude
+- OpenAI through Vercel AI SDK
 
 ### Abstraction
 
@@ -29,7 +29,7 @@ Use Vercel AI SDK as the model abstraction layer and Anthropic Claude as the pri
 
 ### Later Options
 
-- secondary providers through the same SDK layer
+- additional providers through the same SDK layer
 - routing or gateway strategy if cost, latency, or fallback needs justify it
 
 ## Not Doing Yet
@@ -37,4 +37,3 @@ Use Vercel AI SDK as the model abstraction layer and Anthropic Claude as the pri
 - multi-provider routing on day one
 - cost-optimization infrastructure before the base runtime is stable
 - provider-specific prompt forks unless a real model gap appears
-

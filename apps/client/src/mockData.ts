@@ -436,14 +436,14 @@ export function buildGitPreview(thread: WorkspaceThread): GitChange[] {
 
   return [
     {
-      path: "instructions/skills/coding-agent.md",
+      path: "skill.md",
       changeType: "M",
       summary: "Preview instruction adjustments waiting on the real editing engine."
     },
     {
-      path: "docs/architecture/runtime-architecture.md",
+      path: "docs/architecture/implementation-phases.md",
       changeType: "M",
-      summary: "Design notes for future runtime orchestration."
+      summary: "Implementation phase summary for the current runtime build."
     }
   ];
 }
