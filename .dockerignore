@@ -1,0 +1,9 @@
+.git
+.github
+.shipyard
+.vercel
+node_modules
+apps/*/dist
+packages/*/dist
+shipyard_prd.pdf
+*.log
