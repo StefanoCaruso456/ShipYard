@@ -11,6 +11,7 @@ import { projectBrief } from "@shipyard/shared";
 
 import { registerRuntimeRoutes } from "./routes/runtime";
 import { bootRuntimeService } from "./runtime/bootRuntimeService";
+import type { AudioTranscriptionConfig } from "./runtime/createAudioTranscriber";
 import type { OpenAIExecutorConfig } from "./runtime/createOpenAIExecutor";
 
 type RuntimeBootState = {
@@ -20,6 +21,7 @@ type RuntimeBootState = {
   runtimeService: PersistentAgentRuntimeService | null;
   contextAssembler: ContextAssembler | null;
   openAI: OpenAIExecutorConfig | null;
+  audioTranscription: AudioTranscriptionConfig | null;
 };
 
 const host = process.env.HOST?.trim() || "0.0.0.0";
@@ -33,7 +35,8 @@ async function startServer() {
     completedAt: null,
     runtimeService: null,
     contextAssembler: null,
-    openAI: null
+    openAI: null,
+    audioTranscription: null
   };
   const app = express();
 
@@ -100,15 +103,17 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
   });
 
   try {
-    const { runtimeService, contextAssembler, openAI, runtimeStatePath } = await bootRuntimeService();
+    const { runtimeService, contextAssembler, openAI, audioTranscriber, runtimeStatePath } =
+      await bootRuntimeService();
 
     bootState.status = "ready";
     bootState.completedAt = new Date().toISOString();
     bootState.runtimeService = runtimeService;
     bootState.contextAssembler = contextAssembler;
     bootState.openAI = openAI;
+    bootState.audioTranscription = audioTranscriber.config;
 
-    registerRuntimeRoutes(app, runtimeService, openAI, contextAssembler);
+    registerRuntimeRoutes(app, runtimeService, openAI, audioTranscriber, contextAssembler);
 
     console.log("Shipyard runtime boot complete.", {
       completedAt: bootState.completedAt,
@@ -199,6 +204,12 @@ function createHealthPayload(bootState: RuntimeBootState) {
       configured: bootState.openAI.configured,
       modelId: bootState.openAI.modelId,
       apiKeySource: bootState.openAI.apiKeySource
+    },
+    audioTranscription: {
+      provider: bootState.audioTranscription.provider,
+      configured: bootState.audioTranscription.configured,
+      modelId: bootState.audioTranscription.modelId,
+      apiKeySource: bootState.audioTranscription.apiKeySource
     }
   };
 }
@@ -218,12 +229,14 @@ function isRuntimeReady(
   runtimeService: PersistentAgentRuntimeService;
   contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
+  audioTranscription: AudioTranscriptionConfig;
 } {
   return (
     bootState.status === "ready" &&
     bootState.runtimeService !== null &&
     bootState.contextAssembler !== null &&
-    bootState.openAI !== null
+    bootState.openAI !== null &&
+    bootState.audioTranscription !== null
   );
 }
 

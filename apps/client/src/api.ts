@@ -1,5 +1,6 @@
 import type {
   ComposerAttachment,
+  RuntimeAudioTranscriptionResponse,
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
@@ -84,5 +85,28 @@ export function submitRuntimeTask(input: {
   return requestJson<RuntimeTaskResponse>("/api/runtime/tasks", {
     method: "POST",
     body: JSON.stringify(input)
+  });
+}
+
+export function transcribeRuntimeAudio(input: {
+  file: File;
+  prompt?: string;
+  language?: string;
+}) {
+  const formData = new FormData();
+
+  formData.append("audio", input.file, input.file.name);
+
+  if (input.prompt?.trim()) {
+    formData.append("prompt", input.prompt.trim());
+  }
+
+  if (input.language?.trim()) {
+    formData.append("language", input.language.trim());
+  }
+
+  return requestJson<RuntimeAudioTranscriptionResponse>("/api/runtime/audio/transcriptions", {
+    method: "POST",
+    body: formData
   });
 }

@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
+import { createRecordedAudioFile, pickPreferredAudioMimeType } from "../audio";
 import { buildComposerAttachments } from "../attachments";
 import type { ComposerAttachment, ComposerMode, WorkspaceProject } from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
@@ -12,9 +13,12 @@ type ComposerProps = {
   attachments: ComposerAttachment[];
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
+  transcribingAudio: boolean;
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onAttachmentsChange: (attachments: ComposerAttachment[]) => void;
+  onVoiceCapture: (file: File) => Promise<void>;
+  onVoiceCaptureError: (message: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -25,21 +29,38 @@ export function Composer({
   attachments,
   feedback,
   submitting,
+  transcribingAudio,
   onComposerModeChange,
   onComposerValueChange,
   onAttachmentsChange,
+  onVoiceCapture,
+  onVoiceCaptureError,
   onSubmit
 }: ComposerProps) {
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
   const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
-  const canSubmit = Boolean(project) && !submitting && hasDraftContent;
+  const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
-    composerMode === "image"
+    recordingState === "recording"
+      ? "Recording voice note..."
+      : transcribingAudio
+        ? "Transcribing voice note..."
+        : composerMode === "image"
       ? "Describe the image task..."
       : composerMode === "voice"
-        ? "Mic mode is staged. Type the instruction or attach files..."
+        ? "Record a voice note or type the instruction..."
         : "Ask Codex anything...";
+
+  useEffect(() => {
+    return () => {
+      stopActiveStream();
+    };
+  }, []);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
@@ -49,6 +70,88 @@ export function Composer({
     const nextAttachments = await buildComposerAttachments(fileList);
 
     onAttachmentsChange([...attachments, ...nextAttachments]);
+  }
+
+  async function handleMicClick() {
+    if (recordingState === "recording") {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (recordingState === "starting" || transcribingAudio) {
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      onVoiceCaptureError("Microphone capture is not supported in this browser.");
+      return;
+    }
+
+    if (typeof MediaRecorder === "undefined") {
+      onVoiceCaptureError("MediaRecorder is not available in this browser.");
+      return;
+    }
+
+    setRecordingState("starting");
+    onComposerModeChange("voice");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickPreferredAudioMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      streamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      });
+
+      recorder.addEventListener("stop", async () => {
+        const blob = new Blob(chunksRef.current, {
+          type: recorder.mimeType || mimeType || "audio/webm"
+        });
+        const file = createRecordedAudioFile(blob);
+
+        stopActiveStream();
+        setRecordingState("idle");
+        chunksRef.current = [];
+
+        try {
+          await onVoiceCapture(file);
+        } catch (error) {
+          onVoiceCaptureError(
+            error instanceof Error ? error.message : "Voice note processing failed."
+          );
+        }
+      });
+
+      recorder.addEventListener("error", () => {
+        stopActiveStream();
+        setRecordingState("idle");
+        onVoiceCaptureError("Microphone capture failed.");
+      });
+
+      recorder.start();
+      setRecordingState("recording");
+    } catch (error) {
+      stopActiveStream();
+      setRecordingState("idle");
+      onVoiceCaptureError(
+        error instanceof Error ? error.message : "Microphone permission was denied."
+      );
+    }
+  }
+
+  function stopActiveStream() {
+    mediaRecorderRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   }
 
   return (
@@ -79,11 +182,18 @@ export function Composer({
             </button>
             <button
               type="button"
-              className={`composer__tool-button ${composerMode === "voice" ? "is-active" : ""}`}
-              onClick={() => onComposerModeChange(composerMode === "voice" ? "text" : "voice")}
+              className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
+              onClick={() => void handleMicClick()}
+              disabled={transcribingAudio}
             >
               <MicIcon />
-              <span>Mic</span>
+              <span>
+                {recordingState === "recording"
+                  ? "Stop"
+                  : transcribingAudio
+                    ? "Transcribing"
+                    : "Mic"}
+              </span>
             </button>
           </div>
 
@@ -92,7 +202,7 @@ export function Composer({
               type="submit"
               className={`composer__submit ${canSubmit ? "composer__submit--active" : ""}`}
               disabled={!canSubmit}
-              aria-label={submitting ? "Sending" : "Send message"}
+              aria-label={submitting ? "Sending" : transcribingAudio ? "Transcribing audio" : "Send message"}
             >
               <ArrowUpIcon />
             </button>

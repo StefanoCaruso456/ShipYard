@@ -11,6 +11,10 @@ import path from "node:path";
 
 import { bootAgentRuntime } from "./bootAgentRuntime";
 import {
+  createAudioTranscriber,
+  resolveAudioTranscriptionConfig
+} from "./createAudioTranscriber";
+import {
   resolveOpenAIExecutorConfig,
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
@@ -22,6 +26,7 @@ export type BootedRuntimeService = {
   runtimeService: PersistentAgentRuntimeService;
   contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
+  audioTranscriber: ReturnType<typeof createAudioTranscriber>;
   runtimeStatePath: string;
 };
 
@@ -30,6 +35,9 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const instructionRuntime = await bootAgentRuntime(rootDir);
   const projectRules = await loadProjectRules(rootDir);
   const openAI = resolveOpenAIExecutorConfig();
+  const audioTranscriber = createAudioTranscriber({
+    config: resolveAudioTranscriptionConfig()
+  });
   const runtimeStatePath = resolveRuntimeStatePath(rootDir);
   const repoToolset = createRepoToolset({
     rootDir
@@ -52,6 +60,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     }),
     contextAssembler,
     openAI,
+    audioTranscriber,
     runtimeStatePath
   };
 }
