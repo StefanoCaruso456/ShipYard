@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "concurrently \"pnpm --filter @shipyard/server dev\" \"pnpm --filter @shipyard/client dev\"",
     "build": "pnpm -r build",
+    "start": "node apps/server/dist/index.js",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean"
   },
