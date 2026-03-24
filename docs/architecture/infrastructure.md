@@ -17,6 +17,13 @@ Railway is the target host for:
 - background loop behavior
 - runtime health and debug endpoints
 
+Runtime hosting rules:
+
+- bind the HTTP server to `0.0.0.0`
+- respect the platform-provided `PORT`
+- expose a readiness endpoint for deploy healthchecks
+- keep startup state visible in logs and lightweight HTTP responses
+
 ## Database
 
 Use Railway PostgreSQL for:

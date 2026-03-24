@@ -110,6 +110,58 @@ test("persistent runtime marks failures clearly and accepts follow-up tasks", as
   assert.equal(status.totalRuns, 2);
 });
 
+test("persistent runtime retries validation failures once and records rollback events", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const attempts: number[] = [];
+  const runtimeService = createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async () => {
+      attempts.push(attempts.length + 1);
+
+      const error = new Error("Validation failed after edit.") as Error & {
+        code?: string;
+        toolName?: string;
+        path?: string;
+        validationResult?: unknown;
+        rollback?: unknown;
+      };
+
+      error.code = "validation_failed";
+      error.toolName = "edit_file_region";
+      error.path = "src/example.ts";
+      error.validationResult = {
+        success: false,
+        type: "file",
+        errors: ["Validation failed after edit."],
+        warnings: [],
+        path: "src/example.ts"
+      };
+      error.rollback = {
+        attempted: true,
+        success: true,
+        path: "src/example.ts",
+        message: "Restored the original file after validation failed."
+      };
+
+      throw error;
+    }
+  });
+
+  const run = runtimeService.submitTask({
+    instruction: "Retry this invalid edit once."
+  });
+
+  const failedRun = await waitForRunStatus(runtimeService, run.id, "failed");
+
+  assert.deepEqual(attempts, [1, 2]);
+  assert.equal(failedRun.retryCount, 1);
+  assert.equal(failedRun.validationStatus, "rolled_back");
+  assert.equal(failedRun.lastValidationResult?.success, false);
+  assert.equal(failedRun.error?.code, "validation_failed");
+  assert.ok(failedRun.events.some((event) => event.type === "retry_scheduled"));
+  assert.ok(failedRun.events.some((event) => event.type === "rollback_succeeded"));
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),

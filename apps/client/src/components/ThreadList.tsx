@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 import type { ThreadGroup } from "../types";
 
 type ThreadListProps = {
@@ -19,6 +21,49 @@ export function ThreadList({
   onRenameProject,
   onDeleteProject
 }: ThreadListProps) {
+  const [openMenuProjectId, setOpenMenuProjectId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openMenuProjectId) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpenMenuProjectId(null);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenMenuProjectId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMenuProjectId]);
+
+  function toggleProjectMenu(projectId: string) {
+    setOpenMenuProjectId((current) => (current === projectId ? null : projectId));
+  }
+
+  function handleRename(projectId: string) {
+    setOpenMenuProjectId(null);
+    onRenameProject(projectId);
+  }
+
+  function handleDelete(projectId: string) {
+    setOpenMenuProjectId(null);
+    onDeleteProject(projectId);
+  }
+
   return (
     <div className="thread-list">
       {groups.map(({ project, threads }) => (
@@ -33,25 +78,43 @@ export function ThreadList({
               <span>{project.name}</span>
             </button>
 
-            <div className="thread-group__actions">
+            <div
+              ref={openMenuProjectId === project.id ? menuRef : null}
+              className={`thread-group__menu ${openMenuProjectId === project.id ? "is-open" : ""}`}
+            >
               <button
                 type="button"
-                className="thread-group__action-button"
-                onClick={() => onRenameProject(project.id)}
-                aria-label={`Rename ${project.name}`}
+                className="thread-group__menu-trigger sidebar__icon-button"
+                onClick={() => toggleProjectMenu(project.id)}
+                aria-label={`Open actions for ${project.name}`}
+                aria-haspopup="menu"
+                aria-expanded={openMenuProjectId === project.id}
               >
-                <RenameIcon />
-                <span>Rename</span>
+                <MoreIcon />
               </button>
-              <button
-                type="button"
-                className="thread-group__action-button thread-group__action-button--danger"
-                onClick={() => onDeleteProject(project.id)}
-                aria-label={`Delete ${project.name}`}
-              >
-                <DeleteIcon />
-                <span>Delete</span>
-              </button>
+
+              {openMenuProjectId === project.id ? (
+                <div className="thread-group__menu-panel" role="menu" aria-label={`${project.name} actions`}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="thread-group__menu-item"
+                    onClick={() => handleRename(project.id)}
+                  >
+                    <RenameIcon />
+                    <span>Rename</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="thread-group__menu-item thread-group__menu-item--danger"
+                    onClick={() => handleDelete(project.id)}
+                  >
+                    <DeleteIcon />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -99,6 +162,16 @@ function RenameIcon() {
         strokeLinejoin="round"
       />
       <path d="M11.6 5.4l1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="4.25" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="10" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="15.75" cy="10" r="1.3" fill="currentColor" />
     </svg>
   );
 }

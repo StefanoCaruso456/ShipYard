@@ -59,6 +59,8 @@ test("editFileRegion updates only the anchored block", async () => {
     );
     assert.equal(result.data.validation.changeApplied, true);
     assert.equal(result.data.validation.unchangedOutsideRegion, true);
+    assert.equal(result.data.validationResult.success, true);
+    assert.equal(result.data.validationResult.type, "file");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -191,7 +193,13 @@ test("commitTextFileMutation restores the original file when validation fails", 
           ok: false,
           error: {
             code: "validation_failed",
-            message: "Forced validation failure."
+            message: "Forced validation failure.",
+            validationResult: {
+              success: false,
+              type: "file",
+              errors: ["Forced validation failure."],
+              warnings: []
+            }
           }
         };
       }
@@ -204,7 +212,54 @@ test("commitTextFileMutation restores the original file when validation fails", 
     }
 
     assert.equal(result.error.code, "validation_failed");
+    assert.equal(result.error.validationResult?.success, false);
+    assert.equal(result.error.rollback?.success, true);
     assert.equal(await readFile(filePath, "utf8"), originalContent);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("commitTextFileMutation returns rollback_failed when restoring the original file fails", async () => {
+  const tempDir = await createTempRepo({
+    "src/example.ts": "export const greeting = 'hello';\n"
+  });
+  const filePath = path.join(tempDir, "src/example.ts");
+  const originalContent = await readFile(filePath, "utf8");
+
+  try {
+    const result = await commitTextFileMutation({
+      resolvedPath: filePath,
+      displayPath: "src/example.ts",
+      originalContent,
+      nextContent: "export const greeting = 'changed';\n",
+      validate() {
+        return {
+          ok: false,
+          error: {
+            code: "validation_failed",
+            message: "Forced validation failure.",
+            validationResult: {
+              success: false,
+              type: "file",
+              errors: ["Forced validation failure."],
+              warnings: []
+            }
+          }
+        };
+      },
+      rollback: async () => false
+    });
+
+    assert.equal(result.ok, false);
+
+    if (result.ok) {
+      return;
+    }
+
+    assert.equal(result.error.code, "rollback_failed");
+    assert.equal(result.error.rollback?.success, false);
+    assert.equal(await readFile(filePath, "utf8"), "export const greeting = 'changed';\n");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

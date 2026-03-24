@@ -76,3 +76,10 @@ pnpm dev
 - The runtime server reads `OPENAI_KEY` for Vercel AI SDK OpenAI calls. If the backend stays on Railway, set `OPENAI_KEY` there too. A Vercel env var alone will not reach the Railway runtime.
 - GitHub Actions now includes a production Vercel deploy workflow in `.github/workflows/vercel-production.yml` that runs on every push to `main`.
 - To enable that workflow, add these GitHub repository secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID`.
+
+## Railway Health
+
+- The server binds to `0.0.0.0` and respects Railway's `PORT`.
+- `/api/health` is the readiness endpoint used by Railway deploy healthchecks.
+- `/` stays available with boot-state details so startup failures are easier to diagnose.
+- If a Railway deploy builds successfully but never becomes healthy, check the deploy logs for the runtime boot status before assuming the Docker image is broken.

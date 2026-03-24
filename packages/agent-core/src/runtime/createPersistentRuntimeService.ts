@@ -13,6 +13,7 @@ import {
   type PersistentAgentRuntimeService,
   type SubmitTaskInput
 } from "./types";
+import type { RunEvent, ValidationResult } from "../validation/types";
 
 type CreatePersistentRuntimeServiceOptions = {
   instructionRuntime: AgentInstructionRuntime;
@@ -21,6 +22,7 @@ type CreatePersistentRuntimeServiceOptions = {
 };
 
 const runStatuses: AgentRunStatus[] = ["pending", "running", "completed", "failed"];
+const MAX_VALIDATION_RETRIES = 1;
 
 export function createPersistentRuntimeService(
   options: CreatePersistentRuntimeServiceOptions
@@ -53,6 +55,10 @@ export function createPersistentRuntimeService(
       createdAt: new Date().toISOString(),
       startedAt: null,
       completedAt: null,
+      retryCount: 0,
+      validationStatus: "not_run",
+      lastValidationResult: null,
+      events: [],
       error: null,
       result: null
     };
@@ -65,11 +71,13 @@ export function createPersistentRuntimeService(
   }
 
   function getRun(id: string): AgentRunRecord | null {
-    return store.get(id);
+    const run = store.get(id);
+
+    return run ? normalizeRunRecord(run) : null;
   }
 
   function listRuns(): AgentRunRecord[] {
-    return store.list();
+    return store.list().map(normalizeRunRecord);
   }
 
   function getStatus(): AgentRuntimeStatus {
@@ -125,10 +133,19 @@ export function createPersistentRuntimeService(
 
       if (run.status === "running") {
         store.update({
-          ...run,
+          ...normalizeRunRecord(run),
           status: "failed",
           completedAt: recoveredAt,
+          validationStatus: normalizeRunRecord(run).validationStatus,
+          events: appendRunEvents(normalizeRunRecord(run), {
+            at: recoveredAt,
+            type: "execution_failed",
+            message:
+              "Runtime restarted before this run completed. Review and resubmit if it should continue.",
+            retryCount: normalizeRunRecord(run).retryCount
+          }),
           error: {
+            code: "execution_failed",
             message:
               "Runtime restarted before this run completed. Review and resubmit if it should continue."
           },
@@ -177,41 +194,76 @@ export function createPersistentRuntimeService(
   async function processRun(run: AgentRunRecord) {
     activeRunId = run.id;
 
-    const runningRun: AgentRunRecord = {
-      ...run,
-      status: "running",
-      startedAt: new Date().toISOString(),
-      error: null
-    };
-
-    store.update(runningRun);
-
     try {
-      const result = await executeRun(runningRun, {
-        instructionRuntime: options.instructionRuntime
-      });
-      const completedAt = new Date().toISOString();
+      let currentRun = normalizeRunRecord(run);
 
-      store.update({
-        ...(store.get(run.id) ?? runningRun),
-        status: "completed",
-        completedAt,
-        error: null,
-        result: {
-          ...result,
-          completedAt
+      while (true) {
+        const runningRun: AgentRunRecord = normalizeRunRecord({
+          ...currentRun,
+          status: "running",
+          startedAt: currentRun.startedAt ?? new Date().toISOString(),
+          completedAt: null,
+          error: null
+        });
+
+        store.update(runningRun);
+
+        try {
+          const result = await executeRun(runningRun, {
+            instructionRuntime: options.instructionRuntime
+          });
+          const completedAt = new Date().toISOString();
+          const validationResult = extractValidationResult(result);
+          const completedRun = normalizeRunRecord({
+            ...(store.get(run.id) ?? runningRun),
+            status: "completed",
+            completedAt,
+            validationStatus: validationResult
+              ? validationResult.success
+                ? "passed"
+                : "failed"
+              : runningRun.validationStatus,
+            lastValidationResult: validationResult ?? runningRun.lastValidationResult,
+            events: validationResult
+              ? appendRunEvents(runningRun, createValidationSuccessEvent(result, validationResult))
+              : runningRun.events,
+            error: null,
+            result: {
+              ...result,
+              completedAt
+            }
+          });
+
+          store.update(completedRun);
+          return;
+        } catch (error) {
+          const failure = toRunFailure(error);
+          const retrying = shouldRetryRun(runningRun, failure);
+          const nextRun = normalizeRunRecord({
+            ...(store.get(run.id) ?? runningRun),
+            status: retrying ? "pending" : "failed",
+            completedAt: retrying ? null : new Date().toISOString(),
+            retryCount: retrying ? runningRun.retryCount + 1 : runningRun.retryCount,
+            validationStatus: deriveValidationStatus(runningRun, failure),
+            lastValidationResult:
+              failure.validationResult ?? runningRun.lastValidationResult ?? null,
+            events: appendRunEvents(
+              runningRun,
+              ...createFailureEvents(failure, runningRun.retryCount, retrying)
+            ),
+            error: retrying ? null : failure,
+            result: null
+          });
+
+          store.update(nextRun);
+
+          if (!retrying) {
+            return;
+          }
+
+          currentRun = nextRun;
         }
-      });
-    } catch (error) {
-      const failure = toRunFailure(error);
-
-      store.update({
-        ...(store.get(run.id) ?? runningRun),
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error: failure,
-        result: null
-      });
+      }
     } finally {
       activeRunId = null;
     }
@@ -254,7 +306,7 @@ function createRunCounts(): Record<AgentRunStatus, number> {
   >;
 }
 
-function toRunFailure(error: unknown): AgentRunRecord["error"] {
+function toRunFailure(error: unknown): NonNullable<AgentRunRecord["error"]> {
   const fallbackMessage = error instanceof Error ? error.message : "Unknown runtime error.";
   const failure: NonNullable<AgentRunRecord["error"]> = {
     message: fallbackMessage
@@ -265,6 +317,8 @@ function toRunFailure(error: unknown): AgentRunRecord["error"] {
       code?: unknown;
       toolName?: unknown;
       path?: unknown;
+      validationResult?: unknown;
+      rollback?: unknown;
     };
 
     if (typeof candidate.code === "string") {
@@ -278,11 +332,147 @@ function toRunFailure(error: unknown): AgentRunRecord["error"] {
     if (typeof candidate.path === "string") {
       failure.path = candidate.path;
     }
+
+    if (candidate.validationResult && typeof candidate.validationResult === "object") {
+      failure.validationResult = candidate.validationResult as ValidationResult;
+    }
+
+    if (candidate.rollback && typeof candidate.rollback === "object") {
+      failure.rollback = candidate.rollback as NonNullable<typeof failure.rollback>;
+    }
   }
 
   if (!failure.code) {
-    failure.code = "runtime_error";
+    failure.code = "execution_failed";
   }
 
   return failure;
+}
+
+function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
+  return {
+    ...run,
+    toolRequest: run.toolRequest ?? null,
+    retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
+    validationStatus: run.validationStatus ?? "not_run",
+    lastValidationResult: run.lastValidationResult ?? null,
+    events: Array.isArray(run.events) ? run.events : []
+  };
+}
+
+function extractValidationResult(result: AgentRunResult): ValidationResult | null {
+  if (result.mode !== "repo-tool" || !result.toolResult?.ok) {
+    return null;
+  }
+
+  const candidate = result.toolResult.data as {
+    validationResult?: ValidationResult;
+  };
+
+  return candidate.validationResult ?? null;
+}
+
+function shouldRetryRun(
+  run: AgentRunRecord,
+  failure: NonNullable<AgentRunRecord["error"]>
+) {
+  return (
+    failure.code === "validation_failed" &&
+    failure.rollback?.success === true &&
+    run.retryCount < MAX_VALIDATION_RETRIES
+  );
+}
+
+function deriveValidationStatus(
+  run: AgentRunRecord,
+  failure: NonNullable<AgentRunRecord["error"]>
+) {
+  if (failure.rollback?.attempted) {
+    return failure.rollback.success ? "rolled_back" : "rollback_failed";
+  }
+
+  if (failure.validationResult) {
+    return failure.validationResult.success ? "passed" : "failed";
+  }
+
+  return run.validationStatus;
+}
+
+function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
+  return [...run.events, ...events];
+}
+
+function createValidationSuccessEvent(
+  result: AgentRunResult,
+  validationResult: ValidationResult
+): RunEvent {
+  return {
+    at: new Date().toISOString(),
+    type: "validation_succeeded",
+    message: "Validation passed after the mutation completed.",
+    toolName: result.toolResult?.toolName ?? null,
+    path: validationResult.path ?? null,
+    retryCount: 0,
+    validationResult
+  };
+}
+
+function createFailureEvents(
+  failure: NonNullable<AgentRunRecord["error"]>,
+  retryCount: number,
+  retrying: boolean
+): RunEvent[] {
+  const events: RunEvent[] = [];
+  const at = new Date().toISOString();
+
+  if (failure.validationResult) {
+    events.push({
+      at,
+      type: "validation_failed",
+      message: failure.message,
+      toolName: failure.toolName ?? null,
+      path: failure.path ?? failure.validationResult.path ?? null,
+      retryCount,
+      validationResult: failure.validationResult,
+      rollback: failure.rollback ?? null
+    });
+  } else {
+    events.push({
+      at,
+      type: "execution_failed",
+      message: failure.message,
+      toolName: failure.toolName ?? null,
+      path: failure.path ?? null,
+      retryCount,
+      rollback: failure.rollback ?? null
+    });
+  }
+
+  if (failure.rollback?.attempted) {
+    events.push({
+      at,
+      type: failure.rollback.success ? "rollback_succeeded" : "rollback_failed",
+      message: failure.rollback.message,
+      toolName: failure.toolName ?? null,
+      path: failure.rollback.path ?? failure.path ?? null,
+      retryCount,
+      validationResult: failure.validationResult ?? null,
+      rollback: failure.rollback
+    });
+  }
+
+  if (retrying) {
+    events.push({
+      at,
+      type: "retry_scheduled",
+      message: `Retrying after validation failure (attempt ${retryCount + 1} of ${MAX_VALIDATION_RETRIES}).`,
+      toolName: failure.toolName ?? null,
+      path: failure.path ?? failure.validationResult?.path ?? null,
+      retryCount: retryCount + 1,
+      validationResult: failure.validationResult ?? null,
+      rollback: failure.rollback ?? null
+    });
+  }
+
+  return events;
 }

@@ -166,8 +166,7 @@ a {
 }
 
 .thread-group__header {
-  align-items: stretch;
-  flex-direction: column;
+  position: relative;
   gap: 0.4rem;
 }
 
@@ -186,32 +185,68 @@ a {
   white-space: nowrap;
 }
 
-.thread-group__actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
+.thread-group__menu {
+  position: relative;
+  flex: none;
 }
 
-.thread-group__action-button {
+.thread-group__menu-trigger {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-color: rgba(255, 255, 255, 0.04);
+  color: #b7b7b1;
+}
+
+.thread-group__menu.is-open .thread-group__menu-trigger {
+  background: #2a2a2a;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.thread-group__menu-panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 20;
+  min-width: 10.5rem;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.95rem;
+  background: rgba(34, 34, 34, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 18px 42px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+}
+
+.thread-group__menu-item {
   width: 100%;
-  height: auto;
-  min-height: 2rem;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  padding: 0.45rem 0.6rem;
+  gap: 0.6rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: #e2e2dd;
+  text-align: left;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.thread-group__menu-item:hover {
+  background: #2a2a2a;
   border-color: rgba(255, 255, 255, 0.06);
-  background: #202020;
-  font-size: 0.76rem;
-  color: #cfcfca;
 }
 
-.thread-group__action-button--danger {
-  color: #d7aaaa;
+.thread-group__menu-item--danger {
+  color: #e3b1b1;
 }
 
-.thread-group__action-button--danger:hover {
+.thread-group__menu-item--danger:hover {
   background: rgba(110, 62, 62, 0.24);
   border-color: rgba(177, 98, 98, 0.24);
 }
@@ -251,11 +286,8 @@ a {
   place-items: center;
 }
 
-.thread-group__action-button span {
-  line-height: 1;
-}
-
-.thread-group__action-button svg {
+.thread-group__menu-item svg,
+.thread-group__menu-trigger svg {
   width: 0.95rem;
   height: 0.95rem;
   flex: none;
@@ -676,5 +708,9 @@ a {
     width: 100%;
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .thread-group__menu-panel {
+    min-width: 9.5rem;
   }
 }

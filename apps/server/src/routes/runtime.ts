@@ -155,6 +155,10 @@ function serializeRun(run: AgentRunRecord) {
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
+    retryCount: run.retryCount,
+    validationStatus: run.validationStatus,
+    lastValidationResult: run.lastValidationResult,
+    events: run.events,
     error: run.error,
     result: run.result
   };

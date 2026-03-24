@@ -9,6 +9,12 @@ import type {
   RepoToolErrorCode,
   RepoToolName
 } from "../tools/repo/types";
+import type {
+  RollbackResult,
+  RunEvent,
+  ValidationResult,
+  ValidationStatus
+} from "../validation/types";
 
 export type AgentRunStatus = "pending" | "running" | "completed" | "failed";
 
@@ -42,9 +48,11 @@ export type SubmitTaskInput = {
 
 export type AgentRunFailure = {
   message: string;
-  code?: RepoToolErrorCode | "runtime_error";
+  code?: RepoToolErrorCode | "execution_failed";
   toolName?: RepoToolName;
   path?: string;
+  validationResult?: ValidationResult | null;
+  rollback?: RollbackResult | null;
 };
 
 export type AgentRunResult = {
@@ -69,6 +77,10 @@ export type AgentRunRecord = {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  retryCount: number;
+  validationStatus: ValidationStatus;
+  lastValidationResult: ValidationResult | null;
+  events: RunEvent[];
   error: AgentRunFailure | null;
   result: AgentRunResult | null;
 };
