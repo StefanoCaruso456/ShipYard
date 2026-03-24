@@ -1,3 +1,5 @@
+import type { RollbackResult, ValidationResult } from "../../validation/types";
+
 export type RepoToolName =
   | "list_files"
   | "read_file"
@@ -18,6 +20,7 @@ export type RepoToolErrorCode =
   | "location_mismatch"
   | "not_found"
   | "outside_root"
+  | "rollback_failed"
   | "validation_failed"
   | "write_failed";
 
@@ -27,6 +30,8 @@ export type RepoToolError = {
   path?: string;
   query?: string;
   command?: string;
+  validationResult?: ValidationResult | null;
+  rollback?: RollbackResult | null;
 };
 
 export type RepoToolSuccess<Name extends RepoToolName, Data> = {
@@ -143,7 +148,10 @@ export type EditFileRegionResult =
         validation: {
           changeApplied: true;
           unchangedOutsideRegion: true;
+          fileExists: true;
+          fileReadable: true;
         };
+        validationResult: ValidationResult;
         changedRegion: {
           startOffset: number;
           endOffset: number;
@@ -167,6 +175,7 @@ export type CreateFileResult =
         path: string;
         status: "success";
         lineCount: number;
+        validationResult: ValidationResult;
       }
     >
   | RepoToolFailure<"create_file">;
@@ -182,6 +191,7 @@ export type DeleteFileResult =
         rootDir: string;
         path: string;
         status: "success";
+        validationResult: ValidationResult;
       }
     >
   | RepoToolFailure<"delete_file">;

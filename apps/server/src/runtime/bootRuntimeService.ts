@@ -13,18 +13,21 @@ import {
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
 import { createRuntimeExecutor } from "./createRuntimeExecutor";
+import { resolveWorkspaceRoot } from "./resolveWorkspaceRoot";
 
 export type BootedRuntimeService = {
   runtimeService: PersistentAgentRuntimeService;
   openAI: OpenAIExecutorConfig;
+  runtimeStatePath: string;
 };
 
 export async function bootRuntimeService(): Promise<BootedRuntimeService> {
-  const instructionRuntime = await bootAgentRuntime();
+  const rootDir = await resolveWorkspaceRoot();
+  const instructionRuntime = await bootAgentRuntime(rootDir);
   const openAI = resolveOpenAIExecutorConfig();
-  const runtimeStatePath = resolveRuntimeStatePath();
+  const runtimeStatePath = resolveRuntimeStatePath(rootDir);
   const repoToolset = createRepoToolset({
-    rootDir: process.cwd()
+    rootDir
   });
 
   return {
@@ -38,11 +41,12 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
         repoToolset
       })
     }),
-    openAI
+    openAI,
+    runtimeStatePath
   };
 }
 
-function resolveRuntimeStatePath(env: NodeJS.ProcessEnv = process.env) {
+function resolveRuntimeStatePath(rootDir: string, env: NodeJS.ProcessEnv = process.env) {
   const configuredPath = env.SHIPYARD_RUNTIME_STATE_PATH?.trim();
 
   if (configuredPath) {
@@ -53,5 +57,5 @@ function resolveRuntimeStatePath(env: NodeJS.ProcessEnv = process.env) {
     return path.resolve("/tmp/shipyard/runtime/runs.json");
   }
 
-  return path.resolve(process.cwd(), ".shipyard/runtime/runs.json");
+  return path.resolve(rootDir, ".shipyard/runtime/runs.json");
 }

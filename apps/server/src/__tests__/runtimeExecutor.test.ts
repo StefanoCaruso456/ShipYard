@@ -64,6 +64,10 @@ test("runtime executor can process an edit task through the persistent runtime s
 
     assert.equal(completedRun.result?.mode, "repo-tool");
     assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(completedRun.validationStatus, "passed");
+    assert.equal(completedRun.lastValidationResult?.success, true);
+    assert.equal(completedRun.retryCount, 0);
+    assert.ok(completedRun.events.some((event) => event.type === "validation_succeeded"));
     assert.equal(
       await readFile(filePath, "utf8"),
       [

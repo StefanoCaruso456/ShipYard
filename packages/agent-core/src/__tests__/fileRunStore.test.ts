@@ -156,6 +156,10 @@ function createRun(
     createdAt: overrides.createdAt ?? "2026-03-23T12:00:00.000Z",
     startedAt: overrides.startedAt ?? null,
     completedAt: overrides.completedAt ?? null,
+    retryCount: overrides.retryCount ?? 0,
+    validationStatus: overrides.validationStatus ?? "not_run",
+    lastValidationResult: overrides.lastValidationResult ?? null,
+    events: overrides.events ?? [],
     error: overrides.error ?? null,
     result: overrides.result ?? null
   };

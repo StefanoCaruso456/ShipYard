@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+import type { RollbackResult, ValidationResult } from "../../validation/types";
 import type {
   CreateFileInput,
   CreateFileResult,
@@ -295,6 +296,7 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
 
       const mutationResult = await commitTextFileMutation({
         resolvedPath: repoPath.resolvedPath,
+        displayPath: repoPath.relativePath,
         originalContent: fileResult.content,
         nextContent: anchoredEdit.updatedContent,
         validate(updatedContent) {
@@ -323,6 +325,10 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
           status: "success",
           anchor: validatedInput.value.anchor,
           validation: mutationResult.validation,
+          validationResult: {
+            ...mutationResult.validationResult,
+            path: repoPath.relativePath
+          },
           changedRegion: {
             startOffset: anchoredEdit.targetRange.startOffset,
             endOffset: anchoredEdit.targetRange.endOffset,
@@ -344,6 +350,8 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
       if (!repoPath.ok) {
         return fail("create_file", repoPath.error);
       }
+
+      const rollbackPath = repoPath.relativePath;
 
       try {
         await mkdir(path.dirname(repoPath.resolvedPath), { recursive: true });
@@ -376,21 +384,55 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
       const fileResult = await readRepoFile(repoPath.resolvedPath);
 
       if (!fileResult.ok) {
+        const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
+        const validationResult = createFileValidationFailure(
+          rollbackPath,
+          fileResult.error.message,
+          {
+            fileExists: fileResult.error.code !== "not_found",
+            fileReadable: false,
+            contentMatches: false
+          }
+        );
+
         return fail("create_file", {
-          ...fileResult.error,
-          path: repoPath.relativePath
+          code: rollback.success ? "validation_failed" : "rollback_failed",
+          message: rollback.success
+            ? fileResult.error.message
+            : `${fileResult.error.message} ${rollback.message}`,
+          path: rollbackPath,
+          validationResult,
+          rollback
         });
       }
 
       if (fileResult.content !== validatedInput.value.content) {
-        await deleteCreatedFile(repoPath.resolvedPath);
+        const rollback = await rollbackCreatedFile(repoPath.resolvedPath, rollbackPath);
+        const validationResult = createFileValidationFailure(
+          rollbackPath,
+          "Created file content did not match the requested content after re-read.",
+          {
+            fileExists: true,
+            fileReadable: true,
+            contentMatches: false
+          }
+        );
 
         return fail(
           "create_file",
-          validationFailed(
-            "Created file content did not match the requested content after re-read.",
-            repoPath.relativePath
-          )
+          rollback.success
+            ? validationFailed(
+                "Created file content did not match the requested content after re-read.",
+                rollbackPath,
+                validationResult,
+                rollback
+              )
+            : rollbackFailed(
+                "Created file content did not match the requested content after re-read.",
+                rollbackPath,
+                validationResult,
+                rollback
+              )
         );
       }
 
@@ -401,7 +443,12 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
           rootDir,
           path: repoPath.relativePath,
           status: "success",
-          lineCount: toLines(fileResult.content).length
+          lineCount: toLines(fileResult.content).length,
+          validationResult: createFileValidationSuccess(repoPath.relativePath, {
+            fileExists: true,
+            fileReadable: true,
+            contentMatches: true
+          })
         }
       };
     },
@@ -416,6 +463,15 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
 
       if (!repoPath.ok) {
         return fail("delete_file", repoPath.error);
+      }
+
+      const originalFile = await readRepoFile(repoPath.resolvedPath);
+
+      if (!originalFile.ok) {
+        return fail("delete_file", {
+          ...originalFile.error,
+          path: repoPath.relativePath
+        });
       }
 
       try {
@@ -442,19 +498,63 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
       const fileResult = await readRepoFile(repoPath.resolvedPath);
 
       if (fileResult.ok) {
+        const rollback = await restoreDeletedFile(
+          repoPath.resolvedPath,
+          originalFile.content,
+          repoPath.relativePath
+        );
+        const validationResult = createFileValidationFailure(
+          repoPath.relativePath,
+          "Deleted file is still present after the delete operation.",
+          {
+            fileExists: true,
+            fileReadable: true,
+            deleted: false
+          }
+        );
+
         return fail(
           "delete_file",
-          validationFailed(
-            "Deleted file is still present after the delete operation.",
-            repoPath.relativePath
-          )
+          rollback.success
+            ? validationFailed(
+                "Deleted file is still present after the delete operation.",
+                repoPath.relativePath,
+                validationResult,
+                rollback
+              )
+            : rollbackFailed(
+                "Deleted file is still present after the delete operation.",
+                repoPath.relativePath,
+                validationResult,
+                rollback
+              )
         );
       }
 
       if (fileResult.error.code !== "not_found") {
+        const rollback = await restoreDeletedFile(
+          repoPath.resolvedPath,
+          originalFile.content,
+          repoPath.relativePath
+        );
+        const validationResult = createFileValidationFailure(
+          repoPath.relativePath,
+          fileResult.error.message,
+          {
+            fileExists: false,
+            fileReadable: false,
+            deleted: false
+          }
+        );
+
         return fail("delete_file", {
-          ...fileResult.error,
-          path: repoPath.relativePath
+          code: rollback.success ? "validation_failed" : "rollback_failed",
+          message: rollback.success
+            ? fileResult.error.message
+            : `${fileResult.error.message} ${rollback.message}`,
+          path: repoPath.relativePath,
+          validationResult,
+          rollback
         });
       }
 
@@ -464,7 +564,12 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
         data: {
           rootDir,
           path: repoPath.relativePath,
-          status: "success"
+          status: "success",
+          validationResult: createFileValidationSuccess(repoPath.relativePath, {
+            fileExists: false,
+            fileReadable: false,
+            deleted: true
+          })
         }
       };
     }
@@ -1019,11 +1124,33 @@ function invalidInput(message: string, pathValue?: string): RepoToolError {
   };
 }
 
-function validationFailed(message: string, pathValue?: string): RepoToolError {
+function validationFailed(
+  message: string,
+  pathValue?: string,
+  validationResult?: ValidationResult,
+  rollback?: RollbackResult
+): RepoToolError {
   return {
     code: "validation_failed",
     message,
-    path: pathValue
+    path: pathValue,
+    validationResult,
+    rollback
+  };
+}
+
+function rollbackFailed(
+  message: string,
+  pathValue?: string,
+  validationResult?: ValidationResult,
+  rollback?: RollbackResult
+): RepoToolError {
+  return {
+    code: "rollback_failed",
+    message,
+    path: pathValue,
+    validationResult,
+    rollback
   };
 }
 
@@ -1089,10 +1216,77 @@ function createGlobMatcher(glob: string) {
   return new RegExp(`^${expression}$`);
 }
 
-async function deleteCreatedFile(resolvedPath: string) {
+function createFileValidationSuccess(
+  pathValue: string,
+  checks: Record<string, boolean>
+): ValidationResult {
+  return {
+    success: true,
+    type: "file",
+    path: pathValue,
+    errors: [],
+    warnings: [],
+    checks
+  };
+}
+
+function createFileValidationFailure(
+  pathValue: string,
+  message: string,
+  checks: Record<string, boolean>
+): ValidationResult {
+  return {
+    success: false,
+    type: "file",
+    path: pathValue,
+    errors: [message],
+    warnings: [],
+    checks
+  };
+}
+
+async function rollbackCreatedFile(
+  resolvedPath: string,
+  displayPath: string
+): Promise<RollbackResult> {
   try {
     await unlink(resolvedPath);
+    return {
+      attempted: true,
+      success: true,
+      path: displayPath,
+      message: "Removed the created file during rollback."
+    };
   } catch {
-    return;
+    return {
+      attempted: true,
+      success: false,
+      path: displayPath,
+      message: "Failed to remove the created file during rollback."
+    };
+  }
+}
+
+async function restoreDeletedFile(
+  resolvedPath: string,
+  originalContent: string,
+  displayPath: string
+): Promise<RollbackResult> {
+  try {
+    await mkdir(path.dirname(resolvedPath), { recursive: true });
+    await writeFile(resolvedPath, originalContent, "utf8");
+    return {
+      attempted: true,
+      success: true,
+      path: displayPath,
+      message: "Restored the deleted file during rollback."
+    };
+  } catch {
+    return {
+      attempted: true,
+      success: false,
+      path: displayPath,
+      message: "Failed to restore the deleted file during rollback."
+    };
   }
 }

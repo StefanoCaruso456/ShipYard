@@ -151,6 +151,44 @@ The system can now create files, delete files, and surgically edit existing file
 
 Complete
 
+## Phase 5: Validation and Recovery Engine
+
+### What
+
+The runtime now validates every meaningful repo mutation, records the result, rolls back invalid changes, and limits retries.
+
+### Why
+
+Editing alone is not enough. The system must be able to prove whether a change landed correctly and recover safely when it does not.
+
+### How
+
+- validate file mutations immediately after write and re-read
+- record structured validation results and rollback outcomes
+- restore original file contents when validation fails
+- classify failures as validation, rollback, or execution failures
+- retry validation failures once when rollback succeeds
+- expose validation state, retry count, and run events through the runtime API
+
+### Purpose
+
+Turn file mutation into a safe runtime capability instead of a blind write operation.
+
+### Outcome
+
+The backend can now reject invalid edits, restore the repo to its pre-edit state, and make the full recovery path visible to operators.
+
+### Architecture
+
+- validation contracts live in `packages/agent-core/src/validation`
+- repo mutation tools attach validation and rollback metadata in `packages/agent-core/src/tools/repo`
+- runtime state and retry logic live in `packages/agent-core/src/runtime`
+- `apps/server` exposes validation status and recovery events through the API
+
+### Status
+
+Complete
+
 ## What Comes Next
 
 The next major phase should build on these foundations instead of replacing them.
@@ -159,6 +197,6 @@ Likely next work:
 
 - planner, executor, and verifier step orchestration
 - richer prompt and context assembly
-- persistent storage for runs, traces, and edit history
+- richer validation targets such as lint, typecheck, and targeted test execution
 - trace-level observability for edit attempts and recovery
 - approval and review flows around diffs and execution

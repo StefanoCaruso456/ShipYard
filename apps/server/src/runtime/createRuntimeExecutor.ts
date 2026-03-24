@@ -2,7 +2,9 @@ import type {
   ExecuteRun,
   RepoMutationToolRequest,
   RepoMutationToolResult,
-  RepoToolset
+  RepoToolset,
+  RollbackResult,
+  ValidationResult
 } from "@shipyard/agent-core";
 import { generateText } from "ai";
 
@@ -35,11 +37,15 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
         code?: string;
         toolName?: string;
         path?: string;
+        validationResult?: ValidationResult | null;
+        rollback?: RollbackResult | null;
       };
 
       error.code = toolResult.error.code;
       error.toolName = toolResult.toolName;
       error.path = toolResult.error.path;
+      error.validationResult = toolResult.error.validationResult ?? null;
+      error.rollback = toolResult.error.rollback ?? null;
 
       throw error;
     }
@@ -88,11 +94,20 @@ function renderToolResponse(toolResult: Extract<RepoMutationToolResult, { ok: tr
         `Tool: ${toolResult.toolName}`,
         `Path: ${toolResult.data.path}`,
         `Validation: change applied and unrelated regions preserved.`,
+        `Validation status: ${toolResult.data.validationResult.success ? "passed" : "failed"}`,
         `Anchor: ${toolResult.data.anchor}`
       ].join("\n");
     case "create_file":
-      return [`Tool: ${toolResult.toolName}`, `Path: ${toolResult.data.path}`].join("\n");
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Path: ${toolResult.data.path}`,
+        `Validation status: ${toolResult.data.validationResult.success ? "passed" : "failed"}`
+      ].join("\n");
     case "delete_file":
-      return [`Tool: ${toolResult.toolName}`, `Path: ${toolResult.data.path}`].join("\n");
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Path: ${toolResult.data.path}`,
+        `Validation status: ${toolResult.data.validationResult.success ? "passed" : "failed"}`
+      ].join("\n");
   }
 }

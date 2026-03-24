@@ -1,9 +1,12 @@
 import { createAgentRuntime, type AgentInstructionRuntime } from "@shipyard/agent-core";
 
-export async function bootAgentRuntime(): Promise<AgentInstructionRuntime> {
+import { resolveWorkspaceRoot } from "./resolveWorkspaceRoot";
+
+export async function bootAgentRuntime(rootDir?: string): Promise<AgentInstructionRuntime> {
+  const workspaceRoot = rootDir ?? (await resolveWorkspaceRoot());
+
   return createAgentRuntime({
-    rootDir: process.cwd(),
+    rootDir: workspaceRoot,
     skillPath: "skill.md"
   });
 }
-

@@ -48,6 +48,14 @@ export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
+  RollbackResult,
+  RunEvent,
+  RunEventType,
+  ValidationResult,
+  ValidationStatus,
+  ValidationType
+} from "./validation/types";
+export type {
   AgentRunRecord,
   AgentRunResult,
   AgentRunStatus,

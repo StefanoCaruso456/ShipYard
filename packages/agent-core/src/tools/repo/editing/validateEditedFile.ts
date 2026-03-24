@@ -1,8 +1,11 @@
+import type { ValidationResult } from "../../../validation/types";
+
 export type EditedFileValidationFailure = {
   ok: false;
   error: {
     code: "validation_failed";
     message: string;
+    validationResult: ValidationResult;
   };
 };
 
@@ -11,7 +14,10 @@ export type EditedFileValidationSuccess = {
   validation: {
     changeApplied: true;
     unchangedOutsideRegion: true;
+    fileExists: true;
+    fileReadable: true;
   };
+  validationResult: ValidationResult;
 };
 
 export function validateEditedFile(input: {
@@ -52,7 +58,21 @@ export function validateEditedFile(input: {
     ok: true,
     validation: {
       changeApplied: true,
-      unchangedOutsideRegion: true
+      unchangedOutsideRegion: true,
+      fileExists: true,
+      fileReadable: true
+    },
+    validationResult: {
+      success: true,
+      type: "file",
+      errors: [],
+      warnings: [],
+      checks: {
+        fileExists: true,
+        fileReadable: true,
+        changeApplied: true,
+        unchangedOutsideRegion: true
+      }
     }
   };
 }
@@ -62,7 +82,13 @@ function fail(message: string): EditedFileValidationFailure {
     ok: false,
     error: {
       code: "validation_failed",
-      message
+      message,
+      validationResult: {
+        success: false,
+        type: "file",
+        errors: [message],
+        warnings: []
+      }
     }
   };
 }

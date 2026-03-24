@@ -93,6 +93,10 @@ function createRun(instruction: string): AgentRunRecord {
     createdAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     completedAt: null,
+    retryCount: 0,
+    validationStatus: "not_run",
+    lastValidationResult: null,
+    events: [],
     error: null,
     result: null
   };
