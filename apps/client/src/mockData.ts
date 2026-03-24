@@ -1,5 +1,6 @@
 import { toAttachmentCard } from "./attachments";
 import type {
+  AgentActivityItem,
   AutomationItem,
   ComposerAttachment,
   GitChange,
@@ -8,6 +9,9 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTraceRunLog,
+  RuntimeTraceSpan,
+  RuntimeTraceSpanEvent,
   RuntimeTask,
   SidebarNavItem,
   SkillCatalogItem,
@@ -286,7 +290,8 @@ export function buildGuideThread(
 
 export function buildRuntimeThread(
   task: RuntimeTask,
-  previewAttachments: ComposerAttachment[] = []
+  previewAttachments: ComposerAttachment[] = [],
+  trace: RuntimeTraceRunLog | null = null
 ): WorkspaceThread {
   const title = task.title?.trim() || task.instruction.split(/\s+/).slice(0, 5).join(" ");
   const completionLabel = task.completedAt ? formatDateTime(task.completedAt) : "Awaiting finish";
@@ -404,7 +409,8 @@ export function buildRuntimeThread(
     tags: [task.status, task.simulateFailure ? "failure-path" : "live-run"],
     attachments: task.attachments.map((attachment) => toAttachmentCard(attachment, previewLookup)),
     messages,
-    progress
+    progress,
+    activity: buildRuntimeActivity(task, trace)
   };
 }
 
@@ -554,4 +560,368 @@ function createProgress(
     timestamp,
     tone
   };
+}
+
+function buildRuntimeActivity(task: RuntimeTask, trace: RuntimeTraceRunLog | null) {
+  if (trace && trace.spans.length > 0) {
+    return flattenTrace(trace);
+  }
+
+  const events = task.events ?? [];
+
+  if (events.length > 0) {
+    return events.map((event, index) => ({
+      id: `${task.id}-event-${index}`,
+      kind: "event" as const,
+      badge: deriveEventBadge(event.type),
+      label: humanizeKey(event.type),
+      detail: event.message,
+      timestamp: formatDateTime(event.at),
+      tone: deriveEventTone(event.type),
+      depth: 0,
+      meta: [event.toolName, event.path].filter(Boolean) as string[]
+    }));
+  }
+
+  if (task.rollingSummary?.text) {
+    const summaryTone: AgentActivityItem["tone"] =
+      task.rollingSummary.source === "failure"
+        ? "danger"
+        : task.rollingSummary.source === "retry"
+          ? "warning"
+          : "info";
+
+    return [
+      {
+        id: `${task.id}-summary`,
+        kind: "summary" as const,
+        badge: "Summary",
+        label: "Latest runtime summary",
+        detail: task.rollingSummary.text,
+        timestamp: formatDateTime(task.rollingSummary.updatedAt),
+        tone: summaryTone,
+        depth: 0,
+        meta: [humanizeKey(task.rollingSummary.source)]
+      }
+    ];
+  }
+
+  return [];
+}
+
+function flattenTrace(trace: RuntimeTraceRunLog) {
+  const spans = [...trace.spans].sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+  const byParent = new Map<string | null, RuntimeTraceSpan[]>();
+
+  for (const span of spans) {
+    const key = span.parentId ?? null;
+    const existing = byParent.get(key) ?? [];
+    existing.push(span);
+    byParent.set(key, existing);
+  }
+
+  for (const children of byParent.values()) {
+    children.sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+  }
+
+  const rootSpans = trace.rootSpanId
+    ? spans.filter((span) => span.id === trace.rootSpanId)
+    : byParent.get(null) ?? [];
+  const activity: AgentActivityItem[] = [];
+
+  for (const root of rootSpans) {
+    visitTraceSpan(root, 0, byParent, activity);
+  }
+
+  return activity;
+}
+
+function visitTraceSpan(
+  span: RuntimeTraceSpan,
+  depth: number,
+  byParent: Map<string | null, RuntimeTraceSpan[]>,
+  activity: AgentActivityItem[]
+) {
+  activity.push({
+    id: span.id,
+    kind: "span",
+    badge: deriveSpanBadge(span),
+    label: deriveSpanLabel(span),
+    detail: deriveSpanDetail(span),
+    timestamp: formatDateTime(span.startedAt),
+    tone: deriveSpanTone(span),
+    depth,
+    status: span.status,
+    meta: buildSpanMeta(span)
+  });
+
+  const events = [...span.events].sort((left, right) => left.at.localeCompare(right.at));
+
+  for (const event of events) {
+    activity.push({
+      id: event.id,
+      kind: "event",
+      badge: deriveEventBadge(event.name),
+      label: humanizeKey(event.name),
+      detail: event.message?.trim() || "Runtime event recorded.",
+      timestamp: formatDateTime(event.at),
+      tone: deriveEventTone(event.name),
+      depth: depth + 1,
+      meta: buildEventMeta(event)
+    });
+  }
+
+  for (const child of byParent.get(span.id) ?? []) {
+    visitTraceSpan(child, depth + 1, byParent, activity);
+  }
+}
+
+function deriveSpanBadge(span: RuntimeTraceSpan) {
+  switch (span.spanType) {
+    case "role":
+      return capitalize(readString(span.metadata.role) ?? "Role");
+    case "context":
+      return "Context";
+    case "tool":
+      return "Tool";
+    case "model":
+      return "Model";
+    case "validation":
+      return "Validation";
+    case "retry":
+      return "Retry";
+    case "rollback":
+      return "Rollback";
+    case "phase":
+      return "Phase";
+    case "story":
+      return "Story";
+    case "task":
+      return "Task";
+    case "run":
+      return "Run";
+  }
+}
+
+function deriveSpanLabel(span: RuntimeTraceSpan) {
+  switch (span.spanType) {
+    case "role":
+      return `${capitalize(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name))} step`;
+    case "context":
+      return `Assemble ${capitalize(readString(span.metadata.role) ?? "runtime")} context`;
+    case "tool":
+      return `Call ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
+    case "model":
+      return `Call ${readString(span.metadata.modelId) ?? trimTracePrefix(span.name)}`;
+    case "phase":
+    case "story":
+    case "task":
+      return span.name;
+    case "validation":
+      return "Validate execution";
+    case "retry":
+      return "Retry execution";
+    case "rollback":
+      return "Rollback change";
+    case "run":
+      return "Run lifecycle";
+  }
+}
+
+function deriveSpanDetail(span: RuntimeTraceSpan) {
+  if (span.error?.trim()) {
+    return span.error.trim();
+  }
+
+  if (span.outputSummary?.trim()) {
+    return span.outputSummary.trim();
+  }
+
+  if (span.inputSummary?.trim()) {
+    return span.inputSummary.trim();
+  }
+
+  return "Runtime span recorded.";
+}
+
+function deriveSpanTone(span: RuntimeTraceSpan): AgentActivityItem["tone"] {
+  if (span.status === "failed") {
+    return "danger";
+  }
+
+  if (span.status === "running") {
+    return "info";
+  }
+
+  if (span.spanType === "tool" || span.spanType === "model" || span.spanType === "validation") {
+    return "success";
+  }
+
+  return "default";
+}
+
+function deriveEventBadge(eventName: string) {
+  if (eventName.includes("validation")) {
+    return "Validation";
+  }
+
+  if (eventName.includes("retry")) {
+    return "Retry";
+  }
+
+  if (eventName.includes("planner")) {
+    return "Planner";
+  }
+
+  if (eventName.includes("executor")) {
+    return "Executor";
+  }
+
+  if (eventName.includes("verifier")) {
+    return "Verifier";
+  }
+
+  if (eventName.includes("task")) {
+    return "Task";
+  }
+
+  if (eventName.includes("story")) {
+    return "Story";
+  }
+
+  if (eventName.includes("phase")) {
+    return "Phase";
+  }
+
+  return "Event";
+}
+
+function deriveEventTone(eventName: string): AgentActivityItem["tone"] {
+  if (eventName.includes("failed") || eventName.includes("error")) {
+    return "danger";
+  }
+
+  if (eventName.includes("passed") || eventName.includes("succeeded") || eventName.includes("completed")) {
+    return "success";
+  }
+
+  if (eventName.includes("retry")) {
+    return "warning";
+  }
+
+  if (eventName.includes("started") || eventName.includes("proposed") || eventName.includes("made")) {
+    return "info";
+  }
+
+  return "default";
+}
+
+function buildSpanMeta(span: RuntimeTraceSpan) {
+  const meta: string[] = [];
+  const path = readString(span.metadata.path);
+  const modelId = readString(span.metadata.modelId);
+  const toolName = readString(span.metadata.toolName);
+  const validationStatus = readString(span.metadata.validationStatus);
+  const sectionIds = readStringArray(span.metadata.sectionIds);
+  const changedFiles = readStringArray(span.metadata.changedFiles);
+  const inputTokens = readNumber(span.metadata.inputTokens);
+  const outputTokens = readNumber(span.metadata.outputTokens);
+  const totalTokens = readNumber(span.metadata.totalTokens);
+
+  if (toolName && span.spanType !== "tool") {
+    meta.push(toolName);
+  }
+
+  if (path) {
+    meta.push(path);
+  }
+
+  if (modelId && span.spanType !== "model") {
+    meta.push(modelId);
+  }
+
+  if (changedFiles.length > 0) {
+    meta.push(
+      changedFiles.length === 1 ? changedFiles[0] : `${changedFiles.length} changed files`
+    );
+  }
+
+  if (sectionIds.length > 0 && span.spanType === "context") {
+    meta.push(`${sectionIds.length} sections`);
+  }
+
+  if (validationStatus) {
+    meta.push(`validation ${validationStatus}`);
+  }
+
+  if (typeof inputTokens === "number" || typeof outputTokens === "number" || typeof totalTokens === "number") {
+    meta.push(
+      `${inputTokens ?? 0}/${outputTokens ?? 0}/${totalTokens ?? 0} tokens`
+    );
+  }
+
+  if (typeof span.durationMs === "number") {
+    meta.push(`${span.durationMs} ms`);
+  }
+
+  return meta;
+}
+
+function buildEventMeta(event: RuntimeTraceSpanEvent) {
+  const meta: string[] = [];
+  const path = readString(event.metadata?.path);
+  const toolName = readString(event.metadata?.toolName);
+  const gateId = readString(event.metadata?.gateId);
+
+  if (toolName) {
+    meta.push(toolName);
+  }
+
+  if (path) {
+    meta.push(path);
+  }
+
+  if (gateId) {
+    meta.push(gateId);
+  }
+
+  return meta;
+}
+
+function parseRoleFromSpanName(name: string) {
+  const [role] = name.split(":", 1);
+  return role || name;
+}
+
+function trimTracePrefix(name: string) {
+  const parts = name.split(":");
+  return parts.length > 1 ? parts.slice(1).join(":") : name;
+}
+
+function humanizeKey(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function capitalize(value: string) {
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" ? value : null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim())
+    : [];
 }

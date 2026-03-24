@@ -5,6 +5,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTraceResponse,
   RuntimeTaskListResponse,
   RuntimeTaskResponse
 } from "./types";
@@ -49,6 +50,10 @@ export function fetchRuntimeInstructions() {
 
 export function fetchRuntimeTasks() {
   return requestJson<RuntimeTaskListResponse>("/api/runtime/tasks");
+}
+
+export function fetchRuntimeTrace(taskId: string) {
+  return requestJson<RuntimeTraceResponse>(`/api/runtime/traces/${taskId}`);
 }
 
 export function submitRuntimeTask(input: {

@@ -449,6 +449,124 @@ a {
   border-color: rgba(88, 110, 139, 0.34);
 }
 
+.agent-activity {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(31, 31, 31, 0.98), rgba(25, 25, 25, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 16px 32px rgba(0, 0, 0, 0.18);
+}
+
+.agent-activity--empty p {
+  margin: 0;
+  color: #a6a6a0;
+}
+
+.agent-activity__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.agent-activity__header strong {
+  font-size: 0.92rem;
+  font-weight: 620;
+}
+
+.agent-activity__header span {
+  color: #7f7f7a;
+  font-size: 0.8rem;
+}
+
+.agent-activity__list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.agent-activity__item {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  margin-left: calc(var(--agent-activity-depth, 0) * 0.85rem);
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.agent-activity__item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.agent-activity__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d9d9d3;
+  font-size: 0.72rem;
+  font-weight: 620;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.agent-activity__item-head strong {
+  font-size: 0.9rem;
+  font-weight: 620;
+}
+
+.agent-activity__item-head span:last-child {
+  margin-left: auto;
+  color: #7f7f7a;
+  font-size: 0.78rem;
+}
+
+.agent-activity__item p {
+  margin: 0;
+  color: #a6a6a0;
+  line-height: 1.58;
+}
+
+.agent-activity__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.agent-activity__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #c7c7c2;
+  font-size: 0.74rem;
+}
+
+.agent-activity__item--success {
+  border-color: rgba(116, 153, 124, 0.3);
+}
+
+.agent-activity__item--danger {
+  border-color: rgba(154, 96, 96, 0.3);
+}
+
+.agent-activity__item--warning {
+  border-color: rgba(176, 143, 80, 0.32);
+}
+
+.agent-activity__item--info {
+  border-color: rgba(88, 110, 139, 0.3);
+}
+
 .message {
   max-width: 46rem;
 }
