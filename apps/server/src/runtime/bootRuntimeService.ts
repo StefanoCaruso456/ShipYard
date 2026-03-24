@@ -49,5 +49,9 @@ function resolveRuntimeStatePath(env: NodeJS.ProcessEnv = process.env) {
     return path.resolve(configuredPath);
   }
 
+  if (env.NODE_ENV === "production") {
+    return path.resolve("/tmp/shipyard/runtime/runs.json");
+  }
+
   return path.resolve(process.cwd(), ".shipyard/runtime/runs.json");
 }

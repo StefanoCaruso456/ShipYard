@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { createServer } from "node:http";
 
 import { starterDecisionBoard } from "@shipyard/agent-core";
 import { projectBrief } from "@shipyard/shared";
@@ -8,7 +9,7 @@ import { registerRuntimeRoutes } from "./routes/runtime";
 import { bootRuntimeService } from "./runtime/bootRuntimeService";
 
 const port = Number(process.env.PORT ?? 8787);
-const host = process.env.HOST ?? "0.0.0.0";
+const host = "0.0.0.0";
 
 async function startServer() {
   const { runtimeService, openAI } = await bootRuntimeService();
@@ -73,7 +74,19 @@ async function startServer() {
 
   registerRuntimeRoutes(app, runtimeService, openAI);
 
-  app.listen(port, host, () => {
+  const server = createServer(app);
+
+  server.on("error", (error) => {
+    console.error("Shipyard server failed to bind.", {
+      host,
+      port,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    process.exit(1);
+  });
+
+  server.listen(port, host, () => {
     console.log(`Shipyard server running on http://${host}:${port}`);
   });
 }
