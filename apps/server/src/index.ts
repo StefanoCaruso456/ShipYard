@@ -10,7 +10,7 @@ import { bootRuntimeService } from "./runtime/bootRuntimeService";
 const port = Number(process.env.PORT ?? 8787);
 
 async function startServer() {
-  const runtimeService = await bootRuntimeService();
+  const { runtimeService, openAI } = await bootRuntimeService();
   const app = express();
 
   app.use(cors());
@@ -32,6 +32,12 @@ async function startServer() {
         activeRunId: runtimeStatus.activeRunId,
         queuedRuns: runtimeStatus.queuedRuns,
         totalRuns: runtimeStatus.totalRuns
+      },
+      model: {
+        provider: openAI.provider,
+        configured: openAI.configured,
+        modelId: openAI.modelId,
+        apiKeySource: openAI.apiKeySource
       }
     });
   });
@@ -43,7 +49,7 @@ async function startServer() {
     });
   });
 
-  registerRuntimeRoutes(app, runtimeService);
+  registerRuntimeRoutes(app, runtimeService, openAI);
 
   app.listen(port, () => {
     console.log(`Shipyard server running on http://localhost:${port}`);

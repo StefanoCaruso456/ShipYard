@@ -15,11 +15,14 @@ export type AgentRunFailure = {
 };
 
 export type AgentRunResult = {
-  mode: "placeholder-execution";
+  mode: "placeholder-execution" | "ai-sdk-openai";
   summary: string;
   instructionEcho: string;
   skillId: string;
   completedAt: string;
+  responseText?: string | null;
+  provider?: "openai" | null;
+  modelId?: string | null;
 };
 
 export type AgentRunRecord = {

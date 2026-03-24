@@ -7,12 +7,15 @@
     "predev": "pnpm --filter @shipyard/shared build && pnpm --filter @shipyard/agent-core build",
     "dev": "tsx watch src/index.ts",
     "build": "tsup",
+    "test": "node --import tsx --test src/__tests__/*.test.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.48",
     "@shipyard/agent-core": "workspace:*",
     "@shipyard/shared": "workspace:*",
+    "ai": "^6.0.137",
     "cors": "^2.8.6",
     "express": "^5.2.1"
   },

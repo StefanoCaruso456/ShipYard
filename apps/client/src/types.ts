@@ -31,6 +31,12 @@ export type RuntimeHealthResponse = {
     queuedRuns: number;
     totalRuns: number;
   };
+  model?: {
+    provider: "openai";
+    configured: boolean;
+    modelId: string;
+    apiKeySource: "OPENAI_KEY" | "OPENAI_API_KEY" | null;
+  };
 };
 
 export type RuntimeWorkerState = "idle" | "running";
@@ -45,6 +51,12 @@ export type RuntimeStatusResponse = {
   instructions: {
     skillId: string;
     loadedAt: string;
+  };
+  model?: {
+    provider: "openai";
+    configured: boolean;
+    modelId: string;
+    apiKeySource: "OPENAI_KEY" | "OPENAI_API_KEY" | null;
   };
 };
 
@@ -63,11 +75,14 @@ export type RuntimeTask = {
     message: string;
   } | null;
   result: {
-    mode: "placeholder-execution";
+    mode: "placeholder-execution" | "ai-sdk-openai";
     summary: string;
     instructionEcho: string;
     skillId: string;
     completedAt: string;
+    responseText?: string | null;
+    provider?: "openai" | null;
+    modelId?: string | null;
   } | null;
 };
 

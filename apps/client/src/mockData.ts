@@ -296,9 +296,11 @@ export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
       "system",
       "Runtime queue",
       task.status === "failed"
-        ? "Run failed inside the placeholder execution path."
+        ? "Run failed inside the runtime execution path."
         : task.status === "completed"
-          ? "Run completed inside the persistent runtime skeleton."
+          ? task.result?.mode === "ai-sdk-openai"
+            ? "Run completed through the OpenAI executor."
+            : "Run completed inside the persistent runtime skeleton."
           : "Run accepted into the persistent loop and awaiting execution.",
       task.startedAt ? formatDateTime(task.startedAt) : formatDateTime(task.createdAt),
       task.status === "failed" ? "danger" : task.status === "completed" ? "success" : "info"
@@ -311,7 +313,7 @@ export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
         `${task.id}-assistant`,
         "assistant",
         "Runtime result",
-        task.result.summary,
+        task.result.responseText ?? task.result.summary,
         formatDateTime(task.result.completedAt),
         "success"
       )
@@ -352,7 +354,10 @@ export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
       ? createProgress(
           `${task.id}-completed`,
           "Run completed",
-          task.result?.summary ?? "Placeholder execution completed successfully.",
+          task.result?.summary ??
+            (task.result?.mode === "ai-sdk-openai"
+              ? "OpenAI execution completed successfully."
+              : "Placeholder execution completed successfully."),
           completionLabel,
           "success"
         )
@@ -373,7 +378,10 @@ export function buildRuntimeThread(task: RuntimeTask): WorkspaceThread {
     title,
     summary:
       task.status === "completed"
-        ? task.result?.summary ?? "Completed placeholder execution."
+        ? task.result?.summary ??
+          (task.result?.mode === "ai-sdk-openai"
+            ? "Completed OpenAI execution."
+            : "Completed placeholder execution.")
         : task.status === "failed"
           ? task.error?.message ?? "Runtime failure."
           : "Queued in the persistent runtime service.",
