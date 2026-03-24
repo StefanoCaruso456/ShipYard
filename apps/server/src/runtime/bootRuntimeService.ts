@@ -1,14 +1,18 @@
 import {
+  createFileRunStore,
   createPersistentRuntimeService,
+  createRepoToolset,
   type PersistentAgentRuntimeService
 } from "@shipyard/agent-core";
 
+import path from "node:path";
+
 import { bootAgentRuntime } from "./bootAgentRuntime";
 import {
-  createOpenAIExecutor,
   resolveOpenAIExecutorConfig,
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
+import { createRuntimeExecutor } from "./createRuntimeExecutor";
 
 export type BootedRuntimeService = {
   runtimeService: PersistentAgentRuntimeService;
@@ -18,14 +22,32 @@ export type BootedRuntimeService = {
 export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const instructionRuntime = await bootAgentRuntime();
   const openAI = resolveOpenAIExecutorConfig();
+  const runtimeStatePath = resolveRuntimeStatePath();
+  const repoToolset = createRepoToolset({
+    rootDir: process.cwd()
+  });
 
   return {
     runtimeService: createPersistentRuntimeService({
       instructionRuntime,
-      executeRun: createOpenAIExecutor({
-        config: openAI
+      store: createFileRunStore({
+        filePath: runtimeStatePath
+      }),
+      executeRun: createRuntimeExecutor({
+        openAI,
+        repoToolset
       })
     }),
     openAI
   };
+}
+
+function resolveRuntimeStatePath(env: NodeJS.ProcessEnv = process.env) {
+  const configuredPath = env.SHIPYARD_RUNTIME_STATE_PATH?.trim();
+
+  if (configuredPath) {
+    return path.resolve(configuredPath);
+  }
+
+  return path.resolve(process.cwd(), ".shipyard/runtime/runs.json");
 }

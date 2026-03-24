@@ -34,6 +34,8 @@ export function createPersistentRuntimeService(
   let processing = false;
   let loopScheduled = false;
 
+  recoverStoredRuns();
+
   function submitTask(input: SubmitTaskInput): AgentRunRecord {
     const instruction = input.instruction.trim();
 
@@ -46,6 +48,7 @@ export function createPersistentRuntimeService(
       title: input.title?.trim() ? input.title.trim() : null,
       instruction,
       simulateFailure: input.simulateFailure ?? false,
+      toolRequest: input.toolRequest ?? null,
       status: "pending",
       createdAt: new Date().toISOString(),
       startedAt: null,
@@ -105,6 +108,38 @@ export function createPersistentRuntimeService(
         void processQueue();
       }
     });
+  }
+
+  function recoverStoredRuns() {
+    const recoveredAt = new Date().toISOString();
+    const existingRuns = store
+      .list()
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+    for (const run of existingRuns) {
+      if (run.status === "pending") {
+        queue.push(run.id);
+        continue;
+      }
+
+      if (run.status === "running") {
+        store.update({
+          ...run,
+          status: "failed",
+          completedAt: recoveredAt,
+          error: {
+            message:
+              "Runtime restarted before this run completed. Review and resubmit if it should continue."
+          },
+          result: null
+        });
+      }
+    }
+
+    if (queue.length > 0) {
+      scheduleProcessing();
+    }
   }
 
   async function processQueue() {
@@ -168,13 +203,13 @@ export function createPersistentRuntimeService(
         }
       });
     } catch (error) {
+      const failure = toRunFailure(error);
+
       store.update({
         ...(store.get(run.id) ?? runningRun),
         status: "failed",
         completedAt: new Date().toISOString(),
-        error: {
-          message: error instanceof Error ? error.message : "Unknown runtime error."
-        },
+        error: failure,
         result: null
       });
     } finally {
@@ -217,4 +252,37 @@ function createRunCounts(): Record<AgentRunStatus, number> {
     AgentRunStatus,
     number
   >;
+}
+
+function toRunFailure(error: unknown): AgentRunRecord["error"] {
+  const fallbackMessage = error instanceof Error ? error.message : "Unknown runtime error.";
+  const failure: NonNullable<AgentRunRecord["error"]> = {
+    message: fallbackMessage
+  };
+
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      code?: unknown;
+      toolName?: unknown;
+      path?: unknown;
+    };
+
+    if (typeof candidate.code === "string") {
+      failure.code = candidate.code as NonNullable<typeof failure.code>;
+    }
+
+    if (typeof candidate.toolName === "string") {
+      failure.toolName = candidate.toolName as NonNullable<typeof failure.toolName>;
+    }
+
+    if (typeof candidate.path === "string") {
+      failure.path = candidate.path;
+    }
+  }
+
+  if (!failure.code) {
+    failure.code = "runtime_error";
+  }
+
+  return failure;
 }

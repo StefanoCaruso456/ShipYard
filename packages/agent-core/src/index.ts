@@ -43,8 +43,10 @@ export { parseFrontmatter } from "./instructions/parseFrontmatter";
 export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
 export { selectSkillSections } from "./context/selectSkillSections";
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
+export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
+export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
   AgentRunRecord,
   AgentRunResult,
@@ -53,6 +55,31 @@ export type {
   AgentRuntimeStatus,
   ExecuteRun,
   PersistentAgentRuntimeService,
+  RepoMutationToolRequest,
+  RepoMutationToolResult,
   RuntimeWorkerState,
   SubmitTaskInput
 } from "./runtime/types";
+export type {
+  CreateFileInput,
+  CreateFileResult,
+  DeleteFileInput,
+  DeleteFileResult,
+  EditFileRegionInput,
+  EditFileRegionResult,
+  ListFilesInput,
+  ListFilesResult,
+  ReadFileInput,
+  ReadFileRangeInput,
+  ReadFileRangeResult,
+  ReadFileResult,
+  RepoToolError,
+  RepoToolErrorCode,
+  RepoToolFailure,
+  RepoToolMutationResult,
+  RepoToolName,
+  RepoToolset,
+  RepoToolSuccess,
+  SearchRepoInput,
+  SearchRepoResult
+} from "./tools/repo/types";
