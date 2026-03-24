@@ -189,10 +189,6 @@ function App() {
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
-  const runtimeTone =
-    !backendConnected ? "offline" : runtimeStatus?.workerState === "running" ? "busy" : "ready";
-  const runtimeLabel =
-    !backendConnected ? "Offline" : runtimeStatus?.workerState === "running" ? "Running" : "Healthy";
 
   useEffect(() => {
     if (!activeProject || !activeThreadId) {
@@ -407,8 +403,6 @@ function App() {
         activeProjectId={activeProject?.id ?? null}
         activeThreadId={activeThreadId}
         activeNav={activeNav}
-        runtimeTone={runtimeTone}
-        runtimeLabel={runtimeLabel}
         onSelectProject={(projectId) => {
           setSelectedProjectId(projectId);
           setActiveNav("projects");

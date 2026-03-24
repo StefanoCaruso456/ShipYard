@@ -57,8 +57,6 @@ a {
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
 }
 
-.sidebar__brand,
-.sidebar__brand-lockup,
 .sidebar__primary-action,
 .sidebar__settings,
 .thread-group__header,
@@ -73,75 +71,6 @@ a {
 .settings-grid__row {
   display: flex;
   align-items: center;
-}
-
-.sidebar__brand {
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0 0.35rem;
-}
-
-.sidebar__brand-lockup {
-  gap: 0.75rem;
-}
-
-.sidebar__brand-mark {
-  width: 2.2rem;
-  height: 2.2rem;
-  display: grid;
-  place-items: center;
-  border-radius: 0.85rem;
-  background: linear-gradient(180deg, #8fd0ff, #69beff);
-  color: #102132;
-  font-size: 1rem;
-  font-weight: 700;
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-
-.sidebar__brand h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
-}
-
-.sidebar__brand p {
-  margin: 0.15rem 0 0;
-  color: #9e9e99;
-  font-size: 0.84rem;
-  line-height: 1.3;
-}
-
-.sidebar__runtime,
-.workspace__runtime,
-.runtime-pill {
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.sidebar__runtime--ready,
-.workspace__runtime--idle,
-.runtime-pill--ok {
-  background: rgba(76, 102, 89, 0.32);
-  color: #d1edd7;
-}
-
-.sidebar__runtime--busy,
-.workspace__runtime--running {
-  background: rgba(107, 97, 63, 0.28);
-  color: #f1e5b6;
-}
-
-.sidebar__runtime--offline,
-.workspace__runtime--error,
-.runtime-pill--error {
-  background: rgba(107, 65, 65, 0.28);
-  color: #f0c2c2;
 }
 
 .sidebar__primary-action,

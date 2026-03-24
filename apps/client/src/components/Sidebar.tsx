@@ -7,8 +7,6 @@ type SidebarProps = {
   activeProjectId: string | null;
   activeThreadId: string | null;
   activeNav: SidebarNavItemId;
-  runtimeTone: "ready" | "busy" | "offline";
-  runtimeLabel: string;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
   onCreateThread: () => void;
@@ -22,8 +20,6 @@ export function Sidebar({
   activeProjectId,
   activeThreadId,
   activeNav,
-  runtimeTone,
-  runtimeLabel,
   onSelectProject,
   onSelectThread,
   onCreateThread,
@@ -33,17 +29,6 @@ export function Sidebar({
 }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div className="sidebar__brand">
-        <div className="sidebar__brand-lockup">
-          <div className="sidebar__brand-mark">S</div>
-          <div>
-            <h1>Shipyard</h1>
-            <p>Coding agent workspace</p>
-          </div>
-        </div>
-        <span className={`sidebar__runtime sidebar__runtime--${runtimeTone}`}>{runtimeLabel}</span>
-      </div>
-
       <button type="button" className="sidebar__primary-action" onClick={onCreateThread}>
         <ComposeIcon />
         <span>New thread</span>
