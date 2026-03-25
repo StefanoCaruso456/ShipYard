@@ -30,6 +30,7 @@ import type {
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
   RuntimeTraceRunLog,
+  RuntimeQueuedFollowUpDraft,
   RuntimeTask,
   SidebarNavItemId,
   ThreadGroup,
@@ -57,6 +58,9 @@ function App() {
   const [draftThreadsByProject, setDraftThreadsByProject] = useState<Record<string, WorkspaceThread[]>>({});
   const [runtimeAttachmentPreviewsByTaskId, setRuntimeAttachmentPreviewsByTaskId] = useState<
     Record<string, ComposerAttachment[]>
+  >({});
+  const [pendingLiveFollowUpsByThreadId, setPendingLiveFollowUpsByThreadId] = useState<
+    Record<string, RuntimeQueuedFollowUpDraft[]>
   >({});
   const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
   const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
@@ -194,11 +198,13 @@ function App() {
           runtimeTasks,
           draftThreadsByProject[candidate.id] ?? [],
           runtimeAttachmentPreviewsByTaskId,
-          runtimeTracesByTaskId
+          runtimeTracesByTaskId,
+          pendingLiveFollowUpsByThreadId
         )
       })),
     [
       draftThreadsByProject,
+      pendingLiveFollowUpsByThreadId,
       runtimeAttachmentPreviewsByTaskId,
       runtimeTasks,
       runtimeTracesByTaskId,
@@ -217,8 +223,12 @@ function App() {
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
   const activeRuntimeTask =
-    activeProject?.kind === "live" && activeThreadId
-      ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
+    activeProject?.kind === "live" && activeThread?.source === "live"
+      ? runtimeTasks.find(
+          (candidate) => candidate.id === activeThread.liveRuntime?.focusedRunId
+        ) ?? null
+      : activeProject?.kind === "live" && activeThreadId
+        ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
       : null;
 
   useEffect(() => {
@@ -347,13 +357,88 @@ function App() {
       return;
     }
 
+    const submittedAttachments = composerAttachments;
+    const canSendToLiveRuntime = activeProject.kind === "live" && backendConnected;
+    const isLiveThreadFollowUp =
+      canSendToLiveRuntime &&
+      activeThread?.source === "live" &&
+      Boolean(activeThread.liveRuntime?.threadId);
+
+    if (isLiveThreadFollowUp && activeThread?.liveRuntime) {
+      const followUpDraft = createQueuedFollowUpDraft(instruction, submittedAttachments);
+      const threadId = activeThread.liveRuntime.threadId;
+
+      setPendingLiveFollowUpsByThreadId((current) => ({
+        ...current,
+        [threadId]: [...(current[threadId] ?? []), followUpDraft]
+      }));
+      setActiveNav("projects");
+      setComposerValue("");
+      setComposerAttachments([]);
+      setComposerMode("text");
+      setSubmitting(true);
+      setSubmissionFeedback({
+        tone: "info",
+        text: "Follow-up staged behind the current run."
+      });
+
+      try {
+        const response = await submitRuntimeTask({
+          instruction,
+          title: activeThread.title,
+          threadId,
+          parentRunId: activeThread.liveRuntime.latestRunId,
+          attachments: submittedAttachments
+        });
+
+        setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
+
+        if (submittedAttachments.length > 0) {
+          setRuntimeAttachmentPreviewsByTaskId((current) => ({
+            ...current,
+            [response.task.id]: submittedAttachments
+          }));
+        }
+
+        setPendingLiveFollowUpsByThreadId((current) =>
+          removeQueuedFollowUpDraft(current, threadId, followUpDraft.id)
+        );
+        setSubmissionFeedback({
+          tone: "success",
+          text:
+            activeThread.status === "running" || activeThread.status === "pending"
+              ? "Follow-up queued after the active run."
+              : "Follow-up added to the thread."
+        });
+
+        void loadRuntimeSnapshot();
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Task submission failed. Check the runtime API and try again.";
+
+        setPendingLiveFollowUpsByThreadId((current) =>
+          removeQueuedFollowUpDraft(current, threadId, followUpDraft.id)
+        );
+        setSubmissionFeedback({
+          tone: "danger",
+          text: message
+        });
+      } finally {
+        setSubmitting(false);
+      }
+
+      return;
+    }
+
     const draftId = activeThread?.source === "draft" ? activeThread.id : createDraftId();
     const optimisticThread = buildDraftSubmissionThread({
       existingThread: activeThread?.source === "draft" ? activeThread : null,
       threadId: draftId,
       instruction,
-      attachments: composerAttachments,
-      backendConnected: activeProject.kind === "live" && backendConnected
+      attachments: submittedAttachments,
+      backendConnected: canSendToLiveRuntime
     });
 
     setDraftThreadsByProject((current) => ({
@@ -372,7 +457,7 @@ function App() {
     setComposerAttachments([]);
     setComposerMode("text");
 
-    if (activeProject.kind !== "live" || !backendConnected) {
+    if (!canSendToLiveRuntime) {
       setSubmissionFeedback({
         tone: "info",
         text:
@@ -390,15 +475,15 @@ function App() {
       const response = await submitRuntimeTask({
         instruction,
         title: optimisticThread.title,
-        attachments: composerAttachments
+        attachments: submittedAttachments
       });
 
-      await loadRuntimeSnapshot();
+      setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
-      if (composerAttachments.length > 0) {
+      if (submittedAttachments.length > 0) {
         setRuntimeAttachmentPreviewsByTaskId((current) => ({
           ...current,
-          [response.task.id]: composerAttachments
+          [response.task.id]: submittedAttachments
         }));
       }
 
@@ -410,12 +495,14 @@ function App() {
       }));
       setSelectedThreadIds((current) => ({
         ...current,
-        [activeProject.id]: response.task.id
+        [activeProject.id]: response.task.threadId
       }));
       setSubmissionFeedback({
         tone: "success",
         text: "Thread accepted by the persistent runtime."
       });
+
+      void loadRuntimeSnapshot();
     } catch (error) {
       const message =
         error instanceof Error
@@ -609,16 +696,18 @@ function buildThreadsForProject(
   runtimeTasks: RuntimeTask[],
   draftThreads: WorkspaceThread[],
   runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>,
-  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
+  pendingLiveFollowUpsByThreadId: Record<string, RuntimeQueuedFollowUpDraft[]>
 ) {
   if (project.kind === "live") {
     return [
       ...draftThreads,
-      ...runtimeTasks.map((task) =>
+      ...groupRuntimeTasksByThread(runtimeTasks).map((threadRuns) =>
         buildRuntimeThread(
-          task,
-          runtimeAttachmentPreviewsByTaskId[task.id] ?? [],
-          runtimeTracesByTaskId[task.id] ?? null
+          threadRuns,
+          runtimeAttachmentPreviewsByTaskId,
+          runtimeTracesByTaskId,
+          pendingLiveFollowUpsByThreadId[threadRuns[0]?.threadId ?? ""] ?? []
         )
       )
     ];
@@ -754,6 +843,69 @@ function deriveThreadTitle(instruction: string) {
 
 function createDraftId() {
   return `draft-${crypto.randomUUID()}`;
+}
+
+function createQueuedFollowUpDraft(
+  instruction: string,
+  attachments: ComposerAttachment[]
+): RuntimeQueuedFollowUpDraft {
+  return {
+    id: `queued-${crypto.randomUUID()}`,
+    instruction,
+    createdAt: new Date().toISOString(),
+    attachments
+  };
+}
+
+function removeQueuedFollowUpDraft(
+  draftsByThreadId: Record<string, RuntimeQueuedFollowUpDraft[]>,
+  threadId: string,
+  followUpId: string
+) {
+  const nextFollowUps = (draftsByThreadId[threadId] ?? []).filter(
+    (candidate) => candidate.id !== followUpId
+  );
+
+  if (nextFollowUps.length === 0) {
+    const next = { ...draftsByThreadId };
+    delete next[threadId];
+    return next;
+  }
+
+  return {
+    ...draftsByThreadId,
+    [threadId]: nextFollowUps
+  };
+}
+
+function upsertRuntimeTask(currentTasks: RuntimeTask[], task: RuntimeTask) {
+  return [task, ...currentTasks.filter((candidate) => candidate.id !== task.id)];
+}
+
+function groupRuntimeTasksByThread(runtimeTasks: RuntimeTask[]) {
+  const runsByThreadId = new Map<string, RuntimeTask[]>();
+
+  for (const task of runtimeTasks) {
+    const threadId = task.threadId || task.id;
+    const existing = runsByThreadId.get(threadId) ?? [];
+    existing.push(task);
+    runsByThreadId.set(threadId, existing);
+  }
+
+  return [...runsByThreadId.values()].sort(
+    (left, right) =>
+      getThreadSortTimestamp(right).localeCompare(getThreadSortTimestamp(left))
+  );
+}
+
+function getThreadSortTimestamp(runs: RuntimeTask[]) {
+  return runs.reduce(
+    (latest, run) => {
+      const candidate = run.completedAt ?? run.startedAt ?? run.createdAt;
+      return candidate.localeCompare(latest) > 0 ? candidate : latest;
+    },
+    runs[0]?.completedAt ?? runs[0]?.startedAt ?? runs[0]?.createdAt ?? ""
+  );
 }
 
 function formatShellTimestamp(date: Date) {

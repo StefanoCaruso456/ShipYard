@@ -12,6 +12,7 @@ import type {
   RuntimeTraceRunLog,
   RuntimeTraceSpan,
   RuntimeTraceSpanEvent,
+  RuntimeQueuedFollowUpDraft,
   RuntimeTask,
   SidebarNavItem,
   SkillCatalogItem,
@@ -289,128 +290,404 @@ export function buildGuideThread(
 }
 
 export function buildRuntimeThread(
-  task: RuntimeTask,
-  previewAttachments: ComposerAttachment[] = [],
-  trace: RuntimeTraceRunLog | null = null
+  runs: RuntimeTask[],
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]> = {},
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog> = {},
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[] = []
 ): WorkspaceThread {
-  const title = task.title?.trim() || task.instruction.split(/\s+/).slice(0, 5).join(" ");
-  const completionLabel = task.completedAt ? formatDateTime(task.completedAt) : "Awaiting finish";
-  const previewLookup = Object.fromEntries(
-    previewAttachments.map((attachment) => [attachment.name, attachment])
-  );
+  const orderedRuns = [...runs].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const firstRun = orderedRuns[0];
+  const latestRun = orderedRuns[orderedRuns.length - 1];
 
-  const messages: ThreadMessage[] = [
-    createMessage(
-      `${task.id}-user`,
-      "user",
-      "Operator",
-      task.instruction,
-      formatDateTime(task.createdAt),
-      "default"
+  if (!firstRun || !latestRun) {
+    throw new Error("buildRuntimeThread requires at least one runtime run.");
+  }
+
+  const focusedRun = selectFocusedRun(orderedRuns);
+  const queuedRuns = orderedRuns.filter(
+    (run) => run.status === "pending" && run.id !== focusedRun.id
+  );
+  const threadStatus = deriveThreadStatus(orderedRuns);
+  const attachmentCards = [
+    ...orderedRuns.flatMap((run) =>
+      run.attachments.map((attachment) =>
+        toAttachmentCard(
+          attachment,
+          Object.fromEntries(
+            (runtimeAttachmentPreviewsByTaskId[run.id] ?? []).map((preview) => [preview.name, preview])
+          )
+        )
+      )
     ),
-    createMessage(
-      `${task.id}-system`,
-      "system",
-      "Runtime queue",
-      task.status === "failed"
-        ? "Run failed inside the runtime execution path."
-        : task.status === "completed"
-          ? task.result?.mode === "ai-sdk-openai"
-            ? "Run completed through the OpenAI executor."
-            : "Run completed inside the persistent runtime skeleton."
-          : "Run accepted into the persistent loop and awaiting execution.",
-      task.startedAt ? formatDateTime(task.startedAt) : formatDateTime(task.createdAt),
-      task.status === "failed" ? "danger" : task.status === "completed" ? "success" : "info"
+    ...optimisticFollowUps.flatMap((followUp) =>
+      followUp.attachments.map((attachment) => toLocalAttachmentCard(attachment))
     )
   ];
-
-  if (task.result) {
-    messages.push(
-      createMessage(
-        `${task.id}-assistant`,
-        "assistant",
-        "Runtime result",
-        task.result.responseText ?? task.result.summary,
-        formatDateTime(task.result.completedAt),
-        "success"
-      )
-    );
-  }
-
-  if (task.error) {
-    messages.push(
-      createMessage(
-        `${task.id}-error`,
-        "assistant",
-        "Failure",
-        task.error.message,
-        completionLabel,
-        "danger"
-      )
-    );
-  }
-
-  const progress = [
-    createProgress(
-      `${task.id}-created`,
-      "Task submitted",
-      task.title ? `Title: ${task.title}` : "Task entered through the workspace composer.",
-      formatDateTime(task.createdAt),
-      "info"
-    ),
-    task.startedAt
-      ? createProgress(
-          `${task.id}-started`,
-          "Runtime started",
-          "Persistent runtime worker began processing the task.",
-          formatDateTime(task.startedAt),
-          "default"
-        )
-      : null,
-    task.completedAt && task.status === "completed"
-      ? createProgress(
-          `${task.id}-completed`,
-          "Run completed",
-          task.result?.summary ??
-            (task.result?.mode === "ai-sdk-openai"
-              ? "OpenAI execution completed successfully."
-              : "Placeholder execution completed successfully."),
-          completionLabel,
-          "success"
-        )
-      : null,
-    task.completedAt && task.status === "failed"
-      ? createProgress(
-          `${task.id}-failed`,
-          "Run failed",
-          task.error?.message ?? "Unknown runtime error.",
-          completionLabel,
-          "danger"
-        )
-      : null
-  ].filter(Boolean) as WorkspaceThread["progress"];
+  const activity = [
+    ...buildRuntimeActivity(focusedRun, runtimeTracesByTaskId[focusedRun.id] ?? null),
+    ...buildQueuedFollowUpActivityItems(queuedRuns, optimisticFollowUps)
+  ];
 
   return {
-    id: task.id,
-    title,
-    summary:
-      task.status === "completed"
-        ? task.result?.summary ??
-          (task.result?.mode === "ai-sdk-openai"
-            ? "Completed OpenAI execution."
-            : "Completed placeholder execution.")
-        : task.status === "failed"
-          ? task.error?.message ?? "Runtime failure."
-          : "Queued in the persistent runtime service.",
-    status: task.status,
+    id: firstRun.threadId,
+    title: firstRun.title?.trim() || deriveThreadTitle(firstRun.instruction),
+    summary: deriveRuntimeThreadSummary(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
+    status: threadStatus,
     source: "live",
-    createdLabel: formatShortDate(task.createdAt),
-    updatedLabel: completionLabel,
-    tags: [task.status, task.simulateFailure ? "failure-path" : "live-run"],
-    attachments: task.attachments.map((attachment) => toAttachmentCard(attachment, previewLookup)),
-    messages,
-    progress,
-    activity: buildRuntimeActivity(task, trace)
+    createdLabel: formatShortDate(firstRun.createdAt),
+    updatedLabel: deriveRuntimeThreadUpdatedLabel(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
+    tags: buildRuntimeThreadTags(threadStatus, latestRun, queuedRuns.length + optimisticFollowUps.length),
+    attachments: attachmentCards,
+    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun, optimisticFollowUps),
+    progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps),
+    activity,
+    liveRuntime: {
+      threadId: firstRun.threadId,
+      focusedRunId: focusedRun.id,
+      latestRunId: latestRun.id,
+      queuedRunIds: queuedRuns.map((run) => run.id),
+      runIds: orderedRuns.map((run) => run.id)
+    }
+  };
+}
+
+function selectFocusedRun(runs: RuntimeTask[]) {
+  return (
+    runs.find((run) => run.status === "running") ??
+    runs.find((run) => run.status === "pending") ??
+    runs[runs.length - 1]
+  );
+}
+
+function deriveThreadStatus(runs: RuntimeTask[]): WorkspaceThread["status"] {
+  if (runs.some((run) => run.status === "running")) {
+    return "running";
+  }
+
+  if (runs.some((run) => run.status === "pending")) {
+    return "pending";
+  }
+
+  return runs[runs.length - 1]?.status ?? "ready";
+}
+
+function deriveRuntimeThreadSummary(
+  status: WorkspaceThread["status"],
+  focusedRun: RuntimeTask,
+  latestRun: RuntimeTask,
+  queuedFollowUpCount: number
+) {
+  if (status === "running") {
+    return queuedFollowUpCount > 0
+      ? `Working on the current prompt with ${queuedFollowUpCount} staged follow-up${queuedFollowUpCount === 1 ? "" : "s"} next.`
+      : "Working through the latest prompt in the persistent runtime.";
+  }
+
+  if (status === "pending") {
+    return queuedFollowUpCount > 1
+      ? `${queuedFollowUpCount} prompts are queued in this thread.`
+      : "Queued in the persistent runtime service.";
+  }
+
+  if (status === "failed") {
+    return latestRun.error?.message ?? "Runtime failure.";
+  }
+
+  return (
+    latestRun.result?.summary ??
+    (focusedRun.result?.mode === "ai-sdk-openai"
+      ? "Completed OpenAI execution."
+      : "Completed placeholder execution.")
+  );
+}
+
+function deriveRuntimeThreadUpdatedLabel(
+  status: WorkspaceThread["status"],
+  focusedRun: RuntimeTask,
+  latestRun: RuntimeTask,
+  queuedFollowUpCount: number
+) {
+  if (status === "running") {
+    return queuedFollowUpCount > 0 ? `Thinking +${queuedFollowUpCount}` : "Thinking now";
+  }
+
+  if (status === "pending") {
+    return queuedFollowUpCount > 1 ? `${queuedFollowUpCount} queued` : "Queued";
+  }
+
+  return formatDateTime(latestRun.completedAt ?? latestRun.createdAt);
+}
+
+function buildRuntimeThreadTags(
+  status: WorkspaceThread["status"],
+  latestRun: RuntimeTask,
+  queuedFollowUpCount: number
+) {
+  const tags = [status, latestRun.simulateFailure ? "failure-path" : "live-run"];
+
+  if (queuedFollowUpCount > 0) {
+    tags.push(`queue-${queuedFollowUpCount}`);
+  }
+
+  return tags;
+}
+
+function buildRuntimeThreadMessages(
+  runs: RuntimeTask[],
+  focusedRun: RuntimeTask,
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
+): ThreadMessage[] {
+  const messages: ThreadMessage[] = [];
+
+  for (const [index, run] of runs.entries()) {
+    const isFollowUp = index > 0;
+    const isQueuedBehindFocused = run.status === "pending" && run.id !== focusedRun.id;
+    const queueLabel = isQueuedBehindFocused ? "You · queued follow-up" : isFollowUp ? "You · follow-up" : "Operator";
+
+    messages.push(
+      createMessage(
+        `${run.id}-user`,
+        "user",
+        queueLabel,
+        run.instruction,
+        formatDateTime(run.createdAt),
+        "default"
+      )
+    );
+
+    messages.push(
+      createMessage(
+        `${run.id}-system`,
+        "system",
+        isQueuedBehindFocused ? "Steer queue" : "Runtime queue",
+        deriveRuntimeSystemMessage(run, focusedRun),
+        formatDateTime(run.startedAt ?? run.createdAt),
+        deriveRuntimeSystemTone(run)
+      )
+    );
+
+    if (run.result) {
+      messages.push(
+        createMessage(
+          `${run.id}-assistant`,
+          "assistant",
+          "Runtime result",
+          run.result.responseText ?? run.result.summary,
+          formatDateTime(run.result.completedAt),
+          "success"
+        )
+      );
+    }
+
+    if (run.error) {
+      messages.push(
+        createMessage(
+          `${run.id}-error`,
+          "assistant",
+          "Failure",
+          run.error.message,
+          formatDateTime(run.completedAt ?? run.createdAt),
+          "danger"
+        )
+      );
+    }
+  }
+
+  for (const followUp of optimisticFollowUps) {
+    messages.push(
+      createMessage(
+        `${followUp.id}-user`,
+        "user",
+        "You · staged follow-up",
+        followUp.instruction,
+        formatDateTime(followUp.createdAt),
+        "default"
+      )
+    );
+    messages.push(
+      createMessage(
+        `${followUp.id}-system`,
+        "system",
+        "Steer queue",
+        "Sending this follow-up to the runtime queue. The active run will continue uninterrupted.",
+        formatDateTime(followUp.createdAt),
+        "info"
+      )
+    );
+  }
+
+  return messages;
+}
+
+function deriveRuntimeSystemMessage(run: RuntimeTask, focusedRun: RuntimeTask) {
+  if (run.status === "pending" && run.id !== focusedRun.id) {
+    return "Staged behind the active run. It will execute next without interrupting the current reasoning.";
+  }
+
+  if (run.status === "running") {
+    return "This prompt is currently executing inside the persistent runtime.";
+  }
+
+  if (run.status === "pending") {
+    return "Run accepted into the persistent loop and awaiting execution.";
+  }
+
+  if (run.status === "failed") {
+    return "Run failed inside the runtime execution path.";
+  }
+
+  return run.result?.mode === "ai-sdk-openai"
+    ? "Run completed through the OpenAI executor."
+    : "Run completed inside the persistent runtime skeleton.";
+}
+
+function deriveRuntimeSystemTone(run: RuntimeTask): ThreadMessage["tone"] {
+  if (run.status === "failed") {
+    return "danger";
+  }
+
+  if (run.status === "completed") {
+    return "success";
+  }
+
+  return "info";
+}
+
+function buildRuntimeThreadProgress(
+  runs: RuntimeTask[],
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
+): WorkspaceThread["progress"] {
+  const progress: WorkspaceThread["progress"] = [];
+
+  for (const [index, run] of runs.entries()) {
+    const isFollowUp = index > 0;
+
+    progress.push(
+      createProgress(
+        `${run.id}-created`,
+        isFollowUp ? "Follow-up submitted" : "Task submitted",
+        isFollowUp
+          ? "Queued on the same thread without interrupting the active run."
+          : run.title
+            ? `Title: ${run.title}`
+            : "Task entered through the workspace composer.",
+        formatDateTime(run.createdAt),
+        "info"
+      )
+    );
+
+    if (run.startedAt) {
+      progress.push(
+        createProgress(
+          `${run.id}-started`,
+          "Runtime started",
+          "Persistent runtime worker began processing the prompt.",
+          formatDateTime(run.startedAt),
+          "default"
+        )
+      );
+    }
+
+    if (run.completedAt && run.status === "completed") {
+      progress.push(
+        createProgress(
+          `${run.id}-completed`,
+          "Run completed",
+          run.result?.summary ??
+            (run.result?.mode === "ai-sdk-openai"
+              ? "OpenAI execution completed successfully."
+              : "Placeholder execution completed successfully."),
+          formatDateTime(run.completedAt),
+          "success"
+        )
+      );
+    }
+
+    if (run.completedAt && run.status === "failed") {
+      progress.push(
+        createProgress(
+          `${run.id}-failed`,
+          "Run failed",
+          run.error?.message ?? "Unknown runtime error.",
+          formatDateTime(run.completedAt),
+          "danger"
+        )
+      );
+    }
+  }
+
+  for (const followUp of optimisticFollowUps) {
+    progress.push(
+      createProgress(
+        `${followUp.id}-staged`,
+        "Follow-up staged",
+        "Queued behind the active run and sending to the runtime service.",
+        formatDateTime(followUp.createdAt),
+        "info"
+      )
+    );
+  }
+
+  return progress;
+}
+
+function buildQueuedFollowUpActivityItems(
+  queuedRuns: RuntimeTask[],
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
+) {
+  return [
+    ...queuedRuns.map((run, index) => ({
+      id: `${run.id}-queued`,
+      kind: "summary" as const,
+      badge: "Queue",
+      label: index === 0 ? "Queued next prompt" : "Queued follow-up",
+      detail: summarizePrompt(run.instruction),
+      timestamp: formatDateTime(run.createdAt),
+      tone: "warning" as const,
+      depth: 0,
+      surface: "secondary" as const,
+      sourceType: "summary" as const,
+      sourceName: "queued-follow-up",
+      meta: [run.parentRunId ? "linked follow-up" : "queued"]
+    })),
+    ...optimisticFollowUps.map((followUp) => ({
+      id: `${followUp.id}-queued`,
+      kind: "summary" as const,
+      badge: "Queue",
+      label: "Sending staged follow-up",
+      detail: summarizePrompt(followUp.instruction),
+      timestamp: formatDateTime(followUp.createdAt),
+      tone: "info" as const,
+      depth: 0,
+      surface: "secondary" as const,
+      sourceType: "summary" as const,
+      sourceName: "queued-follow-up",
+      meta: ["sending"]
+    }))
+  ];
+}
+
+function summarizePrompt(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+
+  if (compact.length <= 140) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 137).trimEnd()}...`;
+}
+
+function toLocalAttachmentCard(attachment: ComposerAttachment) {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    size: attachment.size,
+    mimeType: attachment.type,
+    kind: attachment.kind,
+    summary: attachment.summary,
+    excerpt: attachment.excerpt,
+    previewUrl: attachment.previewUrl,
+    source: "local" as const
   };
 }
 

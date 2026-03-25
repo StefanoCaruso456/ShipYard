@@ -295,6 +295,8 @@ async function createHarness() {
 function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
   return {
     id: overrides.id ?? "run-orchestration",
+    threadId: overrides.threadId ?? overrides.id ?? "run-orchestration",
+    parentRunId: overrides.parentRunId ?? null,
     title: overrides.title ?? "Orchestration test",
     instruction: overrides.instruction ?? "Implement the orchestration loop.",
     simulateFailure: overrides.simulateFailure ?? false,
