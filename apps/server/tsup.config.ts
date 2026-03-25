@@ -5,7 +5,5 @@ export default defineConfig({
   format: ["esm"],
   target: "es2022",
   sourcemap: true,
-  clean: true,
-  noExternal: ["@shipyard/shared", "@shipyard/agent-core"]
+  clean: true
 });
-
