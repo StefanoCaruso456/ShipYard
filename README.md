@@ -9,6 +9,9 @@ The future product agent's execution behavior is defined in `skill.md`. The buil
 Keep the docs set small and intentional:
 
 - `docs/architecture/implementation-phases.md`: completed implementation phases
+- `docs/architecture/roadmap.md`: canonical requirement status and next-phase order
+- `docs/architecture/control-plane.md`: typed runtime state and transition model
+- `docs/architecture/agent-team-model.md`: orchestrator, production lead, specialist dev, and execution subagent model
 - `docs/architecture/system-architecture.md`: target runtime shape
 - `docs/architecture/infrastructure.md`: hosting and deployment direction
 - `docs/architecture/model-strategy.md`: model and provider direction
