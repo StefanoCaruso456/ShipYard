@@ -323,10 +323,8 @@ export function buildRuntimeThread(
       followUp.attachments.map((attachment) => toLocalAttachmentCard(attachment))
     )
   ];
-  const activity = [
-    ...buildRuntimeActivity(focusedRun, runtimeTracesByTaskId[focusedRun.id] ?? null),
-    ...buildQueuedFollowUpActivityItems(queuedRuns, optimisticFollowUps)
-  ];
+  const activity = buildRuntimeActivity(focusedRun, runtimeTracesByTaskId[focusedRun.id] ?? null);
+  const queuedFollowUps = buildQueuedFollowUpItems(queuedRuns, optimisticFollowUps);
 
   return {
     id: firstRun.threadId,
@@ -338,7 +336,7 @@ export function buildRuntimeThread(
     updatedLabel: deriveRuntimeThreadUpdatedLabel(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
     tags: buildRuntimeThreadTags(threadStatus, latestRun, queuedRuns.length + optimisticFollowUps.length),
     attachments: attachmentCards,
-    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun, optimisticFollowUps),
+    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun),
     progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps),
     activity,
     liveRuntime: {
@@ -346,7 +344,10 @@ export function buildRuntimeThread(
       focusedRunId: focusedRun.id,
       latestRunId: latestRun.id,
       queuedRunIds: queuedRuns.map((run) => run.id),
-      runIds: orderedRuns.map((run) => run.id)
+      runIds: orderedRuns.map((run) => run.id),
+      focusedRun: buildFocusedRunSummary(focusedRun),
+      queuedFollowUps,
+      completedRunCount: orderedRuns.filter((run) => run.status === "completed").length
     }
   };
 }
@@ -434,15 +435,24 @@ function buildRuntimeThreadTags(
 
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
-  focusedRun: RuntimeTask,
-  optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
+  focusedRun: RuntimeTask
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
   for (const [index, run] of runs.entries()) {
     const isFollowUp = index > 0;
     const isQueuedBehindFocused = run.status === "pending" && run.id !== focusedRun.id;
-    const queueLabel = isQueuedBehindFocused ? "You · queued follow-up" : isFollowUp ? "You · follow-up" : "Operator";
+
+    if (isQueuedBehindFocused) {
+      continue;
+    }
+
+    const queueLabel =
+      run.id === focusedRun.id && (run.status === "running" || run.status === "pending")
+        ? "You · active request"
+        : isFollowUp
+          ? "You · follow-up"
+          : "Operator";
 
     messages.push(
       createMessage(
@@ -491,29 +501,6 @@ function buildRuntimeThreadMessages(
         )
       );
     }
-  }
-
-  for (const followUp of optimisticFollowUps) {
-    messages.push(
-      createMessage(
-        `${followUp.id}-user`,
-        "user",
-        "You · staged follow-up",
-        followUp.instruction,
-        formatDateTime(followUp.createdAt),
-        "default"
-      )
-    );
-    messages.push(
-      createMessage(
-        `${followUp.id}-system`,
-        "system",
-        "Steer queue",
-        "Sending this follow-up to the runtime queue. The active run will continue uninterrupted.",
-        formatDateTime(followUp.createdAt),
-        "info"
-      )
-    );
   }
 
   return messages;
@@ -631,40 +618,39 @@ function buildRuntimeThreadProgress(
   return progress;
 }
 
-function buildQueuedFollowUpActivityItems(
+function buildQueuedFollowUpItems(
   queuedRuns: RuntimeTask[],
   optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
 ) {
   return [
-    ...queuedRuns.map((run, index) => ({
-      id: `${run.id}-queued`,
-      kind: "summary" as const,
-      badge: "Queue",
-      label: index === 0 ? "Queued next prompt" : "Queued follow-up",
-      detail: summarizePrompt(run.instruction),
-      timestamp: formatDateTime(run.createdAt),
-      tone: "warning" as const,
-      depth: 0,
-      surface: "secondary" as const,
-      sourceType: "summary" as const,
-      sourceName: "queued-follow-up",
-      meta: [run.parentRunId ? "linked follow-up" : "queued"]
+    ...queuedRuns.map((run) => ({
+      id: run.id,
+      instruction: summarizePrompt(run.instruction),
+      createdAt: formatDateTime(run.createdAt),
+      state: "queued" as const,
+      attachmentsCount: run.attachments.length,
+      parentRunId: run.parentRunId
     })),
     ...optimisticFollowUps.map((followUp) => ({
-      id: `${followUp.id}-queued`,
-      kind: "summary" as const,
-      badge: "Queue",
-      label: "Sending staged follow-up",
-      detail: summarizePrompt(followUp.instruction),
-      timestamp: formatDateTime(followUp.createdAt),
-      tone: "info" as const,
-      depth: 0,
-      surface: "secondary" as const,
-      sourceType: "summary" as const,
-      sourceName: "queued-follow-up",
-      meta: ["sending"]
+      id: followUp.id,
+      instruction: summarizePrompt(followUp.instruction),
+      createdAt: formatDateTime(followUp.createdAt),
+      state: "sending" as const,
+      attachmentsCount: followUp.attachments.length,
+      parentRunId: null
     }))
   ];
+}
+
+function buildFocusedRunSummary(run: RuntimeTask) {
+  return {
+    id: run.id,
+    instruction: run.instruction,
+    status: run.status,
+    createdAt: formatDateTime(run.createdAt),
+    startedAt: run.startedAt ? formatDateTime(run.startedAt) : null,
+    attachmentsCount: run.attachments.length
+  };
 }
 
 function summarizePrompt(value: string) {

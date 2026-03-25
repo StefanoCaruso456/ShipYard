@@ -453,6 +453,24 @@ export type ProgressEvent = {
   tone: "default" | "info" | "success" | "warning" | "danger";
 };
 
+export type RuntimeThreadFocusedRun = {
+  id: string;
+  instruction: string;
+  status: RuntimeTaskStatus;
+  createdAt: string;
+  startedAt: string | null;
+  attachmentsCount: number;
+};
+
+export type RuntimeThreadQueuedItem = {
+  id: string;
+  instruction: string;
+  createdAt: string;
+  state: "queued" | "sending";
+  attachmentsCount: number;
+  parentRunId: string | null;
+};
+
 export type WorkspaceThread = {
   id: string;
   title: string;
@@ -472,6 +490,9 @@ export type WorkspaceThread = {
     latestRunId: string | null;
     queuedRunIds: string[];
     runIds: string[];
+    focusedRun: RuntimeThreadFocusedRun | null;
+    queuedFollowUps: RuntimeThreadQueuedItem[];
+    completedRunCount: number;
   };
 };
 

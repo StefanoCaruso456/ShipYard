@@ -68,6 +68,7 @@ function App() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
@@ -338,6 +339,12 @@ function App() {
     setComposerAttachments([]);
     setComposerMode("text");
     setSubmissionFeedback(null);
+  }
+
+  function handleRequestSteer() {
+    setActiveNav("projects");
+    setComposerMode("text");
+    setComposerFocusRequestKey((current) => current + 1);
   }
 
   async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
@@ -666,6 +673,7 @@ function App() {
         composerMode={composerMode}
         composerValue={composerValue}
         composerAttachments={composerAttachments}
+        composerFocusRequestKey={composerFocusRequestKey}
         feedback={feedback}
         submitting={submitting}
         transcribingAudio={transcribingAudio}
@@ -685,6 +693,7 @@ function App() {
           setComposerMode("text");
           setComposerValue(prompt);
         }}
+        onRequestSteer={handleRequestSteer}
         onSubmit={handleSubmitTask}
       />
     </main>
