@@ -658,7 +658,7 @@ async function buildRolePayload(
   const traceScope = getActiveTraceScope();
   const contextSpan = traceScope
     ? await traceScope.activeSpan.startChild({
-        name: `context:${role}:${run.id}`,
+        name: `${role}:context`,
         spanType: "context",
         inputSummary: `Assemble ${role} context payload.`,
         metadata: {
@@ -1157,21 +1157,15 @@ async function traceHandoffCreation(handoff: AgentHandoff<unknown>) {
     return;
   }
 
-  const span = await traceScope.activeSpan.startChild({
-    name: `handoff:${handoff.source}->${handoff.target}:${handoff.stepId ?? handoff.runId}`,
-    spanType: "handoff",
-    inputSummary: handoff.purpose,
+  traceScope.activeSpan.addEvent("handoff_created", {
+    message: `${handoff.source} -> ${handoff.target}: ${handoff.purpose}`,
     metadata: {
       source: handoff.source,
       target: handoff.target,
       stepId: handoff.stepId,
-      correlationId: handoff.correlationId
+      correlationId: handoff.correlationId,
+      purpose: handoff.purpose
     }
-  });
-
-  await span.end({
-    status: "completed",
-    outputSummary: `${handoff.source} -> ${handoff.target}: ${handoff.purpose}`
   });
 }
 
@@ -1211,29 +1205,25 @@ async function runMergeWithTrace(
   callback: () => Promise<void> | void
 ) {
   const traceScope = getActiveTraceScope();
-  const span = traceScope
-    ? await traceScope.activeSpan.startChild({
-        name: `merge:${input.role}:${input.stepId ?? "pending"}`,
-        spanType: "merge",
-        inputSummary: `Merge ${input.role} result into canonical run state.`,
-        metadata: {
-          role: input.role,
-          stepId: input.stepId,
-          correlationId: input.correlationId
-        }
-      })
-    : null;
 
   try {
     await callback();
-    await span?.end({
-      status: "completed",
-      outputSummary: input.summary
+    traceScope?.activeSpan.addEvent("state_merged", {
+      message: input.summary,
+      metadata: {
+        role: input.role,
+        stepId: input.stepId,
+        correlationId: input.correlationId
+      }
     });
   } catch (error) {
-    await span?.end({
-      status: "failed",
-      error: error instanceof Error ? error.message : String(error)
+    traceScope?.activeSpan.addEvent("state_merge_failed", {
+      message: error instanceof Error ? error.message : String(error),
+      metadata: {
+        role: input.role,
+        stepId: input.stepId,
+        correlationId: input.correlationId
+      }
     });
     throw error;
   }
@@ -1252,21 +1242,14 @@ async function traceCoordinatorDecision(input: {
     return;
   }
 
-  const span = await traceScope.activeSpan.startChild({
-    name: `coordinator:${input.decision}:${input.stepId ?? "pending"}`,
-    spanType: "coordinator",
-    inputSummary: input.summary,
+  traceScope.activeSpan.addEvent("coordinator_decision", {
+    message: input.summary,
     metadata: {
       decision: input.decision,
       stepId: input.stepId,
-      correlationId: input.correlationId
+      correlationId: input.correlationId,
+      failed: input.failed ?? false
     }
-  });
-
-  await span.end({
-    status: input.failed ? "failed" : "completed",
-    outputSummary: input.summary,
-    error: input.failed ? input.summary : null
   });
 }
 

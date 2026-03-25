@@ -813,6 +813,18 @@ function deriveEventBadge(eventName: string) {
     return "Verifier";
   }
 
+  if (eventName.includes("handoff")) {
+    return "Handoff";
+  }
+
+  if (eventName.includes("merge")) {
+    return "State";
+  }
+
+  if (eventName.includes("coordinator")) {
+    return "Coordinator";
+  }
+
   if (eventName.includes("task")) {
     return "Task";
   }
@@ -854,6 +866,14 @@ function deriveEventLabel(eventName: string) {
       return "Phase failed";
     case "retry_scheduled":
       return "Retry scheduled";
+    case "handoff_created":
+      return "Role handoff";
+    case "state_merged":
+      return "State updated";
+    case "state_merge_failed":
+      return "State update failed";
+    case "coordinator_decision":
+      return "Coordinator decision";
     case "model_unavailable":
       return "Model unavailable";
     default:

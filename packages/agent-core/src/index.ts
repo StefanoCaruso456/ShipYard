@@ -85,6 +85,7 @@ export type {
   StartTraceSpanInput,
   TraceMetadata,
   TraceRunLog,
+  TraceRunSummary,
   TraceService,
   TraceServiceStatus,
   TraceSpan,

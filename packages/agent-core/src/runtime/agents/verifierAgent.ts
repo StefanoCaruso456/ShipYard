@@ -10,7 +10,7 @@ export async function invokeVerifierAgent(input: {
   const traceScope = getActiveTraceScope();
   const span = traceScope
     ? await traceScope.activeSpan.startChild({
-        name: `agent:verifier:${input.invocation.stepId ?? input.invocation.runId}`,
+        name: "verifier",
         spanType: "role",
         inputSummary: `Verifier agent invocation for ${input.invocation.stepId ?? input.invocation.runId}.`,
         metadata: {

@@ -221,6 +221,16 @@ export function createPersistentRuntimeService(
             repoRoot: process.cwd(),
             workspaceIdentifier: options.instructionRuntime.skill.meta.id,
             attachmentCount: run.attachments.length,
+            attachmentKinds: uniqueStrings(run.attachments.map((attachment) => attachment.kind)),
+            selectedFileCount: run.context.relevantFiles.length,
+            selectedFiles: run.context.relevantFiles.map((file) => ({
+              path: file.path,
+              source: file.source ?? null,
+              reason: file.reason ?? null
+            })),
+            validationTargetCount: run.context.validationTargets.length,
+            validationTargets: run.context.validationTargets,
+            requestedToolName: run.toolRequest?.toolName ?? null,
             queuedAt: run.createdAt
           },
           tags: ["shipyard", "runtime"]
@@ -293,11 +303,20 @@ export function createPersistentRuntimeService(
               finalStatus: completedRun.status,
               retryCount: completedRun.retryCount,
               validationStatus: completedRun.validationStatus,
+              provider: completedRun.result?.provider ?? null,
+              modelId: completedRun.result?.modelId ?? null,
               inputTokens: completedRun.result?.usage?.inputTokens ?? null,
               outputTokens: completedRun.result?.usage?.outputTokens ?? null,
               totalTokens: completedRun.result?.usage?.totalTokens ?? null,
               providerLatencyMs: completedRun.result?.usage?.providerLatencyMs ?? null,
-              estimatedCostUsd: completedRun.result?.usage?.estimatedCostUsd ?? null
+              estimatedCostUsd: completedRun.result?.usage?.estimatedCostUsd ?? null,
+              queueDelayMs: computeQueueDelayMs(completedRun),
+              changedFiles:
+                completedRun.result?.mode === "repo-tool" &&
+                completedRun.result.toolResult?.ok &&
+                typeof (completedRun.result.toolResult.data as { path?: unknown }).path === "string"
+                  ? [((completedRun.result.toolResult.data as { path: string }).path)]
+                  : []
             });
             await rootTrace?.end({
               status: "completed",
@@ -730,4 +749,16 @@ function summarizeText(value: string, maxLength: number) {
   }
 
   return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)];
+}
+
+function computeQueueDelayMs(run: AgentRunRecord) {
+  if (!run.startedAt) {
+    return null;
+  }
+
+  return new Date(run.startedAt).getTime() - new Date(run.createdAt).getTime();
 }

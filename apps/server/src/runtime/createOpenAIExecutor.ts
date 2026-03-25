@@ -74,15 +74,18 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           name: `model:${options.config.modelId}`,
           spanType: "model",
           inputSummary: context.plannedStep?.summary ?? summarizePrompt(run),
-          metadata: {
-            provider: options.config.provider,
-            modelId: options.config.modelId,
-            plannedStepId: context.plannedStep?.id ?? null,
-            roleContextSectionIds: context.roleContextSectionIds ?? [],
-            attachmentCount: run.attachments.length
-          }
-        })
-      : null;
+        metadata: {
+          provider: options.config.provider,
+          modelId: options.config.modelId,
+          plannedStepId: context.plannedStep?.id ?? null,
+          roleContextSectionIds: context.roleContextSectionIds ?? [],
+          roleContextSectionCount: context.roleContextSectionIds?.length ?? 0,
+          attachmentCount: run.attachments.length,
+          attachmentKinds: [...new Set(run.attachments.map((attachment) => attachment.kind))],
+          promptLength: prompt.length
+        }
+      })
+    : null;
 
     try {
       const generated = await generateTextImpl({
@@ -107,6 +110,8 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         outputTokens: usage.outputTokens,
         totalTokens: usage.totalTokens,
         providerLatencyMs: usage.providerLatencyMs,
+        estimatedCostUsd: usage.estimatedCostUsd,
+        estimatedCostStatus: usage.estimatedCostUsd == null ? "unavailable" : "calculated",
         providerMetadataPresent: generated.providerMetadata != null
       });
       await modelSpan?.end({
@@ -114,7 +119,12 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         outputSummary: summarizeResponse(responseText),
         metadata: {
           finishReason: generated.finishReason,
-          providerLatencyMs: usage.providerLatencyMs
+          providerLatencyMs: usage.providerLatencyMs,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          totalTokens: usage.totalTokens,
+          estimatedCostUsd: usage.estimatedCostUsd,
+          estimatedCostStatus: usage.estimatedCostUsd == null ? "unavailable" : "calculated"
         }
       });
 
@@ -134,7 +144,9 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
         metadata: {
-          providerLatencyMs: Date.now() - startedAtMs
+          providerLatencyMs: Date.now() - startedAtMs,
+          estimatedCostUsd: null,
+          estimatedCostStatus: "unavailable"
         }
       });
       throw error;

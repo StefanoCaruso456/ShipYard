@@ -123,14 +123,12 @@ test("runtime traces planner executor verifier and context spans for a successfu
 
     assert.ok(completedRun.result);
     assert.ok(trace);
+    assert.ok(trace?.summary);
     assert.ok(trace?.spans.some((span) => span.spanType === "run"));
-    assert.ok(trace?.spans.some((span) => span.spanType === "coordinator"));
-    assert.ok(trace?.spans.some((span) => span.spanType === "handoff"));
-    assert.ok(trace?.spans.some((span) => span.spanType === "merge"));
     assert.ok(trace?.spans.some((span) => span.spanType === "context"));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:planner:")));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:executor:")));
-    assert.ok(trace?.spans.some((span) => span.name.startsWith("agent:verifier:")));
+    assert.ok(trace?.spans.some((span) => span.name === "planner"));
+    assert.ok(trace?.spans.some((span) => span.name === "executor"));
+    assert.ok(trace?.spans.some((span) => span.name === "verifier"));
     assert.ok(
       trace?.spans.some(
         (span) =>
@@ -140,10 +138,23 @@ test("runtime traces planner executor verifier and context spans for a successfu
       )
     );
     assert.ok(
-      trace?.spans.some(
-        (span) => span.spanType === "handoff" && span.name.includes("coordinator->planner")
-      )
+      trace?.spans
+        .flatMap((span) => span.events)
+        .some((event) => event.name === "handoff_created")
     );
+    assert.ok(
+      trace?.spans
+        .flatMap((span) => span.events)
+        .some((event) => event.name === "state_merged")
+    );
+    assert.ok(
+      trace?.spans
+        .flatMap((span) => span.events)
+        .some((event) => event.name === "coordinator_decision")
+    );
+    assert.equal(trace?.summary.model.modelId, null);
+    assert.equal(trace?.summary.files.selectedCount, 1);
+    assert.equal(trace?.summary.validation.status, "not_run");
   } finally {
     await waitForTraceFlush();
     await rm(tempDir, { recursive: true, force: true });
@@ -203,6 +214,9 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
 
     assert.ok(trace?.spans.some((span) => span.name.startsWith("tool:edit_file_region")));
     assert.ok(trace?.spans.some((span) => span.spanType === "validation"));
+    assert.equal(trace?.summary.tools.names[0], "edit_file_region");
+    assert.equal(trace?.summary.files.changedPaths[0], "src/example.ts");
+    assert.equal(trace?.summary.validation.failureCount, 0);
     assert.equal(
       await readFile(filePath, "utf8"),
       ["export function greet(name: string) {", "  return `Hi ${name}`;", "}"].join("\n")

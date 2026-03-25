@@ -225,6 +225,47 @@ export type RuntimeTraceRunLog = {
   runId: string;
   rootSpanId: string | null;
   updatedAt: string;
+  summary: {
+    status: RuntimeTraceSpanStatus | null;
+    totalDurationMs: number | null;
+    queueDelayMs: number | null;
+    model: {
+      provider: string | null;
+      modelId: string | null;
+    };
+    usage: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+      providerLatencyMs: number | null;
+      estimatedCostUsd: number | null;
+    };
+    files: {
+      selectedCount: number;
+      selectedPaths: string[];
+      changedCount: number;
+      changedPaths: string[];
+    };
+    tools: {
+      count: number;
+      names: string[];
+    };
+    validation: {
+      status: string | null;
+      checks: string[];
+      failureCount: number;
+    };
+    retries: {
+      count: number;
+    };
+    rollbacks: {
+      count: number;
+    };
+    attachments: {
+      count: number;
+      kinds: string[];
+    };
+  };
   spans: RuntimeTraceSpan[];
 };
 

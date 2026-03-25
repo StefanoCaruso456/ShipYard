@@ -9,7 +9,7 @@ export async function invokeExecutorAgent(input: {
   const traceScope = getActiveTraceScope();
   const span = traceScope
     ? await traceScope.activeSpan.startChild({
-        name: `agent:executor:${input.invocation.stepId ?? input.invocation.runId}`,
+        name: "executor",
         spanType: "role",
         inputSummary: input.invocation.input.plannerStep.summary,
         metadata: {
