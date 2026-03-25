@@ -18,6 +18,7 @@ import {
   type ValidationGateKind,
   type ValidationGateResult
 } from "./types";
+import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import type { ContextAssembler } from "../context/types";
@@ -783,16 +784,22 @@ function evaluateGate(
       return createGateResult(
         gate,
         input.result?.mode === "repo-tool" && input.result.toolResult?.ok === true,
-        "Repo mutation tool returned success."
+        "Repo tool returned success."
       );
     case "validation_passed":
-      return createGateResult(
-        gate,
-        input.result?.mode === "repo-tool" &&
-          input.result.toolResult?.ok === true &&
-          input.result.toolResult.data.validationResult.success === true,
-        "Repo mutation validation passed."
-      );
+      {
+        const validationResult =
+          input.result?.mode === "repo-tool" && input.result.toolResult?.ok === true
+            ? ((input.result.toolResult.data as { validationResult?: ValidationResult })
+                .validationResult ?? null)
+            : null;
+
+        return createGateResult(
+          gate,
+          validationResult?.success === true,
+          "Repo tool validation passed."
+        );
+      }
     case "result_summary_includes":
       return createGateResult(
         gate,

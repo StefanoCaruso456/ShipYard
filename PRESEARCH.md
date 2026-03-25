@@ -2,7 +2,7 @@
 
 ## Summary
 
-The pre-search conclusion for Shipyard is that the strongest coding-agent architecture is not a single monolithic prompt loop. It is a harness-driven system with planner, executor, and verifier roles operating over structured tools inside a controlled workspace. The agent should inject only the context needed for the current step, edit through patch-first workflows with a guarded fallback path, classify tool failures as runtime events, validate every meaningful change, and log the full execution path so runs are explainable after the fact.
+The pre-search conclusion for Shipyard is that the strongest coding-agent architecture is not a single monolithic prompt loop. It is a harness-driven system with planner, executor, and verifier roles operating over structured tools inside a controlled workspace. The agent should inject only the context needed for the current step, edit through anchor-based replacements with precise localization, classify tool failures as runtime events, validate every meaningful change, and log the full execution path so runs are explainable after the fact.
 
 ## Reference Systems Studied
 
@@ -68,16 +68,18 @@ Adopt a harness-first runtime with a sequential `planner -> executor -> verifier
 
 ### File Editing
 
-Adopt a `search -> read -> patch -> verify -> fallback` strategy:
+Chosen strategy: `anchor-based replacement -> verify -> rollback`.
+
+The runtime does not treat whole-file rewrites as the default edit path. It localizes an anchored block, replaces only that block, validates the result, and rolls back on validation failure.
 
 1. Search for the symbol, file, or error.
 2. Read the narrowest useful file region.
-3. Generate a targeted patch.
-4. Apply the patch.
+3. Identify stable anchor text around the target block.
+4. Replace only the anchored block, not the whole file.
 5. Re-read the changed region.
 6. Run the narrowest useful validation.
-7. Re-localize and retry once if the patch fails.
-8. Use guarded full-file rewrite only when patching remains brittle and the file is safe to rewrite.
+7. Re-localize and retry once if the anchor selection is wrong.
+8. Roll back automatically when validation fails and recovery is possible.
 
 ### Context Management
 
@@ -110,7 +112,7 @@ flowchart TD
     C --> D["Context Retrieval Layer"]
     D --> E["Executor Agent"]
     E --> F["Search / Read Files"]
-    F --> G["Propose Patch or Command"]
+    F --> G["Prepare Anchored Edit or Command"]
     G --> H["Harness Executes Tool"]
     H -->|"Success"| I["Re-read Changed Files"]
     I --> J["Run Validation"]
@@ -120,8 +122,8 @@ flowchart TD
     M --> N{"Retryable?"}
     N -->|"Yes"| O["Retry Once with Narrower Context"]
     O --> H
-    N -->|"No"| P["Re-plan or Choose Fallback Edit Strategy"]
-    P --> Q["Checkpoint + Safe Rewrite or Abort"]
+    N -->|"No"| P["Re-plan or Abort"]
+    P --> Q["Return Failure with Trace and Recovery Notes"]
     Q --> R["Return Partial Result + Failure Explanation"]
     J -->|"Fail"| S["Rollback or Revise Patch"]
     S --> T["Executor Re-edits"]
@@ -148,8 +150,7 @@ flowchart TD
 |---|---|
 | Repo search | Finds files, symbols, strings, and references |
 | File read / range read | Pulls narrow code context for localization and verification |
-| Structured patch tool | Applies minimal create, update, or delete diffs |
-| Safe full rewrite | Rewrites a file only when fallback policy allows it |
+| Anchor-based surgical edit tool | Applies minimal create, update, or delete changes using stable anchors |
 | Shell command runner | Runs bounded validation commands inside the workspace |
 | Validation normalizer | Converts test, lint, and typecheck results into structured success or failure |
 | Diff tool | Shows before and after changes for verification |

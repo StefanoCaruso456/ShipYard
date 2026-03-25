@@ -1,7 +1,7 @@
 import type { ContextAssembler, RoleContextPayload } from "../context/types";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
-import type { RunEvent } from "../validation/types";
+import type { RunEvent, ValidationResult } from "../validation/types";
 import type { ExecutorAgentOutput } from "./agents/types";
 import { invokeExecutorAgent } from "./agents/executorAgent";
 import { invokePlannerAgent } from "./agents/plannerAgent";
@@ -28,7 +28,7 @@ import {
   type OrchestrationState,
   type PlannerStep,
   type PlannerStepResult,
-  type RepoMutationToolRequest,
+  type RepoToolRequest,
   type Task,
   type ValidationGate,
   type ValidationGateResult,
@@ -457,7 +457,7 @@ export function planNextStep(input: {
   return {
     role: "planner",
     at,
-    summary: `Planner proposed ${stepId}: ${activeToolRequest ? "execute the scoped repo mutation" : "produce the scoped execution response"}.`,
+    summary: `Planner proposed ${stepId}: ${activeToolRequest ? "execute the scoped repo tool step" : "produce the scoped execution response"}.`,
     consumedContextSectionIds: selectConsumedSectionIds(input.payload, [
       "task-objective",
       "current-run-state",
@@ -756,11 +756,17 @@ function extractChangedFiles(result: AgentRunResult) {
     return [];
   }
 
-  const candidate = result.toolResult.data as { path?: string };
-  return candidate.path ? [candidate.path] : [];
+  switch (result.toolResult.toolName) {
+    case "edit_file_region":
+    case "create_file":
+    case "delete_file":
+      return [result.toolResult.data.path];
+    default:
+      return [];
+  }
 }
 
-function extractToolPath(toolRequest: RepoMutationToolRequest | null | undefined) {
+function extractToolPath(toolRequest: RepoToolRequest | null | undefined) {
   if (!toolRequest) {
     return null;
   }
@@ -775,7 +781,10 @@ function deriveValidationPassed(
   executorResult: ExecutorStepResult
 ): boolean | null {
   if (result?.mode === "repo-tool" && result.toolResult?.ok) {
-    return result.toolResult.data.validationResult.success;
+    const validationResult = (result.toolResult.data as { validationResult?: ValidationResult })
+      .validationResult;
+
+    return validationResult?.success ?? null;
   }
 
   if (executorResult.error?.validationResult) {
@@ -946,16 +955,22 @@ function evaluateValidationGate(
       return createGateResult(
         gate,
         input.result.mode === "repo-tool" && input.result.toolResult?.ok === true,
-        "Repo mutation tool returned success."
+        "Repo tool returned success."
       );
     case "validation_passed":
-      return createGateResult(
-        gate,
-        input.result.mode === "repo-tool" &&
-          input.result.toolResult?.ok === true &&
-          input.result.toolResult.data.validationResult.success === true,
-        "Repo mutation validation passed."
-      );
+      {
+        const validationResult =
+          input.result.mode === "repo-tool" && input.result.toolResult?.ok === true
+            ? ((input.result.toolResult.data as { validationResult?: ValidationResult })
+                .validationResult ?? null)
+            : null;
+
+        return createGateResult(
+          gate,
+          validationResult?.success === true,
+          "Repo tool validation passed."
+        );
+      }
     case "result_summary_includes":
       return createGateResult(
         gate,
@@ -1084,8 +1099,17 @@ function createOrchestrationFailure(
 
 function applyExecutionValidationState(run: AgentRunRecord, execution: ExecutorAgentOutput) {
   if (execution.result?.mode === "repo-tool" && execution.result.toolResult?.ok) {
-    run.lastValidationResult = execution.result.toolResult.data.validationResult ?? null;
-    run.validationStatus = execution.result.toolResult.data.validationResult.success ? "passed" : "failed";
+    const validationResult = (
+      execution.result.toolResult.data as {
+        validationResult?: ValidationResult;
+      }
+    ).validationResult;
+
+    if (validationResult) {
+      run.lastValidationResult = validationResult;
+      run.validationStatus = validationResult.success ? "passed" : "failed";
+    }
+
     return;
   }
 

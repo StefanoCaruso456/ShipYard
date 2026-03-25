@@ -6,7 +6,7 @@ import type {
   AgentRole,
   ContextAssembler,
   PersistentAgentRuntimeService,
-  RepoMutationToolRequest,
+  RepoToolRequest,
   SubmitTaskInput,
   TraceService,
   ValidationGate,
@@ -491,7 +491,9 @@ function parseProjectInput(
     };
   }
 
-  const folder = folderInput
+  const folder:
+    | { value: NonNullable<NonNullable<SubmitTaskInput["project"]>["folder"]> | null }
+    | { error: string } = folderInput
     ? (() => {
         const folderCandidate = folderInput as Record<string, unknown>;
 
@@ -724,7 +726,7 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
 
 function parseToolRequest(
   value: unknown
-): { value: RepoMutationToolRequest | null } | { error: string } {
+): { value: RepoToolRequest | null } | { error: string } {
   if (value === undefined || value === null) {
     return {
       value: null
@@ -741,6 +743,123 @@ function parseToolRequest(
     toolName?: unknown;
     input?: unknown;
   };
+
+  if (candidate.toolName === "list_files") {
+    const input =
+      candidate.input === undefined || candidate.input === null
+        ? {}
+        : (candidate.input as {
+            glob?: unknown;
+            limit?: unknown;
+          });
+
+    if (
+      (input.glob !== undefined && typeof input.glob !== "string") ||
+      (input.limit !== undefined &&
+        (typeof input.limit !== "number" || !Number.isFinite(input.limit)))
+    ) {
+      return {
+        error: "list_files accepts an optional string glob and optional numeric limit."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "list_files",
+        input: {
+          glob: typeof input.glob === "string" ? input.glob : undefined,
+          limit: typeof input.limit === "number" ? input.limit : undefined
+        }
+      }
+    };
+  }
+
+  if (candidate.toolName === "read_file") {
+    const input = candidate.input as {
+      path?: unknown;
+    };
+
+    if (typeof input?.path !== "string") {
+      return {
+        error: "read_file requires a string path field."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "read_file",
+        input: {
+          path: input.path
+        }
+      }
+    };
+  }
+
+  if (candidate.toolName === "read_file_range") {
+    const input = candidate.input as {
+      path?: unknown;
+      startLine?: unknown;
+      endLine?: unknown;
+    };
+
+    if (
+      typeof input?.path !== "string" ||
+      typeof input.startLine !== "number" ||
+      !Number.isInteger(input.startLine) ||
+      typeof input.endLine !== "number" ||
+      !Number.isInteger(input.endLine)
+    ) {
+      return {
+        error: "read_file_range requires string path and integer startLine/endLine fields."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "read_file_range",
+        input: {
+          path: input.path,
+          startLine: input.startLine,
+          endLine: input.endLine
+        }
+      }
+    };
+  }
+
+  if (candidate.toolName === "search_repo") {
+    const input = candidate.input as {
+      query?: unknown;
+      glob?: unknown;
+      limit?: unknown;
+      caseSensitive?: unknown;
+    };
+
+    if (
+      typeof input?.query !== "string" ||
+      (input.glob !== undefined && typeof input.glob !== "string") ||
+      (input.limit !== undefined &&
+        (typeof input.limit !== "number" || !Number.isFinite(input.limit))) ||
+      (input.caseSensitive !== undefined && typeof input.caseSensitive !== "boolean")
+    ) {
+      return {
+        error:
+          "search_repo requires a string query and optional string glob, numeric limit, and boolean caseSensitive fields."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "search_repo",
+        input: {
+          query: input.query,
+          glob: typeof input.glob === "string" ? input.glob : undefined,
+          limit: typeof input.limit === "number" ? input.limit : undefined,
+          caseSensitive:
+            typeof input.caseSensitive === "boolean" ? input.caseSensitive : undefined
+        }
+      }
+    };
+  }
 
   if (candidate.toolName === "edit_file_region") {
     const input = candidate.input as {
@@ -820,7 +939,8 @@ function parseToolRequest(
   }
 
   return {
-    error: "toolRequest.toolName must be edit_file_region, create_file, or delete_file."
+    error:
+      "toolRequest.toolName must be list_files, read_file, read_file_range, search_repo, edit_file_region, create_file, or delete_file."
   };
 }
 

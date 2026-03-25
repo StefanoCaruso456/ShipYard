@@ -81,6 +81,155 @@ test("runtime executor can process an edit task through the persistent runtime s
   }
 });
 
+test("runtime executor can process a read_file task through the persistent runtime service", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-read-file-"));
+  const filePath = path.join(tempDir, "src/example.ts");
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      [
+        "export function greet(name: string) {",
+        "  return `Hello ${name}`;",
+        "}"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const run = await runtimeService.submitTask({
+      instruction: "Read the greet file.",
+      toolRequest: {
+        toolName: "read_file",
+        input: {
+          path: "src/example.ts"
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "repo-tool");
+    assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(completedRun.result?.toolResult?.toolName, "read_file");
+    assert.equal(completedRun.validationStatus, "not_run");
+    assert.equal(completedRun.lastValidationResult, null);
+    assert.deepEqual(completedRun.orchestration?.lastExecutorResult?.changedFiles, []);
+    assert.ok(completedRun.result?.responseText?.includes("export function greet"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime executor can process a read_file_range task through the persistent runtime service", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-read-range-"));
+  const filePath = path.join(tempDir, "src/example.ts");
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      [
+        "export function greet(name: string) {",
+        "  const message = `Hello ${name}`;",
+        "  return message;",
+        "}"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const run = await runtimeService.submitTask({
+      instruction: "Read the body of the greet file.",
+      toolRequest: {
+        toolName: "read_file_range",
+        input: {
+          path: "src/example.ts",
+          startLine: 2,
+          endLine: 3
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "repo-tool");
+    assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(completedRun.result?.toolResult?.toolName, "read_file_range");
+    assert.equal(completedRun.validationStatus, "not_run");
+    assert.deepEqual(completedRun.orchestration?.lastExecutorResult?.changedFiles, []);
+    assert.ok(completedRun.result?.responseText?.includes("const message"));
+    assert.ok(completedRun.result?.responseText?.includes("return message"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime executor can process a search_repo task through the persistent runtime service", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-search-"));
+  const filePath = path.join(tempDir, "src/example.ts");
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      [
+        "export function greet(name: string) {",
+        "  return `Hello ${name}`;",
+        "}"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const run = await runtimeService.submitTask({
+      instruction: "Search for greet.",
+      toolRequest: {
+        toolName: "search_repo",
+        input: {
+          query: "greet"
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "repo-tool");
+    assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(completedRun.result?.toolResult?.toolName, "search_repo");
+    assert.equal(completedRun.validationStatus, "not_run");
+    assert.deepEqual(completedRun.orchestration?.lastExecutorResult?.changedFiles, []);
+    assert.ok(completedRun.result?.responseText?.includes("src/example.ts:1:17"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime executor can process a phase execution plan that uses repo tools", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-phase-"));
   const filePath = path.join(tempDir, "src/example.ts");

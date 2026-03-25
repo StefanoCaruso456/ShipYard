@@ -3,7 +3,7 @@ import type {
   AgentRole,
   RoleSkillView
 } from "../instructions/types";
-import type { AgentRunRecord, AgentRuntimeStatus, RepoMutationToolResult } from "../runtime/types";
+import type { AgentRunRecord, AgentRuntimeStatus, RepoToolResult } from "../runtime/types";
 import type { ProjectRulesDocument, SharedRoleContext } from "./types";
 
 export function buildSharedRoleContext(input: {
@@ -93,12 +93,12 @@ function deriveRelevantFiles(run: AgentRunRecord) {
     {
       path: toolPath,
       source: "toolRequest",
-      reason: "Derived from the active repo mutation request."
+      reason: "Derived from the active repo tool request."
     }
   ];
 }
 
-function deriveRecentToolResults(run: AgentRunRecord): RepoMutationToolResult[] {
+function deriveRecentToolResults(run: AgentRunRecord): RepoToolResult[] {
   if (run.result?.toolResult) {
     return [run.result.toolResult];
   }

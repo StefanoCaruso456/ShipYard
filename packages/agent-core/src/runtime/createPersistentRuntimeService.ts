@@ -420,12 +420,9 @@ export async function createPersistentRuntimeService(
               providerLatencyMs: completedRun.result?.usage?.providerLatencyMs ?? null,
               estimatedCostUsd: completedRun.result?.usage?.estimatedCostUsd ?? null,
               queueDelayMs: computeQueueDelayMs(completedRun),
-              changedFiles:
-                completedRun.result?.mode === "repo-tool" &&
-                completedRun.result.toolResult?.ok &&
-                typeof (completedRun.result.toolResult.data as { path?: unknown }).path === "string"
-                  ? [((completedRun.result.toolResult.data as { path: string }).path)]
-                  : []
+              changedFiles: extractChangedFilesFromToolResult(
+                completedRun.result?.mode === "repo-tool" ? completedRun.result.toolResult : null
+              )
             });
             await rootTrace?.end({
               status: "completed",
@@ -868,6 +865,21 @@ function createResultRollingSummary(
     updatedAt: completedAt,
     source: "result"
   };
+}
+
+function extractChangedFilesFromToolResult(toolResult: AgentRunResult["toolResult"] | null | undefined) {
+  if (!toolResult?.ok) {
+    return [];
+  }
+
+  switch (toolResult.toolName) {
+    case "edit_file_region":
+    case "create_file":
+    case "delete_file":
+      return [toolResult.data.path];
+    default:
+      return [];
+  }
 }
 
 function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
