@@ -81,6 +81,67 @@ Meaning:
 7. runtime either continues, retries, or stops
 8. trace and run state persisted
 
+## End-to-End Request Flow
+
+The current live path is:
+
+1. The React client collects text, files, or a voice note.
+2. Voice input is transcribed on the backend first, then merged back into the composer.
+3. The client sends `POST /api/runtime/tasks`.
+4. The server parses JSON or multipart input and analyzes attachments into structured summaries.
+5. The persistent runtime creates a stored `AgentRunRecord`, assigns `threadId`, and queues the run.
+6. The worker marks the run `running` and opens trace scope for the run.
+7. The runtime chooses one of two execution paths:
+   - direct orchestration via `executeOrchestrationLoop`
+   - phase/story/task execution via `executePhaseExecutionRun`, which still delegates each task into orchestration
+8. Inside orchestration, the coordinator runs:
+   - planner
+   - executor
+   - verifier
+9. The verifier returns the next action:
+   - `continue`
+   - `retry_step`
+   - `replan`
+   - `fail`
+10. The runtime persists the updated run, events, validation state, and rolling summary after each meaningful stage.
+11. The client polls runtime tasks, status, and traces and renders the current state back to the operator.
+
+Important:
+
+- React is the input and rendering layer, not the reasoning engine.
+- The active backend runtime owns execution, branching, persistence, and observability.
+
+## Stage Artifacts
+
+The runtime passes structured artifacts between stages rather than loose text.
+
+Coordinator handoff artifacts:
+
+- `AgentHandoff`
+- `AgentInvocation`
+- `AgentResult`
+
+Role result artifacts:
+
+- `PlannerStepResult`
+- `ExecutorStepResult`
+- `VerifierStepResult`
+
+Execution artifact:
+
+- `AgentRunResult`
+
+Validation artifact:
+
+- `ValidationResult`
+
+Validation is not guaranteed to be non-null on every stage. The guarantees are:
+
+- every planner/executor/verifier transition has a structured handoff/result artifact
+- every meaningful stage persists run state for observability
+- validation artifacts are present when a step performs validation-worthy execution such as repo mutation
+- model-only response steps may complete without a non-null `ValidationResult`
+
 ## Current State
 
 Phases 1 through 7 are now complete in the current backend:
