@@ -79,72 +79,28 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 
-      <section className="steer-queue">
-        <div className="steer-queue__header">
-          <div>
-            <strong>Steer queue</strong>
-            <span>
+      {canSteer || queuedFollowUps.length > 0 ? (
+        <section className="live-runtime-stage__follow-up-strip">
+          <div className="live-runtime-stage__follow-up-copy">
+            <strong>Steer drawer</strong>
+            <p>
               {queuedFollowUps.length > 0
-                ? `${queuedFollowUps.length} follow-up${queuedFollowUps.length === 1 ? "" : "s"} staged`
-                : "No follow-up queued yet"}
-            </span>
+                ? `${queuedFollowUps.length} follow-up${queuedFollowUps.length === 1 ? "" : "s"} are staged in the docked steer drawer below.`
+                : "Open the steer drawer from the prompt bar below to queue the next follow-up without interrupting the current run."}
+            </p>
           </div>
 
           {canSteer ? (
             <button
               type="button"
-              className="steer-queue__action"
+              className="live-runtime-stage__steer-button"
               onClick={onRequestSteer}
             >
               Open steer
             </button>
           ) : null}
-        </div>
-
-        {queuedFollowUps.length > 0 ? (
-          <div className="steer-queue__list">
-            {queuedFollowUps.map((item, index) => (
-              <article
-                key={item.id}
-                className={`steer-queue__item steer-queue__item--${item.state}`}
-              >
-                <div className="steer-queue__item-head">
-                  <div className="steer-queue__label-row">
-                    <span className="steer-queue__badge">
-                      {item.state === "sending"
-                        ? "Sending"
-                        : index === 0
-                          ? "Queued next"
-                          : "Queued later"}
-                    </span>
-                    <strong>
-                      {item.state === "sending"
-                        ? "Submitting steer follow-up"
-                        : "Steer follow-up ready"}
-                    </strong>
-                  </div>
-                  <span>{item.createdAt}</span>
-                </div>
-
-                <p>{item.instruction}</p>
-
-                <div className="steer-queue__meta">
-                  <span>{item.state === "sending" ? "Keeping the current run uninterrupted" : "Runs after the active prompt"}</span>
-                  {item.attachmentsCount > 0 ? (
-                    <span>
-                      {item.attachmentsCount} attachment{item.attachmentsCount === 1 ? "" : "s"}
-                    </span>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="steer-queue__empty">
-            While this run is working, open steer and send a follow-up. It will queue on this thread instead of interrupting the current reasoning.
-          </p>
-        )}
-      </section>
+        </section>
+      ) : null}
     </section>
   );
 }

@@ -3,7 +3,12 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { createRecordedAudioFile, pickPreferredAudioMimeType } from "../audio";
 import { buildComposerAttachments } from "../attachments";
-import type { ComposerAttachment, ComposerMode, WorkspaceProject } from "../types";
+import type {
+  ComposerAttachment,
+  ComposerMode,
+  RuntimeThreadQueuedItem,
+  WorkspaceProject
+} from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type ComposerProps = {
@@ -15,6 +20,8 @@ type ComposerProps = {
     status: "pending" | "running";
     queuedCount: number;
     threadTitle: string;
+    activePrompt: string;
+    queuedFollowUps: RuntimeThreadQueuedItem[];
   } | null;
   focusRequestKey: number;
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
@@ -51,7 +58,9 @@ export function Composer({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const previousQueuedCountRef = useRef(0);
   const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
+  const [steerDrawerOpen, setSteerDrawerOpen] = useState(false);
   const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
   const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
@@ -78,13 +87,47 @@ export function Composer({
       return;
     }
 
+    if (steerMode) {
+      setSteerDrawerOpen(true);
+    }
+
     textareaRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     textareaRef.current?.focus();
     textareaRef.current?.setSelectionRange(
       textareaRef.current.value.length,
       textareaRef.current.value.length
     );
-  }, [focusRequestKey]);
+  }, [focusRequestKey, steerMode]);
+
+  useEffect(() => {
+    if (!steerMode) {
+      setSteerDrawerOpen(false);
+      previousQueuedCountRef.current = 0;
+      return;
+    }
+
+    if (hasDraftContent) {
+      setSteerDrawerOpen(true);
+    }
+  }, [hasDraftContent, steerMode]);
+
+  useEffect(() => {
+    if (!steerMode) {
+      return;
+    }
+
+    const previousQueuedCount = previousQueuedCountRef.current;
+
+    if (
+      steerMode.queuedCount > previousQueuedCount &&
+      !hasDraftContent &&
+      !submitting
+    ) {
+      setSteerDrawerOpen(false);
+    }
+
+    previousQueuedCountRef.current = steerMode.queuedCount;
+  }, [hasDraftContent, steerMode, submitting]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
@@ -179,6 +222,7 @@ export function Composer({
   }
 
   function focusSteerInput() {
+    setSteerDrawerOpen(true);
     textareaRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     textareaRef.current?.focus();
     textareaRef.current?.setSelectionRange(
@@ -187,14 +231,34 @@ export function Composer({
     );
   }
 
+  function handleToggleSteerDrawer() {
+    if (!steerMode) {
+      return;
+    }
+
+    setSteerDrawerOpen((current) => {
+      const next = !current;
+
+      if (next) {
+        window.setTimeout(() => {
+          focusSteerInput();
+        }, 0);
+      }
+
+      return next;
+    });
+  }
+
   return (
     <form className="composer" onSubmit={onSubmit}>
-      <AttachmentPreviewList
-        attachments={attachments}
-        onRemove={(attachmentId) =>
-          onAttachmentsChange(attachments.filter((candidate) => candidate.id !== attachmentId))
-        }
-      />
+      {!steerMode ? (
+        <AttachmentPreviewList
+          attachments={attachments}
+          onRemove={(attachmentId) =>
+            onAttachmentsChange(attachments.filter((candidate) => candidate.id !== attachmentId))
+          }
+        />
+      ) : null}
 
       <div className={`composer__field ${steerMode ? "composer__field--steer" : ""}`}>
         {steerMode ? (
@@ -204,66 +268,151 @@ export function Composer({
                 <SteerDockIcon />
                 <span>{steerMode.status === "running" ? "Now" : "Up next"}</span>
               </span>
-              <span className="composer__steer-window-thread">{steerMode.threadTitle}</span>
+              <div className="composer__steer-window-text">
+                <strong className="composer__steer-window-prompt">{steerMode.activePrompt}</strong>
+                <span className="composer__steer-window-thread">{steerMode.threadTitle}</span>
+              </div>
             </div>
 
             <button
               type="button"
-              className="composer__steer-trigger"
-              onClick={focusSteerInput}
-              aria-label="Open steer composer"
+              className={`composer__steer-trigger ${steerDrawerOpen ? "composer__steer-trigger--open" : ""}`}
+              onClick={handleToggleSteerDrawer}
+              aria-expanded={steerDrawerOpen}
+              aria-label={steerDrawerOpen ? "Hide steer drawer" : "Open steer drawer"}
             >
               <SteerTurnIcon />
               <span>Steer</span>
+              <ChevronIcon />
             </button>
           </div>
         ) : null}
 
-        <textarea
-          ref={textareaRef}
-          value={composerValue}
-          onChange={(event) => onComposerValueChange(event.target.value)}
-          placeholder={placeholder}
-          rows={4}
-        />
-        <div className="composer__toolbar">
-          <div className="composer__tools">
-            <button
-              type="button"
-              className="composer__tool-button composer__tool-button--icon"
-              aria-label="Upload files"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <PlusIcon />
-            </button>
-            <button
-              type="button"
-              className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
-              onClick={() => void handleMicClick()}
-              disabled={transcribingAudio}
-            >
-              <MicIcon />
-              <span>
-                {recordingState === "recording"
-                  ? "Stop"
-                  : transcribingAudio
-                    ? "Transcribing"
-                    : "Mic"}
-              </span>
-            </button>
-          </div>
+        {steerMode ? (
+          <div className={`composer__steer-drawer ${steerDrawerOpen ? "is-open" : "is-closed"}`}>
+            <div className="composer__steer-content">
+              <AttachmentPreviewList
+                attachments={attachments}
+                onRemove={(attachmentId) =>
+                  onAttachmentsChange(attachments.filter((candidate) => candidate.id !== attachmentId))
+                }
+              />
 
-          <div className="composer__actions">
-            <button
-              type="submit"
-              className={`composer__submit ${canSubmit ? "composer__submit--active" : ""}`}
-              disabled={!canSubmit}
-              aria-label={submitting ? "Sending" : transcribingAudio ? "Transcribing audio" : "Send message"}
-            >
-              <ArrowUpIcon />
-            </button>
+              {steerMode.queuedFollowUps.length > 0 ? (
+                <div className="composer__queued-followups">
+                  {steerMode.queuedFollowUps.slice(0, 2).map((item) => (
+                    <article
+                      key={item.id}
+                      className={`composer__queued-followup composer__queued-followup--${item.state}`}
+                    >
+                      <div className="composer__queued-followup-head">
+                        <span className="composer__queued-followup-badge">
+                          {item.state === "sending" ? "Sending" : "Queued next"}
+                        </span>
+                        <span>{item.createdAt}</span>
+                      </div>
+                      <strong>{item.instruction}</strong>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+
+              <textarea
+                ref={textareaRef}
+                value={composerValue}
+                onChange={(event) => onComposerValueChange(event.target.value)}
+                placeholder={placeholder}
+                rows={4}
+              />
+              <div className="composer__toolbar">
+                <div className="composer__tools">
+                  <button
+                    type="button"
+                    className="composer__tool-button composer__tool-button--icon"
+                    aria-label="Upload files"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <PlusIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
+                    onClick={() => void handleMicClick()}
+                    disabled={transcribingAudio}
+                  >
+                    <MicIcon />
+                    <span>
+                      {recordingState === "recording"
+                        ? "Stop"
+                        : transcribingAudio
+                          ? "Transcribing"
+                          : "Mic"}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="composer__actions">
+                  <button
+                    type="submit"
+                    className={`composer__submit ${canSubmit ? "composer__submit--active" : ""}`}
+                    disabled={!canSubmit}
+                    aria-label={submitting ? "Sending" : transcribingAudio ? "Transcribing audio" : "Send message"}
+                  >
+                    <ArrowUpIcon />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <textarea
+              ref={textareaRef}
+              value={composerValue}
+              onChange={(event) => onComposerValueChange(event.target.value)}
+              placeholder={placeholder}
+              rows={4}
+            />
+            <div className="composer__toolbar">
+              <div className="composer__tools">
+                <button
+                  type="button"
+                  className="composer__tool-button composer__tool-button--icon"
+                  aria-label="Upload files"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <PlusIcon />
+                </button>
+                <button
+                  type="button"
+                  className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
+                  onClick={() => void handleMicClick()}
+                  disabled={transcribingAudio}
+                >
+                  <MicIcon />
+                  <span>
+                    {recordingState === "recording"
+                      ? "Stop"
+                      : transcribingAudio
+                        ? "Transcribing"
+                        : "Mic"}
+                  </span>
+                </button>
+              </div>
+
+              <div className="composer__actions">
+                <button
+                  type="submit"
+                  className={`composer__submit ${canSubmit ? "composer__submit--active" : ""}`}
+                  disabled={!canSubmit}
+                  aria-label={submitting ? "Sending" : transcribingAudio ? "Transcribing audio" : "Send message"}
+                >
+                  <ArrowUpIcon />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
@@ -314,6 +463,21 @@ function SteerTurnIcon() {
         fill="none"
         stroke="currentColor"
         strokeWidth="1.55"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="m6.2 8.2 3.8 3.8 3.8-3.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
