@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ContextAssembler } from "../context/types";
 import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
+import type { TraceMetadata } from "../observability/types";
 import type { TraceService } from "../observability/types";
 import { executeOrchestrationLoop } from "./orchestration";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
@@ -35,21 +36,75 @@ type CreatePersistentRuntimeServiceOptions = {
 const runStatuses: AgentRunStatus[] = ["pending", "running", "completed", "failed"];
 const MAX_VALIDATION_RETRIES = 1;
 
-export function createPersistentRuntimeService(
+export async function createPersistentRuntimeService(
   options: CreatePersistentRuntimeServiceOptions
-): PersistentAgentRuntimeService {
+): Promise<PersistentAgentRuntimeService> {
   const store = options.store ?? createInMemoryRunStore();
   const executeRun = options.executeRun ?? defaultExecuteRun;
   const queue: string[] = [];
   const startedAt = new Date().toISOString();
+  const runs = new Map<string, AgentRunRecord>(
+    (await store.load()).map((run) => {
+      const normalized = normalizeRunRecord(run);
+
+      return [normalized.id, cloneRunRecord(normalized)];
+    })
+  );
 
   let activeRunId: string | null = null;
   let processing = false;
   let loopScheduled = false;
 
-  recoverStoredRuns();
+  await recoverStoredRuns();
 
-  function submitTask(input: SubmitTaskInput): AgentRunRecord {
+  function getStoredRun(id: string) {
+    const run = runs.get(id);
+
+    return run ? cloneRunRecord(run) : null;
+  }
+
+  function listStoredRuns() {
+    return Array.from(runs.values())
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(cloneRunRecord);
+  }
+
+  async function createStoredRun(run: AgentRunRecord) {
+    const normalized = normalizeRunRecord(run);
+
+    runs.set(normalized.id, cloneRunRecord(normalized));
+
+    try {
+      await store.create(normalized);
+    } catch (error) {
+      runs.delete(normalized.id);
+      throw error;
+    }
+
+    return cloneRunRecord(normalized);
+  }
+
+  async function updateStoredRun(run: AgentRunRecord) {
+    const normalized = normalizeRunRecord(run);
+    const previous = runs.get(normalized.id);
+
+    if (!previous) {
+      throw new Error(`Cannot update unknown run: ${normalized.id}`);
+    }
+
+    runs.set(normalized.id, cloneRunRecord(normalized));
+
+    try {
+      await store.update(normalized);
+    } catch (error) {
+      runs.set(normalized.id, cloneRunRecord(previous));
+      throw error;
+    }
+
+    return cloneRunRecord(normalized);
+  }
+
+  async function submitTask(input: SubmitTaskInput): Promise<AgentRunRecord> {
     const instruction = input.instruction.trim();
 
     if (!instruction) {
@@ -79,7 +134,7 @@ export function createPersistentRuntimeService(
       result: null
     };
 
-    store.create(run);
+    await createStoredRun(run);
     queue.push(run.id);
     scheduleProcessing();
 
@@ -87,20 +142,20 @@ export function createPersistentRuntimeService(
   }
 
   function getRun(id: string): AgentRunRecord | null {
-    const run = store.get(id);
+    const run = getStoredRun(id);
 
     return run ? normalizeRunRecord(run) : null;
   }
 
   function listRuns(): AgentRunRecord[] {
-    return store.list().map(normalizeRunRecord);
+    return listStoredRuns().map(normalizeRunRecord);
   }
 
   function getStatus(): AgentRuntimeStatus {
-    const runs = store.list();
+    const currentRuns = listStoredRuns();
     const runsByStatus = createRunCounts();
 
-    for (const run of runs) {
+    for (const run of currentRuns) {
       runsByStatus[run.status] += 1;
     }
 
@@ -109,7 +164,7 @@ export function createPersistentRuntimeService(
       workerState: processing ? "running" : "idle",
       activeRunId,
       queuedRuns: queue.length,
-      totalRuns: runs.length,
+      totalRuns: currentRuns.length,
       runsByStatus,
       instructions: {
         skillId: options.instructionRuntime.skill.meta.id,
@@ -134,10 +189,9 @@ export function createPersistentRuntimeService(
     });
   }
 
-  function recoverStoredRuns() {
+  async function recoverStoredRuns() {
     const recoveredAt = new Date().toISOString();
-    const existingRuns = store
-      .list()
+    const existingRuns = listStoredRuns()
       .slice()
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
@@ -148,7 +202,7 @@ export function createPersistentRuntimeService(
       }
 
       if (run.status === "running") {
-        store.update({
+        await updateStoredRun({
           ...normalizeRunRecord(run),
           status: "failed",
           completedAt: recoveredAt,
@@ -190,7 +244,7 @@ export function createPersistentRuntimeService(
           continue;
         }
 
-        const queuedRun = store.get(runId);
+        const queuedRun = getStoredRun(runId);
 
         if (!queuedRun) {
           continue;
@@ -220,18 +274,8 @@ export function createPersistentRuntimeService(
             roleFlow: run.phaseExecution ? "phase-execution" : "orchestration",
             repoRoot: process.cwd(),
             workspaceIdentifier: options.instructionRuntime.skill.meta.id,
-            attachmentCount: run.attachments.length,
-            attachmentKinds: uniqueStrings(run.attachments.map((attachment) => attachment.kind)),
-            selectedFileCount: run.context.relevantFiles.length,
-            selectedFiles: run.context.relevantFiles.map((file) => ({
-              path: file.path,
-              source: file.source ?? null,
-              reason: file.reason ?? null
-            })),
-            validationTargetCount: run.context.validationTargets.length,
-            validationTargets: run.context.validationTargets,
-            requestedToolName: run.toolRequest?.toolName ?? null,
-            queuedAt: run.createdAt
+            queuedAt: run.createdAt,
+            ...buildRunTraceMetadata(run)
           },
           tags: ["shipyard", "runtime"]
         })
@@ -250,7 +294,8 @@ export function createPersistentRuntimeService(
             error: null
           });
 
-          store.update(runningRun);
+          await updateStoredRun(runningRun);
+          rootTrace?.annotate(buildRunTraceMetadata(runningRun));
 
           try {
             const result = runningRun.phaseExecution
@@ -259,8 +304,8 @@ export function createPersistentRuntimeService(
                   instructionRuntime: options.instructionRuntime,
                   contextAssembler: options.contextAssembler,
                   executeRun,
-                  persistRun: (updatedRun) => {
-                    store.update(normalizeRunRecord(updatedRun));
+                  persistRun: async (updatedRun) => {
+                    await updateStoredRun(normalizeRunRecord(updatedRun));
                   },
                   getRuntimeStatus: () => getStatus()
                 })
@@ -269,14 +314,14 @@ export function createPersistentRuntimeService(
                   instructionRuntime: options.instructionRuntime,
                   contextAssembler: options.contextAssembler,
                   executeRun,
-                  persistRun: (updatedRun) => {
-                    store.update(normalizeRunRecord(updatedRun));
+                  persistRun: async (updatedRun) => {
+                    await updateStoredRun(normalizeRunRecord(updatedRun));
                   },
                   getRuntimeStatus: () => getStatus()
                 });
             const completedAt = new Date().toISOString();
             const validationResult = extractValidationResult(result);
-            const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
+            const latestStoredRun = normalizeRunRecord(getStoredRun(run.id) ?? runningRun);
             const completedRun = normalizeRunRecord({
               ...latestStoredRun,
               status: "completed",
@@ -298,11 +343,10 @@ export function createPersistentRuntimeService(
               }
             });
 
-            store.update(completedRun);
+            await updateStoredRun(completedRun);
             rootTrace?.annotate({
+              ...buildRunTraceMetadata(completedRun),
               finalStatus: completedRun.status,
-              retryCount: completedRun.retryCount,
-              validationStatus: completedRun.validationStatus,
               provider: completedRun.result?.provider ?? null,
               modelId: completedRun.result?.modelId ?? null,
               inputTokens: completedRun.result?.usage?.inputTokens ?? null,
@@ -334,7 +378,7 @@ export function createPersistentRuntimeService(
           } catch (error) {
             const failure = toRunFailure(error);
             const retrying = shouldRetryRun(runningRun, failure);
-            const latestStoredRun = normalizeRunRecord(store.get(run.id) ?? runningRun);
+            const latestStoredRun = normalizeRunRecord(getStoredRun(run.id) ?? runningRun);
             const nextRun = normalizeRunRecord({
               ...latestStoredRun,
               status: retrying ? "pending" : "failed",
@@ -352,10 +396,9 @@ export function createPersistentRuntimeService(
               result: null
             });
 
-            store.update(nextRun);
+            await updateStoredRun(nextRun);
             rootTrace?.annotate({
-              retryCount: nextRun.retryCount,
-              validationStatus: nextRun.validationStatus
+              ...buildRunTraceMetadata(nextRun)
             });
 
             if (!retrying) {
@@ -725,6 +768,89 @@ function createResultRollingSummary(
     text: result.summary.trim() || "Run completed successfully.",
     updatedAt: completedAt,
     source: "result"
+  };
+}
+
+function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
+  return {
+    status: run.status,
+    retryCount: run.retryCount,
+    validationStatus: run.validationStatus,
+    attachmentCount: run.attachments.length,
+    attachmentKinds: uniqueStrings(run.attachments.map((attachment) => attachment.kind)),
+    selectedFileCount: run.context.relevantFiles.length,
+    selectedFiles: run.context.relevantFiles.map((file) => ({
+      path: file.path,
+      source: file.source ?? null,
+      reason: file.reason ?? null
+    })),
+    validationTargetCount: run.context.validationTargets.length,
+    validationTargets: run.context.validationTargets,
+    requestedToolName: run.toolRequest?.toolName ?? null,
+    ...buildOrchestrationTraceMetadata(run.orchestration),
+    ...buildPhaseExecutionTraceMetadata(run.phaseExecution)
+  };
+}
+
+function buildOrchestrationTraceMetadata(orchestration: AgentRunRecord["orchestration"]): TraceMetadata {
+  if (!orchestration) {
+    return {
+      orchestrationStatus: null,
+      orchestrationIteration: null,
+      orchestrationCurrentStepId: null,
+      orchestrationNextAction: null,
+      orchestrationStepRetryCount: null,
+      orchestrationMaxStepRetries: null,
+      orchestrationReplanCount: null,
+      orchestrationMaxReplans: null
+    };
+  }
+
+  return {
+    orchestrationStatus: orchestration.status,
+    orchestrationIteration: orchestration.iteration,
+    orchestrationCurrentStepId: orchestration.currentStep?.id ?? null,
+    orchestrationNextAction: orchestration.nextAction,
+    orchestrationStepRetryCount: orchestration.stepRetryCount,
+    orchestrationMaxStepRetries: orchestration.maxStepRetries,
+    orchestrationReplanCount: orchestration.replanCount,
+    orchestrationMaxReplans: orchestration.maxReplans
+  };
+}
+
+function buildPhaseExecutionTraceMetadata(runPhaseExecution: AgentRunRecord["phaseExecution"]): TraceMetadata {
+  if (!runPhaseExecution) {
+    return {
+      phaseExecutionStatus: null,
+      phaseExecutionCurrentPhaseId: null,
+      phaseExecutionCurrentStoryId: null,
+      phaseExecutionCurrentTaskId: null,
+      phaseExecutionTotalPhases: null,
+      phaseExecutionCompletedPhases: null,
+      phaseExecutionTotalStories: null,
+      phaseExecutionCompletedStories: null,
+      phaseExecutionTotalTasks: null,
+      phaseExecutionCompletedTasks: null,
+      phaseExecutionMaxTaskRetries: null,
+      phaseExecutionMaxStoryRetries: null,
+      phaseExecutionMaxReplans: null
+    };
+  }
+
+  return {
+    phaseExecutionStatus: runPhaseExecution.status,
+    phaseExecutionCurrentPhaseId: runPhaseExecution.current.phaseId,
+    phaseExecutionCurrentStoryId: runPhaseExecution.current.storyId,
+    phaseExecutionCurrentTaskId: runPhaseExecution.current.taskId,
+    phaseExecutionTotalPhases: runPhaseExecution.progress.totalPhases,
+    phaseExecutionCompletedPhases: runPhaseExecution.progress.completedPhases,
+    phaseExecutionTotalStories: runPhaseExecution.progress.totalStories,
+    phaseExecutionCompletedStories: runPhaseExecution.progress.completedStories,
+    phaseExecutionTotalTasks: runPhaseExecution.progress.totalTasks,
+    phaseExecutionCompletedTasks: runPhaseExecution.progress.completedTasks,
+    phaseExecutionMaxTaskRetries: runPhaseExecution.retryPolicy.maxTaskRetries,
+    phaseExecutionMaxStoryRetries: runPhaseExecution.retryPolicy.maxStoryRetries,
+    phaseExecutionMaxReplans: runPhaseExecution.retryPolicy.maxReplans
   };
 }
 

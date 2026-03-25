@@ -82,6 +82,7 @@ export type TraceRunSummary = {
   status: TraceSpanStatus | null;
   totalDurationMs: number | null;
   queueDelayMs: number | null;
+  roleFlow: string | null;
   model: {
     provider: string | null;
     modelId: string | null;
@@ -92,6 +93,7 @@ export type TraceRunSummary = {
     totalTokens: number | null;
     providerLatencyMs: number | null;
     estimatedCostUsd: number | null;
+    estimatedCostStatus: string | null;
   };
   files: {
     selectedCount: number;
@@ -118,6 +120,31 @@ export type TraceRunSummary = {
     count: number;
     kinds: string[];
   };
+  orchestration: {
+    status: string | null;
+    iteration: number | null;
+    currentStepId: string | null;
+    nextAction: string | null;
+    stepRetryCount: number | null;
+    maxStepRetries: number | null;
+    replanCount: number | null;
+    maxReplans: number | null;
+  } | null;
+  phaseExecution: {
+    status: string | null;
+    currentPhaseId: string | null;
+    currentStoryId: string | null;
+    currentTaskId: string | null;
+    totalPhases: number | null;
+    completedPhases: number | null;
+    totalStories: number | null;
+    completedStories: number | null;
+    totalTasks: number | null;
+    completedTasks: number | null;
+    maxTaskRetries: number | null;
+    maxStoryRetries: number | null;
+    maxReplans: number | null;
+  } | null;
 };
 
 export type TraceRunLog = {

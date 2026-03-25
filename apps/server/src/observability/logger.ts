@@ -260,6 +260,7 @@ function summarizeRunTrace(
     status: rootSpan?.status ?? null,
     totalDurationMs: rootSpan?.durationMs ?? null,
     queueDelayMs: readMetadataNumber(rootSpan?.metadata.queueDelayMs),
+    roleFlow: readMetadataString(rootSpan?.metadata.roleFlow),
     model: {
       provider: readMetadataString(rootSpan?.metadata.provider),
       modelId: readMetadataString(rootSpan?.metadata.modelId)
@@ -269,7 +270,8 @@ function summarizeRunTrace(
       outputTokens,
       totalTokens,
       providerLatencyMs,
-      estimatedCostUsd
+      estimatedCostUsd,
+      estimatedCostStatus: readMetadataString(rootSpan?.metadata.estimatedCostStatus)
     },
     files: {
       selectedCount: selectedPaths.length,
@@ -299,7 +301,9 @@ function summarizeRunTrace(
     attachments: {
       count: readMetadataNumber(rootSpan?.metadata.attachmentCount) ?? 0,
       kinds: collectMetadataStringArray(rootSpan?.metadata.attachmentKinds)
-    }
+    },
+    orchestration: readOrchestrationSummary(rootSpan?.metadata),
+    phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata)
   };
 }
 
@@ -331,4 +335,43 @@ function collectPaths(value: unknown, key: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function readOrchestrationSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.orchestrationStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.orchestrationStatus),
+    iteration: readMetadataNumber(metadata.orchestrationIteration),
+    currentStepId: readMetadataString(metadata.orchestrationCurrentStepId),
+    nextAction: readMetadataString(metadata.orchestrationNextAction),
+    stepRetryCount: readMetadataNumber(metadata.orchestrationStepRetryCount),
+    maxStepRetries: readMetadataNumber(metadata.orchestrationMaxStepRetries),
+    replanCount: readMetadataNumber(metadata.orchestrationReplanCount),
+    maxReplans: readMetadataNumber(metadata.orchestrationMaxReplans)
+  };
+}
+
+function readPhaseExecutionSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.phaseExecutionStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.phaseExecutionStatus),
+    currentPhaseId: readMetadataString(metadata.phaseExecutionCurrentPhaseId),
+    currentStoryId: readMetadataString(metadata.phaseExecutionCurrentStoryId),
+    currentTaskId: readMetadataString(metadata.phaseExecutionCurrentTaskId),
+    totalPhases: readMetadataNumber(metadata.phaseExecutionTotalPhases),
+    completedPhases: readMetadataNumber(metadata.phaseExecutionCompletedPhases),
+    totalStories: readMetadataNumber(metadata.phaseExecutionTotalStories),
+    completedStories: readMetadataNumber(metadata.phaseExecutionCompletedStories),
+    totalTasks: readMetadataNumber(metadata.phaseExecutionTotalTasks),
+    completedTasks: readMetadataNumber(metadata.phaseExecutionCompletedTasks),
+    maxTaskRetries: readMetadataNumber(metadata.phaseExecutionMaxTaskRetries),
+    maxStoryRetries: readMetadataNumber(metadata.phaseExecutionMaxStoryRetries),
+    maxReplans: readMetadataNumber(metadata.phaseExecutionMaxReplans)
+  };
 }

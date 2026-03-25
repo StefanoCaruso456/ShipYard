@@ -89,7 +89,7 @@ test("runtime traces planner executor verifier and context spans for a successfu
     logPath: path.join(tempDir, "traces.jsonl"),
     env: {}
   });
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     contextAssembler: assembler,
     traceService,
@@ -103,7 +103,7 @@ test("runtime traces planner executor verifier and context spans for a successfu
   });
 
   try {
-    const run = runtimeService.submitTask({
+    const run = await runtimeService.submitTask({
       instruction: "Summarize the runtime status.",
       context: {
         objective: "Summarize the runtime status.",
@@ -152,9 +152,87 @@ test("runtime traces planner executor verifier and context spans for a successfu
         .flatMap((span) => span.events)
         .some((event) => event.name === "coordinator_decision")
     );
+    assert.equal(trace?.summary.roleFlow, "orchestration");
     assert.equal(trace?.summary.model.modelId, null);
     assert.equal(trace?.summary.files.selectedCount, 1);
     assert.equal(trace?.summary.validation.status, "not_run");
+    assert.equal(trace?.summary.orchestration?.status, "completed");
+    assert.equal(trace?.summary.orchestration?.maxStepRetries, 1);
+    assert.equal(trace?.summary.orchestration?.maxReplans, 1);
+    assert.equal(trace?.summary.orchestration?.stepRetryCount, 0);
+    assert.equal(trace?.summary.orchestration?.replanCount, 0);
+    assert.equal(trace?.summary.phaseExecution, null);
+  } finally {
+    await waitForTraceFlush();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime trace summary captures phase execution progress and retry policy", async () => {
+  const { instructionRuntime, assembler } = await createHarness();
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-phase-trace-"));
+  const traceService = createTraceService({
+    logPath: path.join(tempDir, "traces.jsonl"),
+    env: {}
+  });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    contextAssembler: assembler,
+    traceService,
+    executeRun: async (run, context) => ({
+      mode: "placeholder-execution",
+      summary: run.context.objective ?? run.instruction,
+      instructionEcho: run.instruction,
+      skillId: context.instructionRuntime.skill.meta.id,
+      completedAt: new Date().toISOString()
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Execute one phase task.",
+      phaseExecution: {
+        phases: [
+          {
+            id: "phase-1",
+            name: "Phase 1",
+            description: "Test phase execution tracing.",
+            userStories: [
+              {
+                id: "story-1",
+                title: "Story 1",
+                description: "Test story.",
+                acceptanceCriteria: ["Do the task."],
+                tasks: [
+                  {
+                    id: "task-1",
+                    instruction: "Do the task.",
+                    expectedOutcome: "Do the task."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    await waitForRunStatus(runtimeService, run.id, "completed");
+    await waitForTraceFlush();
+    const trace = traceService.getRunTrace(run.id);
+
+    assert.equal(trace?.summary.roleFlow, "phase-execution");
+    assert.equal(trace?.summary.phaseExecution?.status, "completed");
+    assert.equal(trace?.summary.phaseExecution?.currentPhaseId, null);
+    assert.equal(trace?.summary.phaseExecution?.completedPhases, 1);
+    assert.equal(trace?.summary.phaseExecution?.totalPhases, 1);
+    assert.equal(trace?.summary.phaseExecution?.completedStories, 1);
+    assert.equal(trace?.summary.phaseExecution?.totalStories, 1);
+    assert.equal(trace?.summary.phaseExecution?.completedTasks, 1);
+    assert.equal(trace?.summary.phaseExecution?.totalTasks, 1);
+    assert.equal(trace?.summary.phaseExecution?.maxTaskRetries, 1);
+    assert.equal(trace?.summary.phaseExecution?.maxStoryRetries, 1);
+    assert.equal(trace?.summary.phaseExecution?.maxReplans, 1);
   } finally {
     await waitForTraceFlush();
     await rm(tempDir, { recursive: true, force: true });
@@ -170,7 +248,7 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
     env: {}
   });
   const repoToolset = createRepoToolset({ rootDir: tempDir });
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     traceService,
     executeRun: createRuntimeExecutor({
@@ -187,7 +265,7 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
       "utf8"
     );
 
-    const run = runtimeService.submitTask({
+    const run = await runtimeService.submitTask({
       instruction: "Edit the greet function surgically.",
       toolRequest: {
         toolName: "edit_file_region",
@@ -234,7 +312,7 @@ test("runtime traces retry and rollback events on failed validation", async () =
     logPath: path.join(tempDir, "traces.jsonl"),
     env: {}
   });
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     traceService,
     executeRun: async () => {
@@ -268,7 +346,7 @@ test("runtime traces retry and rollback events on failed validation", async () =
   });
 
   try {
-    const run = runtimeService.submitTask({
+    const run = await runtimeService.submitTask({
       instruction: "Retry this invalid edit once."
     });
 
@@ -316,7 +394,7 @@ async function createInstructionRuntimeForTests() {
 }
 
 async function waitForRunStatus(
-  runtimeService: ReturnType<typeof createPersistentRuntimeService>,
+  runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
   expectedStatus: AgentRunRecord["status"]
 ) {
