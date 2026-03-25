@@ -3,7 +3,7 @@ import type {
   AgentRunRecord,
   AgentRuntimeStatus,
   RelevantFileContext,
-  RepoMutationToolResult
+  RepoToolResult
 } from "../runtime/types";
 
 export type RuntimeContextPrecedenceLayer =
@@ -70,7 +70,7 @@ export type SharedRoleContext = {
   taskObjective: string;
   constraints: string[];
   relevantFiles: RelevantFileContext[];
-  recentToolResults: RepoMutationToolResult[];
+  recentToolResults: RepoToolResult[];
   validationTargets: string[];
   knownFailures: string[];
   rollingSummary: string | null;

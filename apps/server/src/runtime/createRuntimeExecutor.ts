@@ -1,7 +1,7 @@
 import type {
   ExecuteRun,
-  RepoMutationToolRequest,
-  RepoMutationToolResult,
+  RepoToolRequest,
+  RepoToolResult,
   RepoToolset,
   RollbackResult,
   ValidationResult
@@ -39,6 +39,14 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       metadata: {
         toolName: toolRequest.toolName,
         path: toolPath,
+        query:
+          toolRequest.toolName === "search_repo"
+            ? toolRequest.input.query
+            : null,
+        glob:
+          toolRequest.toolName === "list_files" || toolRequest.toolName === "search_repo"
+            ? toolRequest.input.glob ?? null
+            : null,
         plannedStepId: context.plannedStep?.id ?? null
       }
     });
@@ -63,11 +71,7 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
         metadata: {
           toolName: toolResult.toolName,
           path: toolResult.error.path ?? toolPath,
-          validationStatus: toolResult.error.validationResult
-            ? toolResult.error.validationResult.success
-              ? "passed"
-              : "failed"
-            : null,
+          validationStatus: extractToolValidationStatus(toolResult),
           rollbackAttempted: toolResult.error.rollback?.attempted ?? false,
           rollbackSucceeded: toolResult.error.rollback?.success ?? null,
           errorCode: toolResult.error.code ?? null
@@ -95,9 +99,9 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       message: summarizeToolResult(toolResult),
       metadata: {
         toolName: toolResult.toolName,
-        path: toolResult.data.path,
-        validationStatus: toolResult.data.validationResult.success ? "passed" : "failed",
-        changedFiles: [toolResult.data.path]
+        path: extractToolResultPath(toolResult),
+        validationStatus: extractToolValidationStatus(toolResult),
+        changedFiles: extractChangedFiles(toolResult)
       }
     });
 
@@ -113,15 +117,25 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
   };
 }
 
-function summarizeToolRequest(toolRequest: RepoMutationToolRequest) {
-  const toolPath = extractToolPath(toolRequest);
+function summarizeToolRequest(toolRequest: RepoToolRequest) {
+  switch (toolRequest.toolName) {
+    case "list_files":
+      return toolRequest.input.glob
+        ? `List files matching ${toolRequest.input.glob}.`
+        : "List files in the repository.";
+    case "search_repo":
+      return `Search the repo for "${toolRequest.input.query}".`;
+    default: {
+      const toolPath = extractToolPath(toolRequest);
 
-  return toolPath
-    ? `Invoke ${toolRequest.toolName} on ${toolPath}.`
-    : `Invoke ${toolRequest.toolName}.`;
+      return toolPath
+        ? `Invoke ${toolRequest.toolName} on ${toolPath}.`
+        : `Invoke ${toolRequest.toolName}.`;
+    }
+  }
 }
 
-function extractToolPath(toolRequest: RepoMutationToolRequest) {
+function extractToolPath(toolRequest: RepoToolRequest) {
   return "path" in toolRequest.input && typeof toolRequest.input.path === "string"
     ? toolRequest.input.path
     : null;
@@ -129,9 +143,17 @@ function extractToolPath(toolRequest: RepoMutationToolRequest) {
 
 async function executeToolRequest(
   repoToolset: RepoToolset,
-  toolRequest: RepoMutationToolRequest
-): Promise<RepoMutationToolResult> {
+  toolRequest: RepoToolRequest
+): Promise<RepoToolResult> {
   switch (toolRequest.toolName) {
+    case "list_files":
+      return repoToolset.listFiles(toolRequest.input);
+    case "read_file":
+      return repoToolset.readFile(toolRequest.input);
+    case "read_file_range":
+      return repoToolset.readFileRange(toolRequest.input);
+    case "search_repo":
+      return repoToolset.searchRepo(toolRequest.input);
     case "edit_file_region":
       return repoToolset.editFileRegion(toolRequest.input);
     case "create_file":
@@ -141,8 +163,16 @@ async function executeToolRequest(
   }
 }
 
-function summarizeToolResult(toolResult: Extract<RepoMutationToolResult, { ok: true }>) {
+function summarizeToolResult(toolResult: Extract<RepoToolResult, { ok: true }>) {
   switch (toolResult.toolName) {
+    case "list_files":
+      return `Listed ${toolResult.data.files.length} file${toolResult.data.files.length === 1 ? "" : "s"} from the repository.`;
+    case "read_file":
+      return `Read ${toolResult.data.path}.`;
+    case "read_file_range":
+      return `Read lines ${toolResult.data.startLine}-${toolResult.data.endLine} from ${toolResult.data.path}.`;
+    case "search_repo":
+      return `Found ${toolResult.data.matches.length} match${toolResult.data.matches.length === 1 ? "" : "es"} for "${toolResult.data.query}".`;
     case "edit_file_region":
       return `Edited ${toolResult.data.path} surgically around the provided anchor.`;
     case "create_file":
@@ -152,8 +182,48 @@ function summarizeToolResult(toolResult: Extract<RepoMutationToolResult, { ok: t
   }
 }
 
-function renderToolResponse(toolResult: Extract<RepoMutationToolResult, { ok: true }>) {
+function renderToolResponse(toolResult: Extract<RepoToolResult, { ok: true }>) {
   switch (toolResult.toolName) {
+    case "list_files":
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Total files returned: ${toolResult.data.files.length}`,
+        `Total files matched: ${toolResult.data.totalCount}`,
+        `Glob: ${toolResult.data.glob ?? "(none)"}`,
+        `Truncated: ${toolResult.data.truncated ? "yes" : "no"}`,
+        "",
+        ...toolResult.data.files.map((file) => `- ${file}`)
+      ].join("\n");
+    case "read_file":
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Path: ${toolResult.data.path}`,
+        `Line count: ${toolResult.data.lineCount}`,
+        "",
+        toolResult.data.content
+      ].join("\n");
+    case "read_file_range":
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Path: ${toolResult.data.path}`,
+        `Lines: ${toolResult.data.startLine}-${toolResult.data.endLine}`,
+        `Total lines in file: ${toolResult.data.totalLineCount}`,
+        "",
+        toolResult.data.content
+      ].join("\n");
+    case "search_repo":
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Query: ${toolResult.data.query}`,
+        `Matches: ${toolResult.data.matches.length}`,
+        `Glob: ${toolResult.data.glob ?? "(none)"}`,
+        `Case sensitive: ${toolResult.data.caseSensitive ? "yes" : "no"}`,
+        `Truncated: ${toolResult.data.truncated ? "yes" : "no"}`,
+        "",
+        ...toolResult.data.matches.map(
+          (match) => `- ${match.path}:${match.lineNumber}:${match.column} ${match.lineText}`
+        )
+      ].join("\n");
     case "edit_file_region":
       return [
         `Tool: ${toolResult.toolName}`,
@@ -175,4 +245,44 @@ function renderToolResponse(toolResult: Extract<RepoMutationToolResult, { ok: tr
         `Validation status: ${toolResult.data.validationResult.success ? "passed" : "failed"}`
       ].join("\n");
   }
+}
+
+function extractToolResultPath(toolResult: Extract<RepoToolResult, { ok: true }>) {
+  return "path" in toolResult.data && typeof toolResult.data.path === "string"
+    ? toolResult.data.path
+    : null;
+}
+
+function extractToolValidationStatus(toolResult: RepoToolResult) {
+  if (!toolResult.ok) {
+    return toolResult.error.validationResult
+      ? toolResult.error.validationResult.success
+        ? "passed"
+        : "failed"
+      : null;
+  }
+
+  if (
+    "validationResult" in toolResult.data &&
+    toolResult.data.validationResult &&
+    typeof toolResult.data.validationResult === "object"
+  ) {
+    return toolResult.data.validationResult.success ? "passed" : "failed";
+  }
+
+  return null;
+}
+
+function extractChangedFiles(toolResult: Extract<RepoToolResult, { ok: true }>) {
+  if (
+    (toolResult.toolName === "edit_file_region" ||
+      toolResult.toolName === "create_file" ||
+      toolResult.toolName === "delete_file") &&
+    "path" in toolResult.data &&
+    typeof toolResult.data.path === "string"
+  ) {
+    return [toolResult.data.path];
+  }
+
+  return [];
 }

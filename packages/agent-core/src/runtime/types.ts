@@ -6,8 +6,16 @@ import type {
   DeleteFileResult,
   EditFileRegionInput,
   EditFileRegionResult,
+  ListFilesInput,
+  ListFilesResult,
+  ReadFileInput,
+  ReadFileRangeInput,
+  ReadFileRangeResult,
+  ReadFileResult,
   RepoToolErrorCode,
-  RepoToolName
+  RepoToolName,
+  SearchRepoInput,
+  SearchRepoResult
 } from "../tools/repo/types";
 import type {
   RollbackResult,
@@ -63,10 +71,38 @@ export type RepoMutationToolRequest =
       input: DeleteFileInput;
     };
 
+export type RepoInspectionToolRequest =
+  | {
+      toolName: "list_files";
+      input: ListFilesInput;
+    }
+  | {
+      toolName: "read_file";
+      input: ReadFileInput;
+    }
+  | {
+      toolName: "read_file_range";
+      input: ReadFileRangeInput;
+    }
+  | {
+      toolName: "search_repo";
+      input: SearchRepoInput;
+    };
+
+export type RepoToolRequest = RepoInspectionToolRequest | RepoMutationToolRequest;
+
 export type RepoMutationToolResult =
   | EditFileRegionResult
   | CreateFileResult
   | DeleteFileResult;
+
+export type RepoInspectionToolResult =
+  | ListFilesResult
+  | ReadFileResult
+  | ReadFileRangeResult
+  | SearchRepoResult;
+
+export type RepoToolResult = RepoInspectionToolResult | RepoMutationToolResult;
 
 export type PhaseStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -120,7 +156,7 @@ export type PlannerStep = {
   successCriteria: string[];
   requiredInputs: string[];
   requiredTool?: RepoToolName | null;
-  toolRequest?: RepoMutationToolRequest | null;
+  toolRequest?: RepoToolRequest | null;
   validationTargets: string[];
 };
 
@@ -140,7 +176,7 @@ export type ExecutorStepResult = {
   mode: AgentRunResult["mode"] | null;
   summary: string;
   responseText?: string | null;
-  toolResult?: RepoMutationToolResult | null;
+  toolResult?: RepoToolResult | null;
   changedFiles: string[];
   validationTargets: string[];
   consumedContextSectionIds: string[];
@@ -201,7 +237,7 @@ export type TaskInput = {
   id: string;
   instruction: string;
   expectedOutcome: string;
-  toolRequest?: RepoMutationToolRequest | null;
+  toolRequest?: RepoToolRequest | null;
   context?: RunContextInput | null;
   validationGates?: ValidationGate[];
 };
@@ -238,7 +274,7 @@ export type Task = {
   instruction: string;
   expectedOutcome: string;
   status: TaskStatus;
-  toolRequest: RepoMutationToolRequest | null;
+  toolRequest: RepoToolRequest | null;
   context: RunContextInput | null;
   validationGates: ValidationGate[];
   retryCount: number;
@@ -320,7 +356,7 @@ export type SubmitTaskInput = {
   threadId?: string;
   parentRunId?: string | null;
   simulateFailure?: boolean;
-  toolRequest?: RepoMutationToolRequest | null;
+  toolRequest?: RepoToolRequest | null;
   attachments?: RunAttachment[];
   project?: RunProjectInput | null;
   context?: RunContextInput | null;
@@ -354,7 +390,7 @@ export type AgentRunResult = {
     providerLatencyMs: number | null;
     estimatedCostUsd: number | null;
   } | null;
-  toolResult?: RepoMutationToolResult | null;
+  toolResult?: RepoToolResult | null;
 };
 
 export type AgentRunRecord = {
@@ -364,7 +400,7 @@ export type AgentRunRecord = {
   title: string | null;
   instruction: string;
   simulateFailure: boolean;
-  toolRequest: RepoMutationToolRequest | null;
+  toolRequest: RepoToolRequest | null;
   attachments: RunAttachment[];
   project?: RunProjectInput | null;
   context: RunContextInput;
