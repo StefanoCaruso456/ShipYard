@@ -96,7 +96,7 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
               className="steer-queue__action"
               onClick={onRequestSteer}
             >
-              Queue follow-up
+              Open steer
             </button>
           ) : null}
         </div>
@@ -141,7 +141,7 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
           </div>
         ) : (
           <p className="steer-queue__empty">
-            While this run is working, send a follow-up and it will queue on this thread instead of interrupting the current reasoning.
+            While this run is working, open steer and send a follow-up. It will queue on this thread instead of interrupting the current reasoning.
           </p>
         )}
       </section>

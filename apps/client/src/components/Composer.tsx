@@ -178,26 +178,17 @@ export function Composer({
     streamRef.current = null;
   }
 
+  function focusSteerInput() {
+    textareaRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    textareaRef.current?.focus();
+    textareaRef.current?.setSelectionRange(
+      textareaRef.current.value.length,
+      textareaRef.current.value.length
+    );
+  }
+
   return (
     <form className="composer" onSubmit={onSubmit}>
-      {steerMode ? (
-        <div className="composer__steer">
-          <div className="composer__steer-copy">
-            <span className="composer__steer-badge">Steer</span>
-            <strong>
-              {steerMode.status === "running"
-                ? "Queue a follow-up without interrupting the current run"
-                : "Queue the next prompt on this live thread"}
-            </strong>
-            <p>
-              {steerMode.queuedCount > 0
-                ? `${steerMode.queuedCount} follow-up${steerMode.queuedCount === 1 ? "" : "s"} already staged for ${steerMode.threadTitle}.`
-                : `${steerMode.threadTitle} stays active while your next prompt waits its turn.`}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       <AttachmentPreviewList
         attachments={attachments}
         onRemove={(attachmentId) =>
@@ -205,7 +196,29 @@ export function Composer({
         }
       />
 
-      <div className="composer__field">
+      <div className={`composer__field ${steerMode ? "composer__field--steer" : ""}`}>
+        {steerMode ? (
+          <div className="composer__steer-window">
+            <div className="composer__steer-window-copy">
+              <span className="composer__steer-window-status">
+                <SteerDockIcon />
+                <span>{steerMode.status === "running" ? "Now" : "Up next"}</span>
+              </span>
+              <span className="composer__steer-window-thread">{steerMode.threadTitle}</span>
+            </div>
+
+            <button
+              type="button"
+              className="composer__steer-trigger"
+              onClick={focusSteerInput}
+              aria-label="Open steer composer"
+            >
+              <SteerTurnIcon />
+              <span>Steer</span>
+            </button>
+          </div>
+        ) : null}
+
         <textarea
           ref={textareaRef}
           value={composerValue}
@@ -274,6 +287,36 @@ function PlusIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SteerDockIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M5 5.5a1 1 0 0 1 1-1h2.5M5 9.5a1 1 0 0 1 1-1h4.5M5 13.5a1 1 0 0 1 1-1h3.5M14.5 6.25v4.5m0 0-2-2m2 2 2-2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SteerTurnIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M13.75 5.25H9.5a3.25 3.25 0 0 0-3.25 3.25v2.25m0 0 2-2m-2 2 2 2M9 14.25h4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
