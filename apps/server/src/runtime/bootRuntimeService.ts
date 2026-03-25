@@ -1,8 +1,10 @@
 import {
   createContextAssembler,
   createFileRunStore,
+  createPostgresRunStore,
   createPersistentRuntimeService,
   createRepoToolset,
+  type AgentRunStore,
   type ContextAssembler,
   type PersistentAgentRuntimeService
 } from "@shipyard/agent-core";
@@ -28,9 +30,15 @@ export type BootedRuntimeService = {
   contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
   audioTranscriber: ReturnType<typeof createAudioTranscriber>;
-  runtimeStatePath: string;
+  runtimeStatePath: string | null;
+  runtimeStore: RuntimeStoreDescriptor;
   traceService: ReturnType<typeof createTraceService>;
   traceLogPath: string;
+};
+
+export type RuntimeStoreDescriptor = {
+  kind: "file" | "postgres";
+  location: string;
 };
 
 export async function bootRuntimeService(): Promise<BootedRuntimeService> {
@@ -41,7 +49,6 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const audioTranscriber = createAudioTranscriber({
     config: resolveAudioTranscriptionConfig()
   });
-  const runtimeStatePath = resolveRuntimeStatePath(rootDir);
   const traceLogPath = resolveTraceLogPath(rootDir);
   const traceService = createTraceService({
     logPath: traceLogPath
@@ -50,17 +57,16 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     rootDir
   });
   const contextAssembler = createContextAssembler({
-    instructionRuntime,
-    projectRules
+      instructionRuntime,
+      projectRules
   });
+  const { store, runtimeStatePath, runtimeStore } = createConfiguredRunStore(rootDir);
 
   return {
-    runtimeService: createPersistentRuntimeService({
+    runtimeService: await createPersistentRuntimeService({
       instructionRuntime,
       contextAssembler,
-      store: createFileRunStore({
-        filePath: runtimeStatePath
-      }),
+      store,
       traceService,
       executeRun: createRuntimeExecutor({
         openAI,
@@ -71,9 +77,75 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     openAI,
     audioTranscriber,
     runtimeStatePath,
+    runtimeStore,
     traceService,
     traceLogPath
   };
+}
+
+function createConfiguredRunStore(
+  rootDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): {
+  store: AgentRunStore;
+  runtimeStatePath: string | null;
+  runtimeStore: RuntimeStoreDescriptor;
+} {
+  const mode = resolveRuntimeStoreMode(env);
+  const databaseUrl = env.DATABASE_URL?.trim();
+
+  if (mode === "postgres" || (mode === "auto" && databaseUrl)) {
+    if (!databaseUrl) {
+      throw new Error(
+        "DATABASE_URL is required when SHIPYARD_RUNTIME_STORE=postgres."
+      );
+    }
+
+    const schemaName = env.SHIPYARD_RUNTIME_PG_SCHEMA?.trim() || "public";
+    const tableName = env.SHIPYARD_RUNTIME_PG_TABLE?.trim() || "agent_runs";
+
+    return {
+      store: createPostgresRunStore({
+        connectionString: databaseUrl,
+        schemaName,
+        tableName
+      }),
+      runtimeStatePath: null,
+      runtimeStore: {
+        kind: "postgres",
+        location: `${schemaName}.${tableName}`
+      }
+    };
+  }
+
+  const runtimeStatePath = resolveRuntimeStatePath(rootDir, env);
+
+  return {
+    store: createFileRunStore({
+      filePath: runtimeStatePath
+    }),
+    runtimeStatePath,
+    runtimeStore: {
+      kind: "file",
+      location: runtimeStatePath
+    }
+  };
+}
+
+function resolveRuntimeStoreMode(env: NodeJS.ProcessEnv = process.env) {
+  const configuredMode = env.SHIPYARD_RUNTIME_STORE?.trim().toLowerCase() || "auto";
+
+  if (
+    configuredMode === "auto" ||
+    configuredMode === "file" ||
+    configuredMode === "postgres"
+  ) {
+    return configuredMode;
+  }
+
+  throw new Error(
+    `Unsupported SHIPYARD_RUNTIME_STORE value: ${configuredMode}. Expected auto, file, or postgres.`
+  );
 }
 
 function resolveRuntimeStatePath(rootDir: string, env: NodeJS.ProcessEnv = process.env) {

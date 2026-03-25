@@ -180,4 +180,5 @@ export type TraceService = {
   startRun(input: StartTraceRunInput): Promise<TraceSpan>;
   getRunTrace(runId: string): TraceRunLog | null;
   listRunTraces(limit?: number): TraceRunLog[];
+  flush(): Promise<void>;
 };

@@ -85,6 +85,9 @@ export function createTraceService(options: CreateTraceServiceOptions): TraceSer
     },
     listRunTraces(limit?: number) {
       return logger.listRunTraces(limit);
+    },
+    async flush() {
+      await logger.flush();
     }
   };
 }

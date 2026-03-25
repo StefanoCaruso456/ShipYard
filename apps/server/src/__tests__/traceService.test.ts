@@ -67,7 +67,7 @@ test("local trace service records root and child spans", async () => {
       status: "completed",
       outputSummary: "Run completed."
     });
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
 
     const trace = traceService.getRunTrace("run-1");
 
@@ -77,7 +77,7 @@ test("local trace service records root and child spans", async () => {
     assert.equal(trace?.spans.find((span) => span.spanType === "tool")?.events[0]?.name, "selected_file");
     assert.match(await readFile(traceLogPath, "utf8"), /span_started/);
   } finally {
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -118,7 +118,7 @@ test("runtime traces planner executor verifier and context spans for a successfu
       }
     });
     const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     const trace = traceService.getRunTrace(run.id);
 
     assert.ok(completedRun.result);
@@ -163,7 +163,7 @@ test("runtime traces planner executor verifier and context spans for a successfu
     assert.equal(trace?.summary.orchestration?.replanCount, 0);
     assert.equal(trace?.summary.phaseExecution, null);
   } finally {
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -218,7 +218,7 @@ test("runtime trace summary captures phase execution progress and retry policy",
     });
 
     await waitForRunStatus(runtimeService, run.id, "completed");
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     const trace = traceService.getRunTrace(run.id);
 
     assert.equal(trace?.summary.roleFlow, "phase-execution");
@@ -234,7 +234,7 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.equal(trace?.summary.phaseExecution?.maxStoryRetries, 1);
     assert.equal(trace?.summary.phaseExecution?.maxReplans, 1);
   } finally {
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -287,7 +287,7 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
     });
 
     await waitForRunStatus(runtimeService, run.id, "completed");
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     const trace = traceService.getRunTrace(run.id);
 
     assert.ok(trace?.spans.some((span) => span.name.startsWith("tool:edit_file_region")));
@@ -300,7 +300,7 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
       ["export function greet(name: string) {", "  return `Hi ${name}`;", "}"].join("\n")
     );
   } finally {
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -351,14 +351,14 @@ test("runtime traces retry and rollback events on failed validation", async () =
     });
 
     await waitForRunStatus(runtimeService, run.id, "failed");
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     const trace = traceService.getRunTrace(run.id);
     const rootSpan = trace?.spans.find((span) => span.parentId === null);
 
     assert.ok(rootSpan?.events.some((event) => event.name === "retry_scheduled"));
     assert.ok(rootSpan?.events.some((event) => event.name === "rollback_succeeded"));
   } finally {
-    await waitForTraceFlush();
+    await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -412,6 +412,6 @@ async function waitForRunStatus(
   assert.fail(`Timed out waiting for run ${runId} to reach ${expectedStatus}.`);
 }
 
-async function waitForTraceFlush() {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+async function waitForTraceFlush(traceService: { flush(): Promise<void> }) {
+  await traceService.flush();
 }

@@ -222,6 +222,10 @@ export function createLocalTraceLogger(options: LocalTraceLoggerOptions) {
     currentRun.updatedAt = at;
   }
 
+  async function flush() {
+    await writeQueue;
+  }
+
   return {
     status: options.status,
     startSpan,
@@ -229,7 +233,8 @@ export function createLocalTraceLogger(options: LocalTraceLoggerOptions) {
     addEvent,
     endSpan,
     getRunTrace,
-    listRunTraces
+    listRunTraces,
+    flush
   };
 }
 

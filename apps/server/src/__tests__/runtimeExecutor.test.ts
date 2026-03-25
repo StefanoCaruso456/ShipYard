@@ -19,7 +19,7 @@ test("runtime executor can process an edit task through the persistent runtime s
   const filePath = path.join(tempDir, "src/example.ts");
   const instructionRuntime = await createInstructionRuntimeForTests();
   const repoToolset = createRepoToolset({ rootDir: tempDir });
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: createRuntimeExecutor({
       openAI: resolveOpenAIExecutorConfig({}),
@@ -39,7 +39,7 @@ test("runtime executor can process an edit task through the persistent runtime s
       "utf8"
     );
 
-    const run = runtimeService.submitTask({
+    const run = await runtimeService.submitTask({
       instruction: "Edit the greet function surgically.",
       toolRequest: {
         toolName: "edit_file_region",
@@ -86,7 +86,7 @@ test("runtime executor can process a phase execution plan that uses repo tools",
   const filePath = path.join(tempDir, "src/example.ts");
   const instructionRuntime = await createInstructionRuntimeForTests();
   const repoToolset = createRepoToolset({ rootDir: tempDir });
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: createRuntimeExecutor({
       openAI: resolveOpenAIExecutorConfig({}),
@@ -106,7 +106,7 @@ test("runtime executor can process a phase execution plan that uses repo tools",
       "utf8"
     );
 
-    const run = runtimeService.submitTask({
+    const run = await runtimeService.submitTask({
       instruction: "Execute the runtime editing phase.",
       phaseExecution: {
         phases: [
@@ -182,7 +182,7 @@ async function createInstructionRuntimeForTests() {
 }
 
 async function waitForRunStatus(
-  runtimeService: ReturnType<typeof createPersistentRuntimeService>,
+  runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
   expectedStatus: AgentRunRecord["status"]
 ) {

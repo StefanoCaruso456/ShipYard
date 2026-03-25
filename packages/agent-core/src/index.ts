@@ -57,6 +57,7 @@ export {
 export { createAgentRuntime, instructionPrecedence } from "./runtime/createAgentRuntime";
 export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
+export { createPostgresRunStore } from "./runtime/createPostgresRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
 export {
   executeOrchestrationLoop,

@@ -70,12 +70,24 @@ pnpm install
 pnpm dev
 ```
 
+## Runtime State
+
+- When `DATABASE_URL` is set, the runtime stores runs durably in PostgreSQL.
+- When `DATABASE_URL` is not set, the runtime falls back to the local file store.
+- `SHIPYARD_RUNTIME_STORE=auto` keeps local development simple while allowing Railway PostgreSQL in production.
+- Optional overrides:
+  - `SHIPYARD_RUNTIME_PG_SCHEMA`
+  - `SHIPYARD_RUNTIME_PG_TABLE`
+  - `SHIPYARD_RUNTIME_STATE_PATH`
+  - `SHIPYARD_TRACE_LOG_PATH`
+
 ## Deploy
 
 - Vercel hosts `apps/client` using `vercel.json`.
 - Railway hosts `apps/server` and PostgreSQL using `railway.json`.
 - In Vercel, set `VITE_API_URL` to the Railway server origin so the client calls the live API in production.
 - The runtime server reads `OPENAI_KEY` for Vercel AI SDK OpenAI calls. If the backend stays on Railway, set `OPENAI_KEY` there too. A Vercel env var alone will not reach the Railway runtime.
+- Set `DATABASE_URL` from Railway PostgreSQL private networking so the runtime uses durable Postgres-backed run storage.
 - The mic button uses the same backend OpenAI key and uploads audio to the server for transcription before it enters the task flow. You can override the transcription model with `OPENAI_TRANSCRIPTION_MODEL`.
 - GitHub Actions now includes a production Vercel deploy workflow in `.github/workflows/vercel-production.yml` that runs on every push to `main`.
 - To enable that workflow, add these GitHub repository secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID`.

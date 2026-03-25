@@ -19,8 +19,8 @@ test("file run store persists runs across store instances", async () => {
   });
 
   try {
-    firstStore.create(run);
-    firstStore.update({
+    await firstStore.create(run);
+    await firstStore.update({
       ...run,
       status: "completed",
       completedAt: "2026-03-23T12:05:00.000Z",
@@ -34,11 +34,11 @@ test("file run store persists runs across store instances", async () => {
     });
 
     const secondStore = createFileRunStore({ filePath });
-    const persisted = secondStore.get(run.id);
+    const persisted = await secondStore.get(run.id);
 
     assert.equal(persisted?.status, "completed");
     assert.equal(persisted?.result?.summary, "stored");
-    assert.equal(secondStore.list()[0]?.id, run.id);
+    assert.equal((await secondStore.list())[0]?.id, run.id);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -52,21 +52,21 @@ test("persistent runtime recovers pending runs and fails interrupted running run
   const completedRuns: string[] = [];
 
   try {
-    store.create(
+    await store.create(
       createRun({
         id: "pending-run",
         status: "pending",
         startedAt: null
       })
     );
-    store.create(
+    await store.create(
       createRun({
         id: "running-run",
         status: "running",
         startedAt: "2026-03-23T12:01:00.000Z"
       })
     );
-    store.create(
+    await store.create(
       createRun({
         id: "completed-run",
         status: "completed",
@@ -82,7 +82,7 @@ test("persistent runtime recovers pending runs and fails interrupted running run
       })
     );
 
-    const runtimeService = createPersistentRuntimeService({
+    const runtimeService = await createPersistentRuntimeService({
       instructionRuntime,
       store,
       executeRun: async (run, context): Promise<AgentRunResult> => {
@@ -125,7 +125,7 @@ async function createInstructionRuntimeForTests() {
 }
 
 async function waitForRunStatus(
-  runtimeService: ReturnType<typeof createPersistentRuntimeService>,
+  runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
   expectedStatus: "completed"
 ) {

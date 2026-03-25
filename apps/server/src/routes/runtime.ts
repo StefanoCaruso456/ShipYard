@@ -126,7 +126,7 @@ export function registerRuntimeRoutes(
     }
   });
 
-  app.post("/api/runtime/tasks", parseMultipartAttachments, (request, response) => {
+  app.post("/api/runtime/tasks", parseMultipartAttachments, async (request, response) => {
     const submission = parseTaskSubmission(request as RuntimeTaskRequest);
 
     if ("error" in submission) {
@@ -134,11 +134,17 @@ export function registerRuntimeRoutes(
       return;
     }
 
-    const task = runtimeService.submitTask(submission);
+    try {
+      const task = await runtimeService.submitTask(submission);
 
-    response.status(202).json({
-      task: serializeRun(task)
-    });
+      response.status(202).json({
+        task: serializeRun(task)
+      });
+    } catch (error) {
+      response.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to submit runtime task."
+      });
+    }
   });
 
   app.get("/api/runtime/tasks/:id", (request, response) => {

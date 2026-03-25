@@ -32,7 +32,7 @@ type ExecutePhaseExecutionOptions = {
   instructionRuntime: AgentInstructionRuntime;
   contextAssembler?: ContextAssembler;
   executeRun: ExecuteRun;
-  persistRun: (run: AgentRunRecord) => void;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
   getRuntimeStatus: () => AgentRuntimeStatus;
 };
 
@@ -177,7 +177,7 @@ export async function executePhaseExecutionRun(
     }
 
     beginPhase(workingRun, phaseExecution, phase);
-    persist(options.persistRun, workingRun);
+    await persist(options.persistRun, workingRun);
 
     for (const story of phase.userStories) {
       if (story.status === "completed") {
@@ -188,7 +188,7 @@ export async function executePhaseExecutionRun(
 
       while (!storyComplete) {
         beginStory(workingRun, phaseExecution, phase, story);
-        persist(options.persistRun, workingRun);
+        await persist(options.persistRun, workingRun);
 
         for (const task of story.tasks) {
           if (task.status === "completed") {
@@ -240,7 +240,7 @@ export async function executePhaseExecutionRun(
             updatedAt: new Date().toISOString(),
             source: "result"
           };
-          persist(options.persistRun, workingRun);
+          await persist(options.persistRun, workingRun);
           storyComplete = true;
           continue;
         }
@@ -277,7 +277,7 @@ export async function executePhaseExecutionRun(
           updatedAt: new Date().toISOString(),
           source: "failure"
         };
-        persist(options.persistRun, workingRun);
+        await persist(options.persistRun, workingRun);
 
         if (story.retryCount >= phaseExecution.retryPolicy.maxStoryRetries) {
           phase.status = "failed";
@@ -285,7 +285,7 @@ export async function executePhaseExecutionRun(
           phaseExecution.status = "failed";
           phaseExecution.lastFailureReason = storyFailureMessage;
           updateProgress(phaseExecution);
-          persist(options.persistRun, workingRun);
+          await persist(options.persistRun, workingRun);
           throw createExecutionFailure(storyFailureMessage);
         }
 
@@ -307,7 +307,7 @@ export async function executePhaseExecutionRun(
           updatedAt: new Date().toISOString(),
           source: "retry"
         };
-        persist(options.persistRun, workingRun);
+        await persist(options.persistRun, workingRun);
       }
     }
 
@@ -341,7 +341,7 @@ export async function executePhaseExecutionRun(
         }
       );
       updateProgress(phaseExecution);
-      persist(options.persistRun, workingRun);
+      await persist(options.persistRun, workingRun);
       throw createExecutionFailure(phaseFailureMessage);
     }
 
@@ -371,7 +371,7 @@ export async function executePhaseExecutionRun(
       updatedAt: new Date().toISOString(),
       source: "result"
     };
-    persist(options.persistRun, workingRun);
+    await persist(options.persistRun, workingRun);
   }
 
   phaseExecution.status = "completed";
@@ -388,7 +388,7 @@ export async function executePhaseExecutionRun(
     updatedAt: new Date().toISOString(),
     source: "result"
   };
-  persist(options.persistRun, workingRun);
+  await persist(options.persistRun, workingRun);
 
   return {
     mode: "phase-execution",
@@ -454,7 +454,7 @@ async function executeTask(options: {
   instructionRuntime: AgentInstructionRuntime;
   contextAssembler?: ContextAssembler;
   executeRun: ExecuteRun;
-  persistRun: (run: AgentRunRecord) => void;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
   getRuntimeStatus: () => AgentRuntimeStatus;
 }) {
   const { run, phaseExecution, phase, story, task } = options;
@@ -480,7 +480,7 @@ async function executeTask(options: {
     message: `Task ${task.id} started.`,
     retryCount: task.retryCount
   });
-  persist(options.persistRun, run);
+  await persist(options.persistRun, run);
 
   let result: AgentRunResult;
   const traceScope = getActiveTraceScope();
@@ -507,7 +507,7 @@ async function executeTask(options: {
         instructionRuntime: options.instructionRuntime,
         contextAssembler: options.contextAssembler,
         executeRun: options.executeRun,
-        persistRun: (updatedRun) => {
+        persistRun: async (updatedRun) => {
           run.orchestration = updatedRun.orchestration;
           run.result = updatedRun.result;
           run.error = updatedRun.error;
@@ -516,7 +516,7 @@ async function executeTask(options: {
           run.lastValidationResult = updatedRun.lastValidationResult;
           run.rollingSummary = updatedRun.rollingSummary;
           run.phaseExecution = phaseExecution;
-          persist(options.persistRun, run);
+          await persist(options.persistRun, run);
         },
         getRuntimeStatus: options.getRuntimeStatus,
         maxStepRetries: phaseExecution.retryPolicy.maxTaskRetries,
@@ -563,7 +563,7 @@ async function executeTask(options: {
       outputSummary: failure.message,
       error: failure.message
     });
-    persist(options.persistRun, run);
+    await persist(options.persistRun, run);
     throw failure;
   }
 
@@ -608,7 +608,7 @@ async function executeTask(options: {
       outputSummary: result.summary
     });
     updateProgress(phaseExecution);
-    persist(options.persistRun, run);
+    await persist(options.persistRun, run);
     return;
   }
 
@@ -653,7 +653,7 @@ async function executeTask(options: {
     error: taskFailureMessage
   });
   updateProgress(phaseExecution);
-  persist(options.persistRun, run);
+  await persist(options.persistRun, run);
   throw createExecutionFailure(taskFailureMessage);
 }
 
@@ -1154,8 +1154,11 @@ function slugify(value: string) {
   return slug || "criterion";
 }
 
-function persist(persistRun: (run: AgentRunRecord) => void, run: AgentRunRecord) {
-  persistRun(cloneRunRecord(run));
+async function persist(
+  persistRun: (run: AgentRunRecord) => void | Promise<void>,
+  run: AgentRunRecord
+) {
+  await persistRun(cloneRunRecord(run));
 }
 
 function createExecutionFailure(message: string) {
