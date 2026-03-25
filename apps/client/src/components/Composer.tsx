@@ -11,6 +11,12 @@ type ComposerProps = {
   composerMode: ComposerMode;
   composerValue: string;
   attachments: ComposerAttachment[];
+  steerMode: {
+    status: "pending" | "running";
+    queuedCount: number;
+    threadTitle: string;
+  } | null;
+  focusRequestKey: number;
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
   transcribingAudio: boolean;
@@ -27,6 +33,8 @@ export function Composer({
   composerMode,
   composerValue,
   attachments,
+  steerMode,
+  focusRequestKey,
   feedback,
   submitting,
   transcribingAudio,
@@ -39,6 +47,7 @@ export function Composer({
 }: ComposerProps) {
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -50,17 +59,32 @@ export function Composer({
       ? "Recording voice note..."
       : transcribingAudio
         ? "Transcribing voice note..."
+        : steerMode
+          ? "Ask for follow-up changes"
         : composerMode === "image"
-      ? "Describe the image task..."
-      : composerMode === "voice"
-        ? "Record a voice note or type the instruction..."
-        : "Ask Codex anything...";
+          ? "Describe the image task..."
+          : composerMode === "voice"
+            ? "Record a voice note or type the instruction..."
+            : "Ask Codex anything...";
 
   useEffect(() => {
     return () => {
       stopActiveStream();
     };
   }, []);
+
+  useEffect(() => {
+    if (focusRequestKey <= 0) {
+      return;
+    }
+
+    textareaRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    textareaRef.current?.focus();
+    textareaRef.current?.setSelectionRange(
+      textareaRef.current.value.length,
+      textareaRef.current.value.length
+    );
+  }, [focusRequestKey]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
@@ -156,6 +180,24 @@ export function Composer({
 
   return (
     <form className="composer" onSubmit={onSubmit}>
+      {steerMode ? (
+        <div className="composer__steer">
+          <div className="composer__steer-copy">
+            <span className="composer__steer-badge">Steer</span>
+            <strong>
+              {steerMode.status === "running"
+                ? "Queue a follow-up without interrupting the current run"
+                : "Queue the next prompt on this live thread"}
+            </strong>
+            <p>
+              {steerMode.queuedCount > 0
+                ? `${steerMode.queuedCount} follow-up${steerMode.queuedCount === 1 ? "" : "s"} already staged for ${steerMode.threadTitle}.`
+                : `${steerMode.threadTitle} stays active while your next prompt waits its turn.`}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <AttachmentPreviewList
         attachments={attachments}
         onRemove={(attachmentId) =>
@@ -165,6 +207,7 @@ export function Composer({
 
       <div className="composer__field">
         <textarea
+          ref={textareaRef}
           value={composerValue}
           onChange={(event) => onComposerValueChange(event.target.value)}
           placeholder={placeholder}
