@@ -145,6 +145,95 @@ Full-file rewrite is not the default strategy. It is allowed only when:
 - the file is small or otherwise low-risk to rewrite
 - the runtime can still validate and review the result safely
 
+## Multi-Agent Design
+
+### Current Coordination Model
+
+Shipyard currently uses an explicit coordinator-owned runtime loop rather than a parallel swarm. The active execution path is:
+
+1. `createPersistentRuntimeService` accepts and persists the run.
+2. `executeOrchestrationLoop` acts as the coordinator for the live step.
+3. Planner, executor, and verifier run as bounded role agents under that coordinator.
+4. The verifier decides whether the runtime should continue, retry, replan, or fail.
+5. When a phase/story/task plan is active, `phaseExecution` wraps the same orchestration loop per task instead of bypassing it.
+
+### Role Boundaries
+
+- Planner: proposes one bounded next step and keeps the scope narrow.
+- Executor: performs the planned step through repo tools or the model path.
+- Verifier: checks intent match, validation evidence, and whether progression is safe.
+
+### Coordinator Responsibilities
+
+The coordinator owns:
+
+- role handoff creation
+- role invocation order
+- merge of planner, executor, and verifier results back into canonical run state
+- retry and replan counters
+- conflict recording
+- final branch decisions
+
+### Shared State
+
+The system does not introduce a second orchestration state model. Canonical shared state remains:
+
+- `AgentRunRecord`
+- nested `OrchestrationState`
+- optional `PhaseExecutionState` when a structured workflow is active
+
+### Deliberate Limits
+
+Current multi-agent behavior is intentionally constrained:
+
+- no peer-to-peer agent messaging
+- no parallel execution
+- no independent specialist agent registry
+- no hidden side channels outside coordinator-owned state updates
+
+This keeps execution deterministic and traceable while still making the planner/executor/verifier collaboration explicit.
+
+## Trace Links
+
+### Primary Docs
+
+- [`README.md`](./README.md)
+- [`docs/architecture/observability.md`](./docs/architecture/observability.md)
+- [`docs/architecture/system-architecture.md`](./docs/architecture/system-architecture.md)
+
+### Runtime Inspection Endpoints
+
+- `GET /api/runtime/status`
+- `GET /api/runtime/tasks`
+- `GET /api/runtime/tasks/:id`
+- `GET /api/runtime/context/:role/:id`
+- `GET /api/runtime/traces/:id`
+
+These routes are registered in [`apps/server/src/routes/runtime.ts`](./apps/server/src/routes/runtime.ts).
+
+### Trace and Runtime Wiring
+
+- Runtime boot and trace-log path resolution: [`apps/server/src/runtime/bootRuntimeService.ts`](./apps/server/src/runtime/bootRuntimeService.ts)
+- Trace service implementation: [`apps/server/src/observability/createTraceService.ts`](./apps/server/src/observability/createTraceService.ts)
+- Trace scope propagation: [`packages/agent-core/src/observability/traceScope.ts`](./packages/agent-core/src/observability/traceScope.ts)
+- Trace contracts and span types: [`packages/agent-core/src/observability/types.ts`](./packages/agent-core/src/observability/types.ts)
+
+### Default Trace Locations
+
+- Local trace log: `.shipyard/runtime/traces.jsonl`
+- Production-style fallback path: `/tmp/shipyard/runtime/traces.jsonl`
+- Optional override: `SHIPYARD_TRACE_LOG_PATH`
+
+### What To Attach In A Submission
+
+For a reviewable submission, include:
+
+- the relevant CODEAGENT section references
+- the run id under review
+- the matching trace endpoint or trace log excerpt
+- any context payload links used to inspect planner, executor, or verifier inputs
+- the PR link that contains the implementation being described
+
 ## Local Use
 
 The repo runs locally with:
