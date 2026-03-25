@@ -204,10 +204,12 @@ function buildTaskPrompt(
           .filter(Boolean)
           .join("\n")
       : null,
+    renderProjectContext(run),
     renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
     renderRunContext(run),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
+    renderLocalFilePlanInstructions(run),
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]
@@ -235,6 +237,27 @@ function renderPhaseExecutionContext(run: AgentRunRecord) {
     story && story.acceptanceCriteria.length > 0
       ? `Story acceptance criteria:\n${story.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")}`
       : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderProjectContext(run: AgentRunRecord) {
+  if (!run.project) {
+    return null;
+  }
+
+  return [
+    "Project context:",
+    `Project: ${run.project.name ?? run.project.id}`,
+    `Kind: ${run.project.kind}`,
+    run.project.environment ? `Environment: ${run.project.environment}` : null,
+    run.project.description ? `Description: ${run.project.description}` : null,
+    run.project.folder
+      ? `Connected folder: ${run.project.folder.displayPath ?? run.project.folder.name ?? "connected folder"}`
+      : null,
+    run.project.folder?.provider ? `Folder provider: ${run.project.folder.provider}` : null,
+    run.project.folder?.status ? `Folder status: ${run.project.folder.status}` : null
   ]
     .filter(Boolean)
     .join("\n");
@@ -281,6 +304,31 @@ function renderRunContext(run: AgentRunRecord) {
   return contextParts.length > 0 ? contextParts.join("\n\n") : null;
 }
 
+function renderLocalFilePlanInstructions(run: AgentRunRecord) {
+  if (
+    run.project?.kind !== "local" ||
+    run.project.folder?.provider !== "browser-file-system-access"
+  ) {
+    return null;
+  }
+
+  return [
+    "Local workspace file action contract:",
+    "When the request requires creating, updating, or deleting files in the connected local folder, append a <local-file-plan>...</local-file-plan> block to the end of your response.",
+    "Inside that block emit valid JSON with exactly this shape: {\"operations\":[...]}",
+    "Supported operations:",
+    '- {"kind":"mkdir","path":"src/routes"}',
+    '- {"kind":"write_file","path":"src/index.ts","content":"..."}',
+    '- {"kind":"delete_file","path":"obsolete.txt"}',
+    "Rules:",
+    "- Use only relative paths rooted at the connected local folder.",
+    "- Never use absolute paths or .. segments.",
+    "- Use write_file to create or fully replace a file with the desired content.",
+    "- Omit the block when no local filesystem change is needed.",
+    "- Do not claim files were already written unless they are represented in the local file plan block. The client applies the plan after your response."
+  ].join("\n");
+}
+
 function createMissingKeyResult(
   run: AgentRunRecord,
   instructionRuntime: AgentInstructionRuntime,
@@ -309,10 +357,13 @@ function createMissingKeyResult(
 }
 
 function summarizeResponse(text: string) {
-  const compact = text.replace(/\s+/g, " ").trim();
+  const stripped = stripLocalFilePlanBlock(text);
+  const compact = stripped.replace(/\s+/g, " ").trim();
 
   if (!compact) {
-    return "OpenAI returned an empty response.";
+    return hasLocalFilePlanBlock(text)
+      ? "Prepared a local file plan for the connected workspace."
+      : "OpenAI returned an empty response.";
   }
 
   if (compact.length <= 180) {
@@ -320,6 +371,14 @@ function summarizeResponse(text: string) {
   }
 
   return `${compact.slice(0, 177).trimEnd()}...`;
+}
+
+function stripLocalFilePlanBlock(text: string) {
+  return text.replace(/<local-file-plan>\s*[\s\S]*?\s*<\/local-file-plan>/gi, "").trim();
+}
+
+function hasLocalFilePlanBlock(text: string) {
+  return /<local-file-plan>\s*[\s\S]*?\s*<\/local-file-plan>/i.test(text);
 }
 
 function summarizePrompt(run: AgentRunRecord) {

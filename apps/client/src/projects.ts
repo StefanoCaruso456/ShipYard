@@ -6,9 +6,25 @@ const DIRECTORY_HANDLE_STORE = "directories";
 
 type PermissionMode = "read" | "readwrite";
 
-type BrowserDirectoryHandle = {
+export type BrowserWritableFileStream = {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+};
+
+export type BrowserFileHandle = {
+  createWritable: () => Promise<BrowserWritableFileStream>;
+};
+
+export type BrowserDirectoryHandle = {
   name: string;
   queryPermission?: (descriptor?: { mode?: PermissionMode }) => Promise<PermissionState | "granted" | "denied" | "prompt">;
+  requestPermission?: (descriptor?: { mode?: PermissionMode }) => Promise<PermissionState | "granted" | "denied" | "prompt">;
+  getDirectoryHandle: (
+    name: string,
+    options?: { create?: boolean }
+  ) => Promise<BrowserDirectoryHandle>;
+  getFileHandle: (name: string, options?: { create?: boolean }) => Promise<BrowserFileHandle>;
+  removeEntry: (name: string, options?: { recursive?: boolean }) => Promise<void>;
 };
 
 type DirectoryPickerWindow = Window & {
@@ -214,6 +230,10 @@ async function getPersistedProjectDirectoryHandle(projectId: string): Promise<Br
     request.onsuccess = () => resolve((request.result as BrowserDirectoryHandle | undefined) ?? null);
     request.onerror = () => reject(request.error ?? new Error("Failed to read project directory handle."));
   });
+}
+
+export async function getProjectDirectoryHandle(projectId: string) {
+  return getPersistedProjectDirectoryHandle(projectId);
 }
 
 async function openDirectoryHandleDatabase() {

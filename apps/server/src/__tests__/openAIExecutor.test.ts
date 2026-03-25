@@ -86,6 +86,97 @@ test("createOpenAIExecutor maps AI SDK text into the runtime result", async () =
   assert.equal(result.usage?.totalTokens, 30);
 });
 
+test("createOpenAIExecutor adds local file plan instructions for browser-backed projects", async () => {
+  let capturedPrompt = "";
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text:
+          "Scaffold plan ready.\n\n<local-file-plan>\n{\"operations\":[{\"kind\":\"mkdir\",\"path\":\"src\"},{\"kind\":\"write_file\",\"path\":\"src/index.ts\",\"content\":\"export {};\\n\"}]}\n</local-file-plan>",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const result = await executor(
+    createRun("Create the initial project scaffold", {
+      project: {
+        id: "project-local",
+        name: "Local project",
+        kind: "local",
+        environment: "Browser workspace",
+        description: "Connected local folder",
+        folder: {
+          name: "1st project",
+          displayPath: "1st project",
+          status: "connected",
+          provider: "browser-file-system-access"
+        }
+      }
+    }),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Local workspace file action contract/);
+  assert.match(capturedPrompt, /<local-file-plan>/);
+  assert.equal(result.summary, "Scaffold plan ready.");
+});
+
+test("createOpenAIExecutor uses a local file plan summary when the response is plan-only", async () => {
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async () =>
+      ({
+        text:
+          "<local-file-plan>\n{\"operations\":[{\"kind\":\"mkdir\",\"path\":\"src\"}]}\n</local-file-plan>",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
+      })) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const result = await executor(createRun("Prepare a local file plan"), {
+    instructionRuntime
+  });
+
+  assert.equal(result.summary, "Prepared a local file plan for the connected workspace.");
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -95,7 +186,10 @@ async function createInstructionRuntimeForTests() {
   return createAgentRuntime({ skillPath });
 }
 
-function createRun(instruction: string): AgentRunRecord {
+function createRun(
+  instruction: string,
+  overrides: Partial<AgentRunRecord> = {}
+): AgentRunRecord {
   return {
     id: "run-test",
     threadId: "thread-test",
@@ -122,6 +216,7 @@ function createRun(instruction: string): AgentRunRecord {
     rollingSummary: null,
     events: [],
     error: null,
-    result: null
+    result: null,
+    ...overrides
   };
 }

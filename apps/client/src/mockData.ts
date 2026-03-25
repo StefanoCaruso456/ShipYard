@@ -1,10 +1,14 @@
 import { toAttachmentCard } from "./attachments";
+import {
+  stripLocalFilePlan
+} from "./localFileBridge";
 import { createRuntimeProject } from "./projects";
 import type {
   AgentActivityItem,
   AutomationItem,
   ComposerAttachment,
   GitChange,
+  LocalFileExecutionEffect,
   ModeOption,
   ProjectPayload,
   RuntimeHealthResponse,
@@ -268,7 +272,8 @@ export function buildRuntimeThread(
   runs: RuntimeTask[],
   runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]> = {},
   runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog> = {},
-  optimisticFollowUps: RuntimeQueuedFollowUpDraft[] = []
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[] = [],
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect> = {}
 ): WorkspaceThread {
   const orderedRuns = [...runs].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const firstRun = orderedRuns[0];
@@ -311,8 +316,8 @@ export function buildRuntimeThread(
     updatedLabel: deriveRuntimeThreadUpdatedLabel(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
     tags: buildRuntimeThreadTags(threadStatus, latestRun, queuedRuns.length + optimisticFollowUps.length),
     attachments: attachmentCards,
-    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun),
-    progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps),
+    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun, localFileEffectsByTaskId),
+    progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps, localFileEffectsByTaskId),
     activity,
     liveRuntime: {
       threadId: firstRun.threadId,
@@ -410,7 +415,8 @@ function buildRuntimeThreadTags(
 
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
-  focusedRun: RuntimeTask
+  focusedRun: RuntimeTask,
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
@@ -452,14 +458,36 @@ function buildRuntimeThreadMessages(
     );
 
     if (run.result) {
+      const visibleResponseText =
+        stripLocalFilePlan(run.result.responseText ?? "") || run.result.summary;
+
       messages.push(
         createMessage(
           `${run.id}-assistant`,
           "assistant",
           "Runtime result",
-          run.result.responseText ?? run.result.summary,
+          visibleResponseText,
           formatDateTime(run.result.completedAt),
           "success"
+        )
+      );
+    }
+
+    const localEffect = localFileEffectsByTaskId[run.id];
+
+    if (localEffect) {
+      messages.push(
+        createMessage(
+          `${run.id}-local-effect`,
+          localEffect.status === "failed" ? "assistant" : "system",
+          "Local workspace",
+          formatLocalWorkspaceEffect(localEffect),
+          formatDateTime(localEffect.timestamp),
+          localEffect.status === "failed"
+            ? "danger"
+            : localEffect.status === "applied"
+              ? "success"
+              : "info"
         )
       );
     }
@@ -517,7 +545,8 @@ function deriveRuntimeSystemTone(run: RuntimeTask): ThreadMessage["tone"] {
 
 function buildRuntimeThreadProgress(
   runs: RuntimeTask[],
-  optimisticFollowUps: RuntimeQueuedFollowUpDraft[]
+  optimisticFollowUps: RuntimeQueuedFollowUpDraft[],
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
 ): WorkspaceThread["progress"] {
   const progress: WorkspaceThread["progress"] = [];
 
@@ -565,6 +594,28 @@ function buildRuntimeThreadProgress(
       );
     }
 
+    const localEffect = localFileEffectsByTaskId[run.id];
+
+    if (localEffect) {
+      progress.push(
+        createProgress(
+          `${run.id}-local-effect`,
+          localEffect.status === "applying"
+            ? "Applying locally"
+            : localEffect.status === "applied"
+              ? "Applied locally"
+              : "Local apply failed",
+          localEffect.error ?? localEffect.summary,
+          formatDateTime(localEffect.timestamp),
+          localEffect.status === "failed"
+            ? "danger"
+            : localEffect.status === "applied"
+              ? "success"
+              : "default"
+        )
+      );
+    }
+
     if (run.completedAt && run.status === "failed") {
       progress.push(
         createProgress(
@@ -591,6 +642,20 @@ function buildRuntimeThreadProgress(
   }
 
   return progress;
+}
+
+function formatLocalWorkspaceEffect(effect: LocalFileExecutionEffect) {
+  if (effect.status === "applying") {
+    return effect.summary;
+  }
+
+  const detailLines = effect.details.slice(0, 8).map((detail) => `- ${detail}`);
+
+  if (detailLines.length === 0) {
+    return effect.error ?? effect.summary;
+  }
+
+  return `${effect.summary}\n\n${detailLines.join("\n")}`;
 }
 
 function buildQueuedFollowUpItems(

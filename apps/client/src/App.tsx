@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchProjectBrief,
@@ -12,6 +12,7 @@ import {
   transcribeRuntimeAudio
 } from "./api";
 import { buildComposerAttachment } from "./attachments";
+import { applyLocalFilePlan, extractLocalFilePlan } from "./localFileBridge";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
@@ -23,6 +24,7 @@ import {
 import {
   createLocalProject,
   deriveProjectCode,
+  getProjectDirectoryHandle,
   loadStoredLocalProjects,
   pickProjectDirectory,
   persistProjectDirectoryHandle,
@@ -36,6 +38,7 @@ import type {
   AttachmentCard,
   ComposerAttachment,
   ComposerMode,
+  LocalFileExecutionEffect,
   ProgressEvent,
   ProjectPayload,
   RuntimeHealthResponse,
@@ -44,6 +47,7 @@ import type {
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
   RuntimeTask,
+  RuntimeTaskSubmitContext,
   SidebarNavItemId,
   ThreadGroup,
   ThreadMessage,
@@ -74,6 +78,9 @@ function App() {
   const [runtimeAttachmentPreviewsByTaskId, setRuntimeAttachmentPreviewsByTaskId] = useState<
     Record<string, ComposerAttachment[]>
   >({});
+  const [localFileEffectsByTaskId, setLocalFileEffectsByTaskId] = useState<
+    Record<string, LocalFileExecutionEffect>
+  >({});
   const [pendingLiveFollowUpsByThreadId, setPendingLiveFollowUpsByThreadId] = useState<
     Record<string, RuntimeQueuedFollowUpDraft[]>
   >({});
@@ -93,6 +100,7 @@ function App() {
   const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [transcribingAudio, setTranscribingAudio] = useState(false);
+  const localFileApplicationsInFlightRef = useRef(new Set<string>());
   const projectPickerSupported = supportsProjectDirectoryPicker();
   const hasActiveRuntimeRuns = runtimeTasks.some(
     (candidate) => candidate.status === "pending" || candidate.status === "running"
@@ -256,11 +264,13 @@ function App() {
           draftThreadsByProject[candidate.id] ?? [],
           runtimeAttachmentPreviewsByTaskId,
           runtimeTracesByTaskId,
-          pendingLiveFollowUpsByThreadId
+          pendingLiveFollowUpsByThreadId,
+          localFileEffectsByTaskId
         )
       })),
     [
       draftThreadsByProject,
+      localFileEffectsByTaskId,
       pendingLiveFollowUpsByThreadId,
       runtimeAttachmentPreviewsByTaskId,
       runtimeTasks,
@@ -361,6 +371,122 @@ function App() {
       window.clearInterval(interval);
     };
   }, [activeRuntimeTask?.id, activeRuntimeTask?.status]);
+
+  useEffect(() => {
+    const localProjectsById = new Map(
+      visibleProjects
+        .filter((project) => project.kind === "local")
+        .map((project) => [project.id, project])
+    );
+
+    for (const task of runtimeTasks) {
+      if (
+        task.status !== "completed" ||
+        !task.result?.responseText ||
+        localFileApplicationsInFlightRef.current.has(task.id) ||
+        localFileEffectsByTaskId[task.id]
+      ) {
+        continue;
+      }
+
+      const projectId = getRuntimeTaskProjectId(task);
+      const project = localProjectsById.get(projectId);
+
+      if (!project) {
+        continue;
+      }
+
+      const parsedPlan = extractLocalFilePlan(task.result.responseText);
+
+      if (!parsedPlan.plan && !parsedPlan.error) {
+        continue;
+      }
+
+      localFileApplicationsInFlightRef.current.add(task.id);
+      setLocalFileEffectsByTaskId((current) => ({
+        ...current,
+        [task.id]: {
+          taskId: task.id,
+          projectId,
+          status: "applying",
+          summary: "Applying the local file plan inside the connected folder.",
+          timestamp: new Date().toISOString(),
+          files: [],
+          details: [],
+          error: null
+        }
+      }));
+
+      void (async () => {
+        try {
+          const handle = await getProjectDirectoryHandle(project.id);
+          const effect = handle
+            ? await applyLocalFilePlan({
+                taskId: task.id,
+                project,
+                handle,
+                responseText: task.result?.responseText ?? null
+              })
+            : {
+                taskId: task.id,
+                projectId: project.id,
+                status: "failed" as const,
+                summary:
+                  "Local workspace apply failed: reconnect the selected folder before applying file changes.",
+                timestamp: new Date().toISOString(),
+                files: [],
+                details: [],
+                error:
+                  "Reconnect the selected folder before applying file changes."
+              };
+
+          setLocalFileEffectsByTaskId((current) => ({
+            ...current,
+            [task.id]: effect
+          }));
+
+          const accessFailure =
+            effect.error?.includes("Reconnect the selected folder") ||
+            effect.error?.includes("write access");
+
+          if (effect.status === "applied" || accessFailure) {
+            setLocalProjects((current) =>
+              current.map((candidate) =>
+                candidate.id === project.id && candidate.folder
+                  ? {
+                      ...candidate,
+                      folder: {
+                        ...candidate.folder,
+                        status: effect.status === "applied" ? "connected" : "needs-access"
+                      }
+                    }
+                  : candidate
+              )
+            );
+          }
+        } catch (error) {
+          setLocalFileEffectsByTaskId((current) => ({
+            ...current,
+            [task.id]: {
+              taskId: task.id,
+              projectId: project.id,
+              status: "failed",
+              summary:
+                error instanceof Error
+                  ? `Local workspace apply failed: ${error.message}`
+                  : "Local workspace apply failed.",
+              timestamp: new Date().toISOString(),
+              files: [],
+              details: [],
+              error: error instanceof Error ? error.message : "Local workspace apply failed."
+            }
+          }));
+        } finally {
+          localFileApplicationsInFlightRef.current.delete(task.id);
+        }
+      })();
+    }
+  }, [localFileEffectsByTaskId, runtimeTasks, visibleProjects]);
 
   function buildInstructionPayload() {
     const trimmed = composerValue.trim();
@@ -512,13 +638,19 @@ function App() {
       });
 
       try {
+        const runtimeContext = buildRuntimeContextForProject(
+          activeProject,
+          runtimeTasks,
+          localFileEffectsByTaskId
+        );
         const response = await submitRuntimeTask({
           instruction,
           title: activeThread.title,
           threadId,
           parentRunId: activeThread.liveRuntime.latestRunId,
           attachments: submittedAttachments,
-          project: activeProject
+          project: activeProject,
+          context: runtimeContext
         });
 
         setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
@@ -599,11 +731,17 @@ function App() {
     setSubmissionFeedback(null);
 
     try {
+      const runtimeContext = buildRuntimeContextForProject(
+        activeProject,
+        runtimeTasks,
+        localFileEffectsByTaskId
+      );
       const response = await submitRuntimeTask({
         instruction,
         title: optimisticThread.title,
         attachments: submittedAttachments,
-        project: activeProject
+        project: activeProject,
+        context: runtimeContext
       });
 
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
@@ -896,7 +1034,8 @@ function buildThreadsForProject(
   draftThreads: WorkspaceThread[],
   runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>,
   runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
-  pendingLiveFollowUpsByThreadId: Record<string, RuntimeQueuedFollowUpDraft[]>
+  pendingLiveFollowUpsByThreadId: Record<string, RuntimeQueuedFollowUpDraft[]>,
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
 ) {
   const projectRuntimeTasks = runtimeTasks.filter(
     (task) => getRuntimeTaskProjectId(task) === project.id
@@ -909,10 +1048,52 @@ function buildThreadsForProject(
         threadRuns,
         runtimeAttachmentPreviewsByTaskId,
         runtimeTracesByTaskId,
-        pendingLiveFollowUpsByThreadId[threadRuns[0]?.threadId ?? ""] ?? []
+        pendingLiveFollowUpsByThreadId[threadRuns[0]?.threadId ?? ""] ?? [],
+        localFileEffectsByTaskId
       )
     )
   ];
+}
+
+function buildRuntimeContextForProject(
+  project: WorkspaceProject,
+  runtimeTasks: RuntimeTask[],
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
+): RuntimeTaskSubmitContext | undefined {
+  if (project.kind !== "local") {
+    return undefined;
+  }
+
+  const recentEffects = runtimeTasks
+    .filter((task) => getRuntimeTaskProjectId(task) === project.id)
+    .map((task) => localFileEffectsByTaskId[task.id] ?? null)
+    .filter(
+      (effect): effect is LocalFileExecutionEffect =>
+        effect !== null && (effect.status === "applied" || effect.status === "failed")
+    )
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .slice(0, 4);
+
+  const recentFilePaths = [...new Set(recentEffects.flatMap((effect) => effect.files))].slice(0, 12);
+  const recentFailure = recentEffects.find((effect) => effect.status === "failed");
+
+  return {
+    objective: `Work inside the connected local folder "${project.folder?.displayPath ?? project.folder?.name ?? project.name}" and prepare file changes that should be applied directly to that workspace.`,
+    constraints: [
+      "When the request requires filesystem changes for this local project, append a <local-file-plan> block with mkdir/write_file/delete_file operations.",
+      "Use relative paths rooted at the connected local project folder.",
+      "Do not claim files were created, updated, or deleted unless they are represented in the local file plan block.",
+      recentFailure
+        ? `Recent local workspace apply failure: ${recentFailure.error ?? recentFailure.summary}`
+        : "Recent local workspace applies are available below as relevant files and validation targets."
+    ],
+    relevantFiles: recentFilePaths.map((path) => ({
+      path,
+      source: "local-file-bridge",
+      reason: "Recently created or updated in the connected local folder."
+    })),
+    validationTargets: recentFilePaths.slice(0, 8)
+  };
 }
 
 function createDraftThread(projectName: string): WorkspaceThread {
