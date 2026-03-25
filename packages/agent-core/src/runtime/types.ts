@@ -387,15 +387,16 @@ export type ExecuteRun = (
 ) => Promise<AgentRunResult>;
 
 export type AgentRunStore = {
-  create(run: AgentRunRecord): void;
-  update(run: AgentRunRecord): void;
-  get(id: string): AgentRunRecord | null;
-  list(): AgentRunRecord[];
+  load(): Promise<AgentRunRecord[]>;
+  create(run: AgentRunRecord): Promise<void>;
+  update(run: AgentRunRecord): Promise<void>;
+  get(id: string): Promise<AgentRunRecord | null>;
+  list(): Promise<AgentRunRecord[]>;
 };
 
 export type PersistentAgentRuntimeService = {
   instructionRuntime: AgentInstructionRuntime;
-  submitTask(input: SubmitTaskInput): AgentRunRecord;
+  submitTask(input: SubmitTaskInput): Promise<AgentRunRecord>;
   getRun(id: string): AgentRunRecord | null;
   listRuns(): AgentRunRecord[];
   getStatus(): AgentRuntimeStatus;

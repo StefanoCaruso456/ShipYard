@@ -11,7 +11,10 @@ import {
 import { projectBrief } from "@shipyard/shared";
 
 import { registerRuntimeRoutes } from "./routes/runtime";
-import { bootRuntimeService } from "./runtime/bootRuntimeService";
+import {
+  bootRuntimeService,
+  type RuntimeStoreDescriptor
+} from "./runtime/bootRuntimeService";
 import type { AudioTranscriptionConfig } from "./runtime/createAudioTranscriber";
 import type { OpenAIExecutorConfig } from "./runtime/createOpenAIExecutor";
 
@@ -24,6 +27,7 @@ type RuntimeBootState = {
   openAI: OpenAIExecutorConfig | null;
   audioTranscription: AudioTranscriptionConfig | null;
   traceService: TraceService | null;
+  runtimeStore: RuntimeStoreDescriptor | null;
 };
 
 const host = process.env.HOST?.trim() || "0.0.0.0";
@@ -39,7 +43,8 @@ async function startServer() {
     contextAssembler: null,
     openAI: null,
     audioTranscription: null,
-    traceService: null
+    traceService: null,
+    runtimeStore: null
   };
   const app = express();
 
@@ -112,6 +117,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       openAI,
       audioTranscriber,
       runtimeStatePath,
+      runtimeStore,
       traceService,
       traceLogPath
     } =
@@ -124,6 +130,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
     bootState.openAI = openAI;
     bootState.audioTranscription = audioTranscriber.config;
     bootState.traceService = traceService;
+    bootState.runtimeStore = runtimeStore;
 
     registerRuntimeRoutes(
       app,
@@ -137,6 +144,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
     console.log("Shipyard runtime boot complete.", {
       completedAt: bootState.completedAt,
       runtimeStatePath,
+      runtimeStore,
       traceLogPath,
       skillId: runtimeService.instructionRuntime.skill.meta.id,
       openAIConfigured: openAI.configured,
@@ -185,7 +193,8 @@ function createRootPayload(bootState: RuntimeBootState) {
       workerState: runtimeStatus.workerState,
       queuedRuns: runtimeStatus.queuedRuns,
       totalRuns: runtimeStatus.totalRuns
-    }
+    },
+    runtimeStorage: bootState.runtimeStore
   };
 }
 
@@ -219,6 +228,7 @@ function createHealthPayload(bootState: RuntimeBootState) {
       queuedRuns: runtimeStatus.queuedRuns,
       totalRuns: runtimeStatus.totalRuns
     },
+    runtimeStorage: bootState.runtimeStore,
     model: {
       provider: bootState.openAI.provider,
       configured: bootState.openAI.configured,

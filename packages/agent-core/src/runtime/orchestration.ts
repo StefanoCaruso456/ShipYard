@@ -44,7 +44,7 @@ type ExecuteOrchestrationLoopOptions = {
   instructionRuntime: AgentInstructionRuntime;
   contextAssembler?: ContextAssembler;
   executeRun: ExecuteRun;
-  persistRun: (run: AgentRunRecord) => void;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
   getRuntimeStatus: () => AgentRuntimeStatus;
   maxStepRetries?: number;
   maxReplans?: number;
@@ -86,7 +86,7 @@ export async function executeOrchestrationLoop(
         updatedAt: new Date().toISOString(),
         source: "result"
       };
-      persist(options.persistRun, options.run);
+      await persist(options.persistRun, options.run);
 
       const plannerPayload = await buildRolePayload(
         options.contextAssembler,
@@ -141,7 +141,7 @@ export async function executeOrchestrationLoop(
           });
         }
       );
-      persist(options.persistRun, options.run);
+      await persist(options.persistRun, options.run);
     }
 
     if (!plannerResult || !orchestration.currentStep) {
@@ -165,7 +165,7 @@ export async function executeOrchestrationLoop(
       updatedAt: new Date().toISOString(),
       source: "result"
     };
-    persist(options.persistRun, options.run);
+    await persist(options.persistRun, options.run);
 
     const executorHandoff = createAgentHandoff({
       runId: options.run.id,
@@ -215,7 +215,7 @@ export async function executeOrchestrationLoop(
         });
       }
     );
-    persist(options.persistRun, options.run);
+    await persist(options.persistRun, options.run);
 
     const verifierPayload = await buildRolePayload(
       options.contextAssembler,
@@ -281,7 +281,7 @@ export async function executeOrchestrationLoop(
         });
       }
     );
-    persist(options.persistRun, options.run);
+    await persist(options.persistRun, options.run);
 
     switch (verifierResult.decision) {
       case "continue": {
@@ -309,7 +309,7 @@ export async function executeOrchestrationLoop(
         };
 
         options.run.result = resultWithOrchestration;
-        persist(options.persistRun, options.run);
+        await persist(options.persistRun, options.run);
         return resultWithOrchestration;
       }
       case "retry_step":
@@ -329,7 +329,7 @@ export async function executeOrchestrationLoop(
             conflicts: [conflict],
             appendEvents: appendRunEvents
           });
-          persist(options.persistRun, options.run);
+          await persist(options.persistRun, options.run);
           await traceCoordinatorDecision({
             stepId: plannerResult.step.id,
             decision: "fail",
@@ -366,7 +366,7 @@ export async function executeOrchestrationLoop(
           updatedAt: new Date().toISOString(),
           source: "retry"
         };
-        persist(options.persistRun, options.run);
+        await persist(options.persistRun, options.run);
         continue;
       case "replan":
         if (orchestration.replanCount >= orchestration.maxReplans) {
@@ -385,7 +385,7 @@ export async function executeOrchestrationLoop(
             conflicts: [conflict],
             appendEvents: appendRunEvents
           });
-          persist(options.persistRun, options.run);
+          await persist(options.persistRun, options.run);
           await traceCoordinatorDecision({
             stepId: plannerResult.step.id,
             decision: "fail",
@@ -423,7 +423,7 @@ export async function executeOrchestrationLoop(
           updatedAt: new Date().toISOString(),
           source: "retry"
         };
-        persist(options.persistRun, options.run);
+        await persist(options.persistRun, options.run);
         continue;
       case "fail":
         await traceCoordinatorDecision({
@@ -1125,8 +1125,11 @@ function appendRunEvents(run: AgentRunRecord, ...events: RunEvent[]) {
   run.events = [...run.events, ...events];
 }
 
-function persist(persistRun: (run: AgentRunRecord) => void, run: AgentRunRecord) {
-  persistRun(cloneRunRecord(run));
+async function persist(
+  persistRun: (run: AgentRunRecord) => void | Promise<void>,
+  run: AgentRunRecord
+) {
+  await persistRun(cloneRunRecord(run));
 }
 
 function requireAgentOutput<Output>(input: {

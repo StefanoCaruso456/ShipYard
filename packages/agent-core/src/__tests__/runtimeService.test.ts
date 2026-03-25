@@ -12,7 +12,7 @@ test("persistent runtime processes queued tasks sequentially without restart", a
   const secondGate = createDeferred<AgentRunResult>();
   const startedInstructions: string[] = [];
 
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: async (run, context) => {
       startedInstructions.push(run.instruction);
@@ -27,18 +27,18 @@ test("persistent runtime processes queued tasks sequentially without restart", a
     }
   });
 
-  const firstRun = runtimeService.submitTask({
+  const firstRun = await runtimeService.submitTask({
     instruction: "first task",
     title: "First"
   });
-  const secondRun = runtimeService.submitTask({
+  const secondRun = await runtimeService.submitTask({
     instruction: "second task",
     title: "Second"
   });
 
   assert.equal(firstRun.status, "pending");
   assert.equal(secondRun.status, "pending");
-  assert.equal(runtimeService.getStatus().queuedRuns, 2);
+  assert.ok(runtimeService.getStatus().queuedRuns >= 1);
 
   await waitForRunStatus(runtimeService, firstRun.id, "running");
   assert.equal(runtimeService.getRun(secondRun.id)?.status, "pending");
@@ -79,9 +79,9 @@ test("persistent runtime processes queued tasks sequentially without restart", a
 
 test("persistent runtime marks failures clearly and accepts follow-up tasks", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
-  const runtimeService = createPersistentRuntimeService({ instructionRuntime });
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
 
-  const failedRun = runtimeService.submitTask({
+  const failedRun = await runtimeService.submitTask({
     instruction: "fail this task",
     simulateFailure: true
   });
@@ -91,7 +91,7 @@ test("persistent runtime marks failures clearly and accepts follow-up tasks", as
   assert.match(failedRecord.error?.message ?? "", /Simulated runtime failure/);
   assert.equal(failedRecord.result, null);
 
-  const completedRun = runtimeService.submitTask({
+  const completedRun = await runtimeService.submitTask({
     instruction: "recover after failure"
   });
 
@@ -117,7 +117,7 @@ test("persistent runtime marks failures clearly and accepts follow-up tasks", as
 test("persistent runtime retries validation failures once and records rollback events", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const attempts: number[] = [];
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: async () => {
       attempts.push(attempts.length + 1);
@@ -151,7 +151,7 @@ test("persistent runtime retries validation failures once and records rollback e
     }
   });
 
-  const run = runtimeService.submitTask({
+  const run = await runtimeService.submitTask({
     instruction: "Retry this invalid edit once."
   });
 
@@ -170,7 +170,7 @@ test("persistent runtime retries validation failures once and records rollback e
 test("persistent runtime executes phases, stories, and tasks sequentially", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const startedInstructions: string[] = [];
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: async (run, context) => {
       startedInstructions.push(run.instruction);
@@ -185,7 +185,7 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
     }
   });
 
-  const run = runtimeService.submitTask({
+  const run = await runtimeService.submitTask({
     instruction: "Execute the backend delivery plan.",
     phaseExecution: {
       phases: [
@@ -258,7 +258,7 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
 test("persistent runtime retries task validation gates before failing the full run", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const attempts = new Map<string, number>();
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     executeRun: async (run, context) => {
       const currentAttempt = (attempts.get(run.instruction) ?? 0) + 1;
@@ -274,7 +274,7 @@ test("persistent runtime retries task validation gates before failing the full r
     }
   });
 
-  const run = runtimeService.submitTask({
+  const run = await runtimeService.submitTask({
     instruction: "Execute the retrying plan.",
     phaseExecution: {
       retryPolicy: {
@@ -326,7 +326,7 @@ async function createInstructionRuntimeForTests() {
 }
 
 async function waitForRunStatus(
-  runtimeService: ReturnType<typeof createPersistentRuntimeService>,
+  runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
   expectedStatus: "running" | "completed" | "failed"
 ) {

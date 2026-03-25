@@ -163,7 +163,7 @@ test("live orchestration consumes assembler payloads and records planner/executo
     sectionIds: [] as string[],
     plannedStepId: ""
   };
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     contextAssembler: assembler,
     executeRun: async (run, context) => {
@@ -181,7 +181,7 @@ test("live orchestration consumes assembler payloads and records planner/executo
     }
   });
 
-  const run = runtimeService.submitTask({
+  const run = await runtimeService.submitTask({
     instruction: "Summarize the runtime status.",
     context: {
       objective: "Summarize the runtime status.",
@@ -216,7 +216,7 @@ test("live orchestration consumes assembler payloads and records planner/executo
 
 test("verifier can fail a task immediately when retries are exhausted", async () => {
   const { instructionRuntime, assembler } = await createHarness();
-  const runtimeService = createPersistentRuntimeService({
+  const runtimeService = await createPersistentRuntimeService({
     instructionRuntime,
     contextAssembler: assembler,
     executeRun: async (run, context) => ({
@@ -228,7 +228,7 @@ test("verifier can fail a task immediately when retries are exhausted", async ()
     })
   });
 
-  const run = runtimeService.submitTask({
+  const run = await runtimeService.submitTask({
     instruction: "Run the failing plan.",
     phaseExecution: {
       retryPolicy: {
@@ -362,7 +362,7 @@ function createRuntimeStatus(): AgentRuntimeStatus {
 }
 
 async function waitForRunStatus(
-  runtimeService: ReturnType<typeof createPersistentRuntimeService>,
+  runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
   expectedStatus: AgentRunRecord["status"]
 ) {

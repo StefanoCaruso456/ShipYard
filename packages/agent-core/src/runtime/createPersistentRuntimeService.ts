@@ -65,8 +65,26 @@ export async function createPersistentRuntimeService(
 
   function listStoredRuns() {
     return Array.from(runs.values())
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .map(cloneRunRecord);
+      .map((run, index) => ({
+        run,
+        index
+      }))
+      .sort((left, right) => {
+        const activityOrder = getRunSortTimestamp(right.run).localeCompare(getRunSortTimestamp(left.run));
+
+        if (activityOrder !== 0) {
+          return activityOrder;
+        }
+
+        const createdOrder = right.run.createdAt.localeCompare(left.run.createdAt);
+
+        if (createdOrder !== 0) {
+          return createdOrder;
+        }
+
+        return right.index - left.index;
+      })
+      .map(({ run }) => cloneRunRecord(run));
   }
 
   async function createStoredRun(run: AgentRunRecord) {
@@ -887,4 +905,8 @@ function computeQueueDelayMs(run: AgentRunRecord) {
   }
 
   return new Date(run.startedAt).getTime() - new Date(run.createdAt).getTime();
+}
+
+function getRunSortTimestamp(run: AgentRunRecord) {
+  return run.completedAt ?? run.startedAt ?? run.createdAt;
 }
