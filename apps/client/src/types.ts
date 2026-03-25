@@ -382,14 +382,29 @@ export type RuntimeAudioTranscriptionResponse = {
   };
 };
 
+export type WorkspaceProjectKind = "live" | "local";
+
+export type WorkspaceProjectFolderStatus = "connected" | "needs-access";
+
+export type WorkspaceProjectFolder = {
+  name: string;
+  displayPath: string;
+  status: WorkspaceProjectFolderStatus;
+  provider: "runtime" | "browser-file-system-access";
+  lastConnectedAt: string | null;
+};
+
 export type WorkspaceProject = {
   id: string;
   name: string;
   code: string;
   environment: string;
   description: string;
-  kind: "live" | "preview";
+  kind: WorkspaceProjectKind;
   region: string;
+  branchLabel: string | null;
+  folder: WorkspaceProjectFolder | null;
+  removable: boolean;
 };
 
 export type SidebarNavItemId = "projects" | "skills" | "automations" | "settings";

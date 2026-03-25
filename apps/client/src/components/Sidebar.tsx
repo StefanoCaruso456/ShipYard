@@ -1,15 +1,18 @@
 import { ThreadList } from "./ThreadList";
 
-import type { SidebarNavItemId, ThreadGroup } from "../types";
+import type { SidebarNavItemId, ThreadGroup, WorkspaceProject } from "../types";
 
 type SidebarProps = {
   groups: ThreadGroup[];
   activeProjectId: string | null;
   activeThreadId: string | null;
   activeNav: SidebarNavItemId;
+  activeProject: WorkspaceProject | null;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
-  onCreateThread: () => void;
+  onCreateProject: () => void;
+  onCreateThread: (projectId?: string) => void;
+  onReconnectProjectFolder: (projectId: string) => Promise<void>;
   onRenameProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onSelectNav: (navId: SidebarNavItemId) => void;
@@ -20,23 +23,36 @@ export function Sidebar({
   activeProjectId,
   activeThreadId,
   activeNav,
+  activeProject,
   onSelectProject,
   onSelectThread,
+  onCreateProject,
   onCreateThread,
+  onReconnectProjectFolder,
   onRenameProject,
   onDeleteProject,
   onSelectNav
 }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <button type="button" className="sidebar__primary-action" onClick={onCreateThread}>
-        <ComposeIcon />
-        <span>New thread</span>
+      <button type="button" className="sidebar__primary-action" onClick={onCreateProject}>
+        <FolderPlusIcon />
+        <span>New project</span>
       </button>
 
       <section className="sidebar__threads">
         <div className="sidebar__threads-header">
-          <strong>Threads</strong>
+          <strong>Projects</strong>
+          {activeProject ? (
+            <button
+              type="button"
+              className="sidebar__header-action sidebar__icon-button"
+              onClick={() => onCreateThread(activeProject.id)}
+              aria-label={`Create a new thread in ${activeProject.name}`}
+            >
+              <ComposeIcon />
+            </button>
+          ) : null}
         </div>
 
         <ThreadList
@@ -45,6 +61,8 @@ export function Sidebar({
           activeThreadId={activeThreadId}
           onSelectProject={onSelectProject}
           onSelectThread={onSelectThread}
+          onCreateThread={onCreateThread}
+          onReconnectProjectFolder={onReconnectProjectFolder}
           onRenameProject={onRenameProject}
           onDeleteProject={onDeleteProject}
         />
@@ -62,18 +80,31 @@ export function Sidebar({
   );
 }
 
+function FolderPlusIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M3.5 6.5h4l1.2 1.6h7.8v6.2a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 1.2-1.2z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M12.5 4.4v4.2M10.4 6.5h4.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ComposeIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path
-        d="M4.5 14.5l.5-2.75L12.9 3.8a1.8 1.8 0 0 1 2.55 2.55l-7.95 7.9-3 .25z"
+        d="M10 5v10M5 10h10"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
-      <path d="M11.7 5l2.9 2.9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

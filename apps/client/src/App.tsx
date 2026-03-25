@@ -12,14 +12,26 @@ import {
   transcribeRuntimeAudio
 } from "./api";
 import { buildComposerAttachment } from "./attachments";
+import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import {
-  buildPreviewThreads,
   buildRuntimeThread,
   emptyProjectBrief,
   workspaceProjects
 } from "./mockData";
+import {
+  createLocalProject,
+  deriveProjectCode,
+  loadStoredLocalProjects,
+  pickProjectDirectory,
+  persistProjectDirectoryHandle,
+  removePersistedProjectDirectoryHandle,
+  resolveStoredProjectFolderStatus,
+  saveStoredLocalProjects,
+  supportsProjectDirectoryPicker,
+  updateLocalProjectFolder
+} from "./projects";
 import type {
   AttachmentCard,
   ComposerAttachment,
@@ -44,6 +56,7 @@ type Feedback = {
 };
 
 function App() {
+  const [localProjects, setLocalProjects] = useState<WorkspaceProject[]>(() => loadStoredLocalProjects());
   const [projectBrief, setProjectBrief] = useState<ProjectPayload>(emptyProjectBrief);
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealthResponse | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
@@ -58,17 +71,22 @@ function App() {
   const [runtimeAttachmentPreviewsByTaskId, setRuntimeAttachmentPreviewsByTaskId] = useState<
     Record<string, ComposerAttachment[]>
   >({});
-  const [hiddenProjectIds, setHiddenProjectIds] = useState<string[]>([]);
-  const [renamedProjectIds, setRenamedProjectIds] = useState<Record<string, string>>({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectDialogName, setProjectDialogName] = useState("");
+  const [projectDialogFolder, setProjectDialogFolder] = useState<Awaited<
+    ReturnType<typeof pickProjectDirectory>
+  > | null>(null);
+  const [projectDialogError, setProjectDialogError] = useState<string | null>(null);
   const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [transcribingAudio, setTranscribingAudio] = useState(false);
+  const projectPickerSupported = supportsProjectDirectoryPicker();
   const hasActiveRuntimeRuns = runtimeTasks.some(
     (candidate) => candidate.status === "pending" || candidate.status === "running"
   );
@@ -152,6 +170,47 @@ function App() {
   useEffect(() => {
     const cancelled = { value: false };
 
+    async function hydrateProjectFolderStatuses() {
+      const updates = await Promise.all(
+        localProjects.map(async (project) => ({
+          id: project.id,
+          status: await resolveStoredProjectFolderStatus(project.id)
+        }))
+      );
+
+      if (cancelled.value) {
+        return;
+      }
+
+      setLocalProjects((current) =>
+        current.map((project) => {
+          const next = updates.find((candidate) => candidate.id === project.id);
+
+          if (!next || !project.folder || project.folder.status === next.status) {
+            return project;
+          }
+
+          return {
+            ...project,
+            folder: {
+              ...project.folder,
+              status: next.status
+            }
+          };
+        })
+      );
+    }
+
+    void hydrateProjectFolderStatuses();
+
+    return () => {
+      cancelled.value = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cancelled = { value: false };
+
     void loadRuntimeSnapshot(cancelled);
 
     const interval = window.setInterval(() => {
@@ -164,16 +223,11 @@ function App() {
     };
   }, [hasActiveRuntimeRuns]);
 
-  const visibleProjects = useMemo(
-    () =>
-      workspaceProjects
-        .filter((candidate) => !hiddenProjectIds.includes(candidate.id))
-        .map((candidate) => ({
-          ...candidate,
-          name: renamedProjectIds[candidate.id] ?? candidate.name
-        })),
-    [hiddenProjectIds, renamedProjectIds]
-  );
+  useEffect(() => {
+    saveStoredLocalProjects(localProjects);
+  }, [localProjects]);
+
+  const visibleProjects = useMemo(() => [workspaceProjects[0], ...localProjects], [localProjects]);
 
   useEffect(() => {
     if (!visibleProjects.length) {
@@ -308,21 +362,86 @@ function App() {
     return "";
   }
 
-  function handleCreateThread() {
-    if (!activeProject) {
+  function handleOpenProjectDialog() {
+    setProjectDialogOpen(true);
+    setProjectDialogName("");
+    setProjectDialogFolder(null);
+    setProjectDialogError(null);
+    setSubmissionFeedback(null);
+  }
+
+  async function handlePickProjectFolder() {
+    try {
+      const nextFolder = await pickProjectDirectory();
+
+      setProjectDialogFolder(nextFolder);
+      setProjectDialogError(null);
+
+      if (!projectDialogName.trim()) {
+        setProjectDialogName(nextFolder.folderName);
+      }
+    } catch (error) {
+      setProjectDialogError(
+        error instanceof Error ? error.message : "Local folder selection failed."
+      );
+    }
+  }
+
+  async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!projectDialogFolder) {
+      setProjectDialogError("Choose a local folder before creating the project.");
       return;
     }
 
-    const thread = createDraftThread(activeProject.name);
+    const project = createLocalProject({
+      name: projectDialogName,
+      folderName: projectDialogFolder.folderName
+    });
+
+    try {
+      await persistProjectDirectoryHandle(project.id, projectDialogFolder.handle);
+      setLocalProjects((current) => [project, ...current]);
+      setSelectedProjectId(project.id);
+      setSelectedThreadIds((current) => ({
+        ...current,
+        [project.id]: null
+      }));
+      setProjectDialogOpen(false);
+      setProjectDialogName("");
+      setProjectDialogFolder(null);
+      setProjectDialogError(null);
+      setActiveNav("projects");
+      setSubmissionFeedback({
+        tone: "success",
+        text: `${project.name} is now connected to the local folder ${project.folder?.name ?? project.name}.`
+      });
+    } catch (error) {
+      setProjectDialogError(
+        error instanceof Error ? error.message : "Failed to persist the local folder connection."
+      );
+    }
+  }
+
+  function handleCreateThread(projectId = activeProject?.id) {
+    const projectToUse = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToUse) {
+      return;
+    }
+
+    const thread = createDraftThread(projectToUse.name);
 
     setDraftThreadsByProject((current) => ({
       ...current,
-      [activeProject.id]: [thread, ...(current[activeProject.id] ?? [])]
+      [projectToUse.id]: [thread, ...(current[projectToUse.id] ?? [])]
     }));
     setSelectedThreadIds((current) => ({
       ...current,
-      [activeProject.id]: thread.id
+      [projectToUse.id]: thread.id
     }));
+    setSelectedProjectId(projectToUse.id);
     setActiveNav("projects");
     setComposerValue("");
     setComposerAttachments([]);
@@ -378,7 +497,7 @@ function App() {
         text:
           activeProject.kind === "live"
             ? "Saved locally. Start the runtime to send live tasks."
-            : "Saved locally in this preview workspace."
+            : `Saved locally inside ${activeProject.name}.`
       });
       return;
     }
@@ -488,33 +607,81 @@ function App() {
   function handleRenameProject(projectId: string) {
     const projectToRename = visibleProjects.find((candidate) => candidate.id === projectId);
 
-    if (!projectToRename) {
+    if (!projectToRename || !projectToRename.removable) {
       return;
     }
 
-    const nextName = window.prompt("Rename session", projectToRename.name)?.trim();
+    const nextName = window.prompt("Rename project", projectToRename.name)?.trim();
 
     if (!nextName) {
       return;
     }
 
-    setRenamedProjectIds((current) => ({
-      ...current,
-      [projectId]: nextName
-    }));
+    setLocalProjects((current) =>
+      current.map((candidate) =>
+        candidate.id === projectId
+          ? {
+              ...candidate,
+              name: nextName,
+              code: deriveProjectCode(nextName)
+            }
+          : candidate
+      )
+    );
   }
 
-  function handleDeleteProject(projectId: string) {
-    if (visibleProjects.length <= 1) {
+  async function handleReconnectProjectFolder(projectId: string) {
+    const projectToReconnect = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToReconnect || projectToReconnect.kind !== "local") {
+      return;
+    }
+
+    try {
+      const nextFolder = await pickProjectDirectory();
+
+      await persistProjectDirectoryHandle(projectId, nextFolder.handle);
+      setLocalProjects((current) =>
+        current.map((candidate) =>
+          candidate.id === projectId
+            ? updateLocalProjectFolder(candidate, nextFolder.folderName, "connected")
+            : candidate
+        )
+      );
+      setSubmissionFeedback({
+        tone: "success",
+        text: `${projectToReconnect.name} is now connected to ${nextFolder.folderName}.`
+      });
+    } catch (error) {
+      setSubmissionFeedback({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Could not reconnect the local project folder."
+      });
+    }
+  }
+
+  async function handleDeleteProject(projectId: string) {
+    const projectToDelete = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToDelete?.removable) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Keep at least one project visible in the sidebar."
+        text: "The live runtime workspace stays pinned in the sidebar."
       });
       return;
     }
 
-    setHiddenProjectIds((current) => [...current, projectId]);
+    await removePersistedProjectDirectoryHandle(projectId);
+    setLocalProjects((current) => current.filter((candidate) => candidate.id !== projectId));
     setDraftThreadsByProject((current) => {
+      const next = { ...current };
+      delete next[projectId];
+      return next;
+    });
+    setSelectedThreadIds((current) => {
       const next = { ...current };
       delete next[projectId];
       return next;
@@ -545,62 +712,83 @@ function App() {
         : null);
 
   return (
-    <main className="app-shell">
-      <Sidebar
-        groups={threadGroups}
-        activeProjectId={activeProject?.id ?? null}
-        activeThreadId={activeThreadId}
-        activeNav={activeNav}
-        onSelectProject={(projectId) => {
-          setSelectedProjectId(projectId);
-          setActiveNav("projects");
-        }}
-        onSelectThread={(projectId, threadId) => {
-          setSelectedProjectId(projectId);
-          setSelectedThreadIds((current) => ({
-            ...current,
-            [projectId]: threadId
-          }));
-          setActiveNav("projects");
-        }}
-        onCreateThread={handleCreateThread}
-        onRenameProject={handleRenameProject}
-        onDeleteProject={handleDeleteProject}
-        onSelectNav={setActiveNav}
-      />
+    <>
+      <main className="app-shell">
+        <Sidebar
+          groups={threadGroups}
+          activeProjectId={activeProject?.id ?? null}
+          activeThreadId={activeThreadId}
+          activeNav={activeNav}
+          activeProject={activeProject}
+          onSelectProject={(projectId) => {
+            setSelectedProjectId(projectId);
+            setActiveNav("projects");
+          }}
+          onSelectThread={(projectId, threadId) => {
+            setSelectedProjectId(projectId);
+            setSelectedThreadIds((current) => ({
+              ...current,
+              [projectId]: threadId
+            }));
+            setActiveNav("projects");
+          }}
+          onCreateProject={handleOpenProjectDialog}
+          onCreateThread={handleCreateThread}
+          onReconnectProjectFolder={handleReconnectProjectFolder}
+          onRenameProject={handleRenameProject}
+          onDeleteProject={handleDeleteProject}
+          onSelectNav={setActiveNav}
+        />
 
-      <TaskWorkspace
-        activeNav={activeNav}
-        project={activeProject}
-        projectBrief={projectBrief}
-        thread={activeThread}
-        runtimeStatus={runtimeStatus}
-        instructions={instructions}
-        composerMode={composerMode}
-        composerValue={composerValue}
-        composerAttachments={composerAttachments}
-        feedback={feedback}
-        submitting={submitting}
-        transcribingAudio={transcribingAudio}
-        backendConnected={backendConnected}
-        onComposerModeChange={setComposerMode}
-        onComposerValueChange={setComposerValue}
-        onComposerAttachmentsChange={setComposerAttachments}
-        onVoiceCapture={handleVoiceCapture}
-        onVoiceCaptureError={(message) =>
-          setSubmissionFeedback({
-            tone: "danger",
-            text: message
-          })
-        }
-        onSelectSuggestion={(prompt) => {
-          setActiveNav("projects");
-          setComposerMode("text");
-          setComposerValue(prompt);
+        <TaskWorkspace
+          activeNav={activeNav}
+          project={activeProject}
+          projectBrief={projectBrief}
+          thread={activeThread}
+          runtimeStatus={runtimeStatus}
+          instructions={instructions}
+          composerMode={composerMode}
+          composerValue={composerValue}
+          composerAttachments={composerAttachments}
+          feedback={feedback}
+          submitting={submitting}
+          transcribingAudio={transcribingAudio}
+          backendConnected={backendConnected}
+          onComposerModeChange={setComposerMode}
+          onComposerValueChange={setComposerValue}
+          onComposerAttachmentsChange={setComposerAttachments}
+          onVoiceCapture={handleVoiceCapture}
+          onVoiceCaptureError={(message) =>
+            setSubmissionFeedback({
+              tone: "danger",
+              text: message
+            })
+          }
+          onSelectSuggestion={(prompt) => {
+            setActiveNav("projects");
+            setComposerMode("text");
+            setComposerValue(prompt);
+          }}
+          onReconnectProjectFolder={handleReconnectProjectFolder}
+          onSubmit={handleSubmitTask}
+        />
+      </main>
+
+      <NewProjectDialog
+        open={projectDialogOpen}
+        projectName={projectDialogName}
+        folderName={projectDialogFolder?.folderName ?? null}
+        pickerSupported={projectPickerSupported}
+        error={projectDialogError}
+        onProjectNameChange={setProjectDialogName}
+        onPickFolder={handlePickProjectFolder}
+        onClose={() => {
+          setProjectDialogOpen(false);
+          setProjectDialogError(null);
         }}
-        onSubmit={handleSubmitTask}
+        onSubmit={handleCreateProject}
       />
-    </main>
+    </>
   );
 }
 
@@ -624,7 +812,7 @@ function buildThreadsForProject(
     ];
   }
 
-  return [...draftThreads, ...buildPreviewThreads(project.id)];
+  return draftThreads;
 }
 
 function createDraftThread(projectName: string): WorkspaceThread {

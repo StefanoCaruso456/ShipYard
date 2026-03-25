@@ -33,6 +33,7 @@ type TaskWorkspaceProps = {
   onVoiceCapture: (file: File) => Promise<void>;
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
+  onReconnectProjectFolder: (projectId: string) => Promise<void>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -56,6 +57,7 @@ export function TaskWorkspace({
   onVoiceCapture,
   onVoiceCaptureError,
   onSelectSuggestion,
+  onReconnectProjectFolder,
   onSubmit
 }: TaskWorkspaceProps) {
   const runtimeState = backendConnected
@@ -104,6 +106,7 @@ export function TaskWorkspace({
             runtimeState={runtimeState}
             suggestions={suggestionCards}
             onSelectSuggestion={onSelectSuggestion}
+            onReconnectProjectFolder={onReconnectProjectFolder}
           />
         )}
       </div>
