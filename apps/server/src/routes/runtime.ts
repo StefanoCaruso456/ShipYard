@@ -326,6 +326,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
   const body = request.body as {
     instruction?: unknown;
     title?: unknown;
+    threadId?: unknown;
+    parentRunId?: unknown;
     simulateFailure?: unknown;
     toolRequest?: unknown;
     context?: unknown;
@@ -341,6 +343,22 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
   if (body.title !== undefined && typeof body.title !== "string") {
     return {
       error: "Task title must be a string when provided."
+    };
+  }
+
+  if (body.threadId !== undefined && typeof body.threadId !== "string") {
+    return {
+      error: "threadId must be a string when provided."
+    };
+  }
+
+  if (
+    body.parentRunId !== undefined &&
+    body.parentRunId !== null &&
+    typeof body.parentRunId !== "string"
+  ) {
+    return {
+      error: "parentRunId must be a string when provided."
     };
   }
 
@@ -373,6 +391,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
   return {
     instruction: body.instruction,
     title: body.title,
+    threadId: body.threadId,
+    parentRunId: body.parentRunId ?? null,
     simulateFailure: simulateFailure ?? false,
     toolRequest: toolRequest.value,
     attachments: analyzeTaskAttachments(
@@ -393,6 +413,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
 function serializeRun(run: AgentRunRecord) {
   return {
     id: run.id,
+    threadId: run.threadId,
+    parentRunId: run.parentRunId,
     title: run.title,
     instruction: run.instruction,
     simulateFailure: run.simulateFailure,

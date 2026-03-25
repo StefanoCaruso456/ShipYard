@@ -98,6 +98,8 @@ async function createInstructionRuntimeForTests() {
 function createRun(instruction: string): AgentRunRecord {
   return {
     id: "run-test",
+    threadId: "thread-test",
+    parentRunId: null,
     title: "Test",
     instruction,
     simulateFailure: false,

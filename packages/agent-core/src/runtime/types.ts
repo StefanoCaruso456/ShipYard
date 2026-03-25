@@ -303,6 +303,8 @@ export type RollingSummary = {
 export type SubmitTaskInput = {
   instruction: string;
   title?: string;
+  threadId?: string;
+  parentRunId?: string | null;
   simulateFailure?: boolean;
   toolRequest?: RepoMutationToolRequest | null;
   attachments?: RunAttachment[];
@@ -342,6 +344,8 @@ export type AgentRunResult = {
 
 export type AgentRunRecord = {
   id: string;
+  threadId: string;
+  parentRunId: string | null;
   title: string | null;
   instruction: string;
   simulateFailure: boolean;

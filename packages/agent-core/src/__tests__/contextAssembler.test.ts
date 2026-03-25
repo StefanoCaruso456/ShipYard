@@ -230,6 +230,8 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
 
   return {
     id: overrides.id ?? "run-123",
+    threadId: overrides.threadId ?? overrides.id ?? "run-123",
+    parentRunId: overrides.parentRunId ?? null,
     title: overrides.title ?? "Implement context assembly",
     instruction:
       overrides.instruction ??

@@ -129,8 +129,14 @@ export async function createPersistentRuntimeService(
       throw new Error("Task instruction is required.");
     }
 
+    const runId = randomUUID();
+    const threadId = input.threadId?.trim() ? input.threadId.trim() : runId;
+    const parentRunId = input.parentRunId?.trim() ? input.parentRunId.trim() : null;
+
     const run: AgentRunRecord = {
-      id: randomUUID(),
+      id: runId,
+      threadId,
+      parentRunId,
       title: input.title?.trim() ? input.title.trim() : null,
       instruction,
       simulateFailure: input.simulateFailure ?? false,
@@ -153,7 +159,7 @@ export async function createPersistentRuntimeService(
     };
 
     await createStoredRun(run);
-    queue.push(run.id);
+    enqueueRun(run);
     scheduleProcessing();
 
     return cloneRunRecord(run);
@@ -205,6 +211,45 @@ export async function createPersistentRuntimeService(
         void processQueue();
       }
     });
+  }
+
+  function enqueueRun(run: AgentRunRecord) {
+    const threadInsertionIndex = findThreadInsertionIndex(run);
+
+    if (threadInsertionIndex === null) {
+      queue.push(run.id);
+      return;
+    }
+
+    queue.splice(threadInsertionIndex, 0, run.id);
+  }
+
+  function findThreadInsertionIndex(run: AgentRunRecord) {
+    if (!run.parentRunId) {
+      return null;
+    }
+
+    let lastQueuedRunForThreadIndex = -1;
+
+    for (const [index, queuedRunId] of queue.entries()) {
+      const queuedRun = runs.get(queuedRunId);
+
+      if (queuedRun?.threadId === run.threadId) {
+        lastQueuedRunForThreadIndex = index;
+      }
+    }
+
+    if (lastQueuedRunForThreadIndex >= 0) {
+      return lastQueuedRunForThreadIndex + 1;
+    }
+
+    const activeRun = activeRunId ? runs.get(activeRunId) : null;
+
+    if (activeRun?.threadId === run.threadId) {
+      return 0;
+    }
+
+    return null;
   }
 
   async function recoverStoredRuns() {
@@ -539,16 +584,18 @@ function toRunFailure(error: unknown): NonNullable<AgentRunRecord["error"]> {
 function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   return {
     ...run,
+    threadId: run.threadId?.trim() ? run.threadId.trim() : run.id,
+    parentRunId: run.parentRunId?.trim() ? run.parentRunId.trim() : null,
     toolRequest: run.toolRequest ?? null,
     attachments: normalizeRunAttachments(run.attachments),
     context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
-            validationStatus: run.validationStatus ?? "not_run",
-            lastValidationResult: run.lastValidationResult ?? null,
-            orchestration: normalizeOrchestrationState(run.orchestration),
-            phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
-            rollingSummary: normalizeRollingSummary(run.rollingSummary),
-            events: Array.isArray(run.events) ? run.events : []
+    validationStatus: run.validationStatus ?? "not_run",
+    lastValidationResult: run.lastValidationResult ?? null,
+    orchestration: normalizeOrchestrationState(run.orchestration),
+    phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
+    rollingSummary: normalizeRollingSummary(run.rollingSummary),
+    events: Array.isArray(run.events) ? run.events : []
   };
 }
 
@@ -791,6 +838,8 @@ function createResultRollingSummary(
 
 function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
   return {
+    threadId: run.threadId,
+    parentRunId: run.parentRunId,
     status: run.status,
     retryCount: run.retryCount,
     validationStatus: run.validationStatus,
