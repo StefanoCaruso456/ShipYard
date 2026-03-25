@@ -69,6 +69,9 @@ function App() {
   const [submissionFeedback, setSubmissionFeedback] = useState<Feedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [transcribingAudio, setTranscribingAudio] = useState(false);
+  const hasActiveRuntimeRuns = runtimeTasks.some(
+    (candidate) => candidate.status === "pending" || candidate.status === "running"
+  );
 
   async function loadProjectData(cancelled?: { value: boolean }) {
     try {
@@ -153,13 +156,13 @@ function App() {
 
     const interval = window.setInterval(() => {
       void loadRuntimeSnapshot(cancelled);
-    }, 4000);
+    }, hasActiveRuntimeRuns ? 1500 : 4000);
 
     return () => {
       cancelled.value = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [hasActiveRuntimeRuns]);
 
   const visibleProjects = useMemo(
     () =>
@@ -283,7 +286,7 @@ function App() {
 
     const interval = window.setInterval(() => {
       void loadTraceSnapshot();
-    }, 2500);
+    }, activeTaskStatus === "running" ? 900 : 1500);
 
     return () => {
       cancelled.value = true;

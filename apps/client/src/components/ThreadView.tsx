@@ -25,6 +25,18 @@ export function ThreadView({
   onSelectSuggestion
 }: ThreadViewProps) {
   const isEmpty = !thread || thread.messages.length === 0;
+  const threadStatusTone = thread?.status === "failed" ? "error" : thread?.status ?? runtimeState;
+  const statusLabel = thread
+    ? thread.status === "pending"
+      ? "Queued"
+      : thread.status === "running"
+        ? "Thinking"
+        : thread.status === "completed"
+          ? "Completed"
+          : thread.status === "failed"
+            ? "Failed"
+            : `Runtime ${runtimeState}`
+    : `Runtime ${runtimeState}`;
 
   if (isEmpty) {
     return (
@@ -62,7 +74,10 @@ export function ThreadView({
   return (
     <section className="thread-view">
       <div className="thread-view__status">
-        <span>Runtime {runtimeState}</span>
+        <span className={`thread-view__status-pill thread-view__status-pill--${threadStatusTone}`}>
+          <span className="thread-view__status-dot" aria-hidden="true" />
+          {statusLabel}
+        </span>
         <span>{thread.updatedLabel}</span>
       </div>
 
