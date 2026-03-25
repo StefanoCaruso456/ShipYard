@@ -1,6 +1,6 @@
 import type { WorkspaceProject, WorkspaceThread } from "../types";
-import { AgentActivityFeed } from "./AgentActivityFeed";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
+import { LiveRuntimeStage } from "./LiveRuntimeStage";
 import { ThreadMessageCard } from "./ThreadMessageCard";
 
 type SuggestionCard = {
@@ -16,6 +16,7 @@ type ThreadViewProps = {
   suggestions: SuggestionCard[];
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRequestSteer: () => void;
 };
 
 export function ThreadView({
@@ -24,7 +25,8 @@ export function ThreadView({
   runtimeState,
   suggestions,
   onSelectSuggestion,
-  onReconnectProjectFolder
+  onReconnectProjectFolder,
+  onRequestSteer
 }: ThreadViewProps) {
   const isEmpty = !thread || thread.messages.length === 0;
   const projectNeedsAccess = project?.kind === "local" && project.folder?.status === "needs-access";
@@ -104,9 +106,17 @@ export function ThreadView({
   }
 
   const hasActivity = (thread.activity?.length ?? 0) > 0;
-  const visibleMessages = hasActivity
-    ? thread.messages.filter((message) => message.role !== "system")
-    : thread.messages;
+  const hiddenMessageIds = new Set<string>();
+
+  if (thread.source === "live" && thread.liveRuntime?.focusedRunId) {
+    hiddenMessageIds.add(`${thread.liveRuntime.focusedRunId}-user`);
+  }
+
+  const filteredMessages = thread.messages.filter((message) => !hiddenMessageIds.has(message.id));
+  const showLiveRuntimeStage = thread.source === "live" && Boolean(thread.liveRuntime?.focusedRun);
+  const visibleMessages = hasActivity || showLiveRuntimeStage
+    ? filteredMessages.filter((message) => message.role !== "system")
+    : filteredMessages;
   const userMessages = visibleMessages.filter((message) => message.role === "user");
   const responseMessages = visibleMessages.filter((message) => message.role !== "user");
 
@@ -123,15 +133,15 @@ export function ThreadView({
       <div className="thread-view__stream">
         <AttachmentPreviewList attachments={thread.attachments} />
 
+        {showLiveRuntimeStage ? (
+          <LiveRuntimeStage thread={thread} onRequestSteer={onRequestSteer} />
+        ) : null}
+
         {userMessages.map((message) => (
           <ThreadMessageCard key={message.id} message={message} />
         ))}
 
-        {hasActivity || thread.source === "live" ? (
-          <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
-        ) : null}
-
-        {!hasActivity
+        {!hasActivity && !showLiveRuntimeStage
           ? thread.progress.map((event) => (
               <div key={event.id} className={`event-row event-row--${event.tone}`}>
                 <strong>{event.label}</strong>

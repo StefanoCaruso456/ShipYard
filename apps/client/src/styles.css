@@ -496,6 +496,194 @@ a {
   gap: 0.9rem;
 }
 
+.live-runtime-stage {
+  display: grid;
+  gap: 1rem;
+}
+
+.live-runtime-stage__active,
+.steer-queue,
+.composer__steer {
+  border-radius: 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+    #1d1d1d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 18px 36px rgba(0, 0, 0, 0.2);
+}
+
+.live-runtime-stage__active,
+.steer-queue {
+  padding: 1rem 1.05rem;
+}
+
+.live-runtime-stage__eyebrow,
+.live-runtime-stage__title-row,
+.live-runtime-stage__meta,
+.steer-queue__header,
+.steer-queue__item-head,
+.steer-queue__meta,
+.composer__steer {
+  display: flex;
+  align-items: center;
+}
+
+.live-runtime-stage__eyebrow,
+.live-runtime-stage__meta,
+.steer-queue__meta {
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.live-runtime-stage__eyebrow,
+.live-runtime-stage__meta,
+.steer-queue__header span,
+.steer-queue__item-head span,
+.steer-queue__meta span,
+.composer__steer-copy p {
+  color: #979792;
+  font-size: 0.8rem;
+}
+
+.live-runtime-stage__badge,
+.steer-queue__badge,
+.composer__steer-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.52rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ecece7;
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
+.live-runtime-stage__title-row,
+.steer-queue__header {
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+
+.live-runtime-stage__title-copy,
+.steer-queue__header div,
+.composer__steer-copy {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.live-runtime-stage__title-copy strong,
+.steer-queue__header strong,
+.composer__steer-copy strong {
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.live-runtime-stage__title-copy p,
+.steer-queue__empty,
+.steer-queue__item p,
+.composer__steer-copy p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.live-runtime-stage__title-copy p,
+.steer-queue__empty,
+.steer-queue__item p {
+  color: #b3b3ad;
+}
+
+.live-runtime-stage__steer-button,
+.steer-queue__action {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #ecece7;
+  padding: 0.52rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 620;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.live-runtime-stage__steer-button:hover,
+.steer-queue__action:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.live-runtime-stage__prompt {
+  margin: 0.95rem 0 0;
+  color: #efefe9;
+  font-size: 1rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.live-runtime-stage__meta {
+  margin-top: 0.9rem;
+}
+
+.live-runtime-stage__meta span,
+.steer-queue__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.46rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.steer-queue {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.steer-queue__list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.steer-queue__item {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.steer-queue__item--sending {
+  border-color: rgba(101, 134, 173, 0.3);
+}
+
+.steer-queue__item--queued {
+  border-color: rgba(176, 143, 80, 0.22);
+}
+
+.steer-queue__item-head,
+.steer-queue__label-row {
+  gap: 0.6rem;
+}
+
+.steer-queue__item-head {
+  justify-content: space-between;
+}
+
+.steer-queue__label-row {
+  min-width: 0;
+}
+
+.steer-queue__label-row strong {
+  font-size: 0.88rem;
+  font-weight: 620;
+}
+
 .event-row,
 .message,
 .agent-placeholder,
@@ -1105,6 +1293,12 @@ a {
   padding: 0.85rem 1.2rem 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(23, 23, 23, 0.98);
+}
+
+.composer__steer {
+  gap: 0.95rem;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
 }
 
 .composer__attachments {

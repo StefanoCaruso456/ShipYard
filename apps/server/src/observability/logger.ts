@@ -243,15 +243,16 @@ function summarizeRunTrace(
   rootSpanId: string | null
 ): TraceRunSummary {
   const rootSpan = rootSpanId ? spans.find((span) => span.id === rootSpanId) ?? null : null;
+  const modelSpans = spans.filter((span) => span.spanType === "model");
   const toolSpans = spans.filter((span) => span.spanType === "tool");
   const validationSpans = spans.filter((span) => span.spanType === "validation");
   const rollbackSpans = spans.filter((span) => span.spanType === "rollback");
-  const selectedPaths = uniqueStrings(
-    spans.flatMap((span) => collectPaths(span.metadata.selectedFiles, "path"))
+  const contextSpans = spans.filter((span) => span.spanType === "context");
+  const fileSelections = dedupeFileSelections(
+    spans.flatMap((span) => collectFileSelectionEntries(span.metadata.selectedFiles))
   );
-  const changedPaths = uniqueStrings(
-    spans.flatMap((span) => collectMetadataStringArray(span.metadata.changedFiles))
-  );
+  const selectedPaths = uniqueStrings(fileSelections.map((entry) => entry.path));
+  const changedPaths = uniqueStrings(spans.flatMap((span) => collectChangedPaths(span)));
   const validationChecks = uniqueStrings(
     validationSpans.flatMap((span) => collectMetadataStringArray(span.metadata.checks))
   );
@@ -260,16 +261,25 @@ function summarizeRunTrace(
   const totalTokens = readMetadataNumber(rootSpan?.metadata.totalTokens);
   const providerLatencyMs = readMetadataNumber(rootSpan?.metadata.providerLatencyMs);
   const estimatedCostUsd = readMetadataNumber(rootSpan?.metadata.estimatedCostUsd);
+  const toolSummary = summarizeToolSpans(toolSpans);
+  const modelSummary = summarizeModelSpans(modelSpans, rootSpan);
+  const contextSummary = summarizeContextSpans(contextSpans);
+  const retrySummary = summarizeRetryEvents(rootSpan);
+  const rollbackSummary = summarizeRollbackEvents(rootSpan, rollbackSpans);
+  const validationFailureSpans = validationSpans.filter((span) => span.status === "failed");
+  const validationSuccessSpans = validationSpans.filter((span) => span.status === "completed");
+  const lastValidationFailure =
+    validationFailureSpans
+      .slice()
+      .sort((left, right) => (right.endedAt ?? right.startedAt).localeCompare(left.endedAt ?? left.startedAt))[0] ??
+    null;
 
   return {
     status: rootSpan?.status ?? null,
     totalDurationMs: rootSpan?.durationMs ?? null,
     queueDelayMs: readMetadataNumber(rootSpan?.metadata.queueDelayMs),
     roleFlow: readMetadataString(rootSpan?.metadata.roleFlow),
-    model: {
-      provider: readMetadataString(rootSpan?.metadata.provider),
-      modelId: readMetadataString(rootSpan?.metadata.modelId)
-    },
+    model: modelSummary,
     usage: {
       inputTokens,
       outputTokens,
@@ -282,31 +292,49 @@ function summarizeRunTrace(
       selectedCount: selectedPaths.length,
       selectedPaths,
       changedCount: changedPaths.length,
-      changedPaths
+      changedPaths,
+      selectionSources: summarizeBuckets(
+        fileSelections
+          .map((entry) => entry.source)
+          .filter((source): source is string => Boolean(source))
+      ).map((entry) => entry.value),
+      selectionReasons: summarizeBuckets(
+        fileSelections
+          .map((entry) => entry.reason)
+          .filter((reason): reason is string => Boolean(reason))
+      ).map((entry) => entry.value),
+      selectedBySource: summarizeBuckets(
+        fileSelections
+          .map((entry) => entry.source)
+          .filter((source): source is string => Boolean(source))
+      ).map((entry) => ({
+        source: entry.value,
+        count: entry.count
+      })),
+      selectedByReason: summarizeBuckets(
+        fileSelections
+          .map((entry) => entry.reason)
+          .filter((reason): reason is string => Boolean(reason))
+      ).map((entry) => ({
+        reason: entry.value,
+        count: entry.count
+      }))
     },
-    tools: {
-      count: toolSpans.length,
-      names: uniqueStrings(
-        toolSpans
-          .map((span) => readMetadataString(span.metadata.toolName))
-          .filter((name): name is string => Boolean(name))
-      )
-    },
+    tools: toolSummary,
     validation: {
       status: readMetadataString(rootSpan?.metadata.validationStatus),
       checks: validationChecks,
-      failureCount: validationSpans.filter((span) => span.status === "failed").length
+      successCount: validationSuccessSpans.length,
+      failureCount: validationFailureSpans.length,
+      lastFailureMessage: lastValidationFailure?.error ?? lastValidationFailure?.outputSummary ?? null
     },
-    retries: {
-      count: readMetadataNumber(rootSpan?.metadata.retryCount) ?? 0
-    },
-    rollbacks: {
-      count: rollbackSpans.length
-    },
+    retries: retrySummary,
+    rollbacks: rollbackSummary,
     attachments: {
       count: readMetadataNumber(rootSpan?.metadata.attachmentCount) ?? 0,
       kinds: collectMetadataStringArray(rootSpan?.metadata.attachmentKinds)
     },
+    context: contextSummary,
     orchestration: readOrchestrationSummary(rootSpan?.metadata),
     phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata)
   };
@@ -340,6 +368,464 @@ function collectPaths(value: unknown, key: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function collectChangedPaths(span: MutableTraceSpanSnapshot) {
+  const explicitPaths = collectMetadataStringArray(span.metadata.changedFiles);
+  const spanPath = readMetadataString(span.metadata.path);
+  const category = readMetadataString(span.metadata.toolCategory);
+  const changedPaths =
+    category === "mutation" && spanPath
+      ? [...explicitPaths, spanPath]
+      : explicitPaths;
+
+  return uniqueStrings(changedPaths);
+}
+
+function collectFileSelectionEntries(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as Array<{
+      path: string;
+      source: string | null;
+      reason: string | null;
+    }>;
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const record = entry as Record<string, unknown>;
+      const path = readMetadataString(record.path);
+
+      if (!path) {
+        return null;
+      }
+
+      return {
+        path,
+        source: readMetadataString(record.source),
+        reason: readMetadataString(record.reason)
+      };
+    })
+    .filter(
+      (
+        entry
+      ): entry is {
+        path: string;
+        source: string | null;
+        reason: string | null;
+      } => entry !== null
+    );
+}
+
+function dedupeFileSelections(
+  entries: Array<{
+    path: string;
+    source: string | null;
+    reason: string | null;
+  }>
+) {
+  const seen = new Set<string>();
+  const deduped: typeof entries = [];
+
+  for (const entry of entries) {
+    const key = `${entry.path}::${entry.source ?? ""}::${entry.reason ?? ""}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(entry);
+  }
+
+  return deduped;
+}
+
+function summarizeBuckets(values: string[]) {
+  const counts = new Map<string, number>();
+
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([value, count]) => ({
+      value,
+      count
+    }))
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
+}
+
+function summarizeModelSpans(
+  modelSpans: MutableTraceSpanSnapshot[],
+  rootSpan: MutableTraceSpanSnapshot | null
+): TraceRunSummary["model"] {
+  const modelIndex = new Map<
+    string,
+    {
+      provider: string | null;
+      modelId: string | null;
+      callCount: number;
+      inputTokens: number[];
+      outputTokens: number[];
+      totalTokens: number[];
+      latencies: number[];
+      firstTokenLatencies: number[];
+      estimatedCosts: number[];
+      estimatedCostStatus: string | null;
+    }
+  >();
+
+  for (const span of modelSpans) {
+    const provider = readMetadataString(span.metadata.provider);
+    const modelId = readMetadataString(span.metadata.modelId);
+    const key = `${provider ?? "unknown"}::${modelId ?? "unknown"}`;
+    const rollup = modelIndex.get(key) ?? {
+      provider,
+      modelId,
+      callCount: 0,
+      inputTokens: [],
+      outputTokens: [],
+      totalTokens: [],
+      latencies: [],
+      firstTokenLatencies: [],
+      estimatedCosts: [],
+      estimatedCostStatus: readMetadataString(span.metadata.estimatedCostStatus)
+    };
+
+    rollup.callCount += 1;
+    pushFiniteNumber(rollup.inputTokens, readMetadataNumber(span.metadata.inputTokens));
+    pushFiniteNumber(rollup.outputTokens, readMetadataNumber(span.metadata.outputTokens));
+    pushFiniteNumber(rollup.totalTokens, readMetadataNumber(span.metadata.totalTokens));
+    pushFiniteNumber(
+      rollup.latencies,
+      readMetadataNumber(span.metadata.providerLatencyMs) ?? span.durationMs
+    );
+    pushFiniteNumber(
+      rollup.firstTokenLatencies,
+      readMetadataNumber(span.metadata.firstTokenLatencyMs)
+    );
+    pushFiniteNumber(
+      rollup.estimatedCosts,
+      readMetadataNumber(span.metadata.estimatedCostUsd)
+    );
+    rollup.estimatedCostStatus =
+      readMetadataString(span.metadata.estimatedCostStatus) ?? rollup.estimatedCostStatus;
+
+    modelIndex.set(key, rollup);
+  }
+
+  const models = [...modelIndex.values()]
+    .map((rollup) => ({
+      provider: rollup.provider,
+      modelId: rollup.modelId,
+      callCount: rollup.callCount,
+      inputTokens: sumFiniteNumbers(rollup.inputTokens),
+      outputTokens: sumFiniteNumbers(rollup.outputTokens),
+      totalTokens: sumFiniteNumbers(rollup.totalTokens),
+      totalLatencyMs: sumFiniteNumbers(rollup.latencies),
+      maxLatencyMs: maxFiniteNumbers(rollup.latencies),
+      firstTokenLatencyMs: minFiniteNumbers(rollup.firstTokenLatencies),
+      estimatedCostUsd: sumFiniteNumbers(rollup.estimatedCosts),
+      estimatedCostStatus: rollup.estimatedCostStatus
+    }))
+    .sort(
+      (left, right) =>
+        right.callCount - left.callCount ||
+        (left.modelId ?? "").localeCompare(right.modelId ?? "")
+    );
+
+  const latencies = models
+    .map((model) => model.totalLatencyMs)
+    .filter((value): value is number => value != null);
+  const firstTokenLatencies = models
+    .map((model) => model.firstTokenLatencyMs)
+    .filter((value): value is number => value != null);
+
+  return {
+    provider: readMetadataString(rootSpan?.metadata.provider) ?? models[0]?.provider ?? null,
+    modelId: readMetadataString(rootSpan?.metadata.modelId) ?? models[0]?.modelId ?? null,
+    callCount: modelSpans.length,
+    totalLatencyMs: sumFiniteNumbers(latencies),
+    maxLatencyMs: maxFiniteNumbers(latencies),
+    firstTokenLatencyMs: minFiniteNumbers(firstTokenLatencies),
+    models
+  };
+}
+
+function summarizeToolSpans(toolSpans: MutableTraceSpanSnapshot[]): TraceRunSummary["tools"] {
+  const toolIndex = new Map<
+    string,
+    {
+      name: string;
+      category: string | null;
+      callCount: number;
+      successCount: number;
+      failureCount: number;
+      latencies: number[];
+      changedPaths: Set<string>;
+      selectedPaths: Set<string>;
+      tags: Set<string>;
+      errorCodes: Set<string>;
+    }
+  >();
+
+  for (const span of toolSpans) {
+    const name = readMetadataString(span.metadata.toolName) ?? normalizeToolSpanName(span.name);
+    const category =
+      readMetadataString(span.metadata.toolCategory) ?? inferToolCategory(name);
+    const rollup = toolIndex.get(name) ?? {
+      name,
+      category,
+      callCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      latencies: [],
+      changedPaths: new Set<string>(),
+      selectedPaths: new Set<string>(),
+      tags: new Set<string>(),
+      errorCodes: new Set<string>()
+    };
+
+    rollup.callCount += 1;
+    if (span.status === "completed") {
+      rollup.successCount += 1;
+    }
+    if (span.status === "failed") {
+      rollup.failureCount += 1;
+    }
+    pushFiniteNumber(rollup.latencies, span.durationMs);
+    for (const changedPath of collectChangedPaths(span)) {
+      rollup.changedPaths.add(changedPath);
+    }
+    for (const selectedPath of collectFileSelectionEntries(span.metadata.selectedFiles).map((entry) => entry.path)) {
+      rollup.selectedPaths.add(selectedPath);
+    }
+    for (const tag of [...span.tags, ...collectMetadataStringArray(span.metadata.toolTags)]) {
+      rollup.tags.add(tag);
+    }
+    const errorCode = readMetadataString(span.metadata.errorCode);
+    if (errorCode) {
+      rollup.errorCodes.add(errorCode);
+    }
+
+    toolIndex.set(name, rollup);
+  }
+
+  const byTool = [...toolIndex.values()]
+    .map((rollup) => ({
+      name: rollup.name,
+      category: rollup.category,
+      callCount: rollup.callCount,
+      successCount: rollup.successCount,
+      failureCount: rollup.failureCount,
+      totalLatencyMs: sumFiniteNumbers(rollup.latencies),
+      maxLatencyMs: maxFiniteNumbers(rollup.latencies),
+      changedPaths: [...rollup.changedPaths].sort(),
+      selectedPaths: [...rollup.selectedPaths].sort(),
+      tags: [...rollup.tags].sort(),
+      errorCodes: [...rollup.errorCodes].sort()
+    }))
+    .sort((left, right) => right.callCount - left.callCount || left.name.localeCompare(right.name));
+
+  const latencies = byTool
+    .map((tool) => tool.totalLatencyMs)
+    .filter((value): value is number => value != null);
+
+  return {
+    count: toolSpans.length,
+    names: byTool.map((tool) => tool.name),
+    categories: uniqueStrings(
+      byTool
+        .map((tool) => tool.category)
+        .filter((category): category is string => Boolean(category))
+    ),
+    successCount: byTool.reduce((total, tool) => total + tool.successCount, 0),
+    failureCount: byTool.reduce((total, tool) => total + tool.failureCount, 0),
+    totalLatencyMs: sumFiniteNumbers(latencies),
+    maxLatencyMs: maxFiniteNumbers(latencies),
+    byTool
+  };
+}
+
+function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceRunSummary["context"] {
+  const roleIndex = new Map<
+    string,
+    {
+      role: string;
+      assemblyCount: number;
+      sectionCount: number;
+      omittedSectionCount: number;
+      promptLength: number | null;
+      selectedPaths: string[];
+      selectedSources: string[];
+      selectedReasons: string[];
+      hasRollingSummary: boolean;
+    }
+  >();
+
+  const sortedContextSpans = contextSpans
+    .slice()
+    .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+
+  for (const span of sortedContextSpans) {
+    const role = readMetadataString(span.metadata.role) ?? span.name.replace(/:context$/, "");
+    const existing = roleIndex.get(role) ?? {
+      role,
+      assemblyCount: 0,
+      sectionCount: 0,
+      omittedSectionCount: 0,
+      promptLength: null,
+      selectedPaths: [],
+      selectedSources: [],
+      selectedReasons: [],
+      hasRollingSummary: false
+    };
+    const fileSelections = collectFileSelectionEntries(span.metadata.selectedFiles);
+
+    existing.assemblyCount += 1;
+    existing.sectionCount = collectMetadataStringArray(span.metadata.sectionIds).length;
+    existing.omittedSectionCount = collectMetadataStringArray(span.metadata.omittedSectionIds).length;
+    existing.promptLength = readMetadataNumber(span.metadata.promptLength);
+    existing.selectedPaths = uniqueStrings(fileSelections.map((entry) => entry.path)).sort();
+    existing.selectedSources = uniqueStrings(
+      fileSelections
+        .map((entry) => entry.source)
+        .filter((source): source is string => Boolean(source))
+    ).sort();
+    existing.selectedReasons = uniqueStrings(
+      fileSelections
+        .map((entry) => entry.reason)
+        .filter((reason): reason is string => Boolean(reason))
+    ).sort();
+    existing.hasRollingSummary = readMetadataString(span.metadata.rollingSummarySource) != null;
+
+    roleIndex.set(role, existing);
+  }
+
+  const roles = [...roleIndex.values()]
+    .map((role) => ({
+      role: role.role,
+      assemblyCount: role.assemblyCount,
+      sectionCount: role.sectionCount,
+      omittedSectionCount: role.omittedSectionCount,
+      promptLength: role.promptLength,
+      selectedFileCount: role.selectedPaths.length,
+      selectedPaths: role.selectedPaths,
+      selectedSources: role.selectedSources,
+      selectedReasons: role.selectedReasons,
+      hasRollingSummary: role.hasRollingSummary
+    }))
+    .sort((left, right) => left.role.localeCompare(right.role));
+
+  const promptLengths = roles
+    .map((role) => role.promptLength)
+    .filter((value): value is number => value != null);
+
+  return {
+    roleCount: roles.length,
+    totalAssemblies: contextSpans.length,
+    totalSectionCount: roles.reduce((total, role) => total + role.sectionCount, 0),
+    totalPromptLength: sumFiniteNumbers(promptLengths),
+    roles
+  };
+}
+
+function summarizeRetryEvents(rootSpan: MutableTraceSpanSnapshot | null): TraceRunSummary["retries"] {
+  const retryEvents = rootSpan?.events.filter((event) => event.name === "retry_scheduled") ?? [];
+
+  return {
+    count: readMetadataNumber(rootSpan?.metadata.retryCount) ?? retryEvents.length,
+    reasons: retryEvents
+      .map((event) => event.message?.trim() ?? null)
+      .filter((reason): reason is string => Boolean(reason)),
+    lastReason: retryEvents[retryEvents.length - 1]?.message?.trim() ?? null
+  };
+}
+
+function summarizeRollbackEvents(
+  rootSpan: MutableTraceSpanSnapshot | null,
+  rollbackSpans: MutableTraceSpanSnapshot[]
+): TraceRunSummary["rollbacks"] {
+  const rollbackEvents =
+    rootSpan?.events.filter(
+      (event) => event.name === "rollback_succeeded" || event.name === "rollback_failed"
+    ) ?? [];
+  const eventPaths = rollbackEvents
+    .map((event) => readMetadataString(event.metadata?.path))
+    .filter((path): path is string => Boolean(path));
+  const spanPaths = rollbackSpans
+    .map((span) => readMetadataString(span.metadata.path))
+    .filter((path): path is string => Boolean(path));
+  const affectedPaths = uniqueStrings([...eventPaths, ...spanPaths]).sort();
+  const eventSuccessCount = rollbackEvents.filter((event) => event.name === "rollback_succeeded").length;
+  const eventFailureCount = rollbackEvents.filter((event) => event.name === "rollback_failed").length;
+
+  return {
+    count: rollbackEvents.length || rollbackSpans.length,
+    successCount: eventSuccessCount || rollbackSpans.filter((span) => span.status === "completed").length,
+    failureCount: eventFailureCount || rollbackSpans.filter((span) => span.status === "failed").length,
+    affectedPaths
+  };
+}
+
+function normalizeToolSpanName(name: string) {
+  return name.startsWith("tool:") ? name.slice("tool:".length) : name;
+}
+
+function inferToolCategory(toolName: string) {
+  if (
+    toolName === "list_files" ||
+    toolName === "search_repo" ||
+    toolName === "read_file" ||
+    toolName === "read_file_range"
+  ) {
+    return "inspection";
+  }
+
+  if (
+    toolName === "edit_file_region" ||
+    toolName === "create_file" ||
+    toolName === "delete_file"
+  ) {
+    return "mutation";
+  }
+
+  return null;
+}
+
+function pushFiniteNumber(target: number[], value: number | null) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    target.push(value);
+  }
+}
+
+function sumFiniteNumbers(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function maxFiniteNumbers(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return Math.max(...values);
+}
+
+function minFiniteNumbers(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return Math.min(...values);
 }
 
 function readOrchestrationSummary(metadata: TraceMetadata | undefined) {

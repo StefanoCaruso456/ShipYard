@@ -114,6 +114,116 @@ test("persistent runtime marks failures clearly and accepts follow-up tasks", as
   assert.equal(status.totalRuns, 2);
 });
 
+test("persistent runtime keeps staged follow-up runs on the same thread", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const initialRun = await runtimeService.submitTask({
+    instruction: "Plan the next backend task."
+  });
+  const followUpRun = await runtimeService.submitTask({
+    instruction: "Also note whether we are using LangGraph.",
+    threadId: initialRun.threadId,
+    parentRunId: initialRun.id
+  });
+
+  assert.equal(initialRun.threadId, initialRun.id);
+  assert.equal(initialRun.parentRunId, null);
+  assert.equal(followUpRun.threadId, initialRun.threadId);
+  assert.equal(followUpRun.parentRunId, initialRun.id);
+  assert.notEqual(followUpRun.id, initialRun.id);
+
+  const storedFollowUp = runtimeService.getRun(followUpRun.id);
+
+  assert.equal(storedFollowUp?.threadId, initialRun.threadId);
+  assert.equal(storedFollowUp?.parentRunId, initialRun.id);
+});
+
+test("persistent runtime runs active-thread follow-ups before unrelated queued work", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const firstGate = createDeferred<AgentRunResult>();
+  const followUpGate = createDeferred<AgentRunResult>();
+  const unrelatedGate = createDeferred<AgentRunResult>();
+  const startedInstructions: string[] = [];
+
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      const gate =
+        run.instruction === "Continue the current thread next."
+          ? followUpGate
+          : run.instruction === "Handle another thread later."
+            ? unrelatedGate
+            : firstGate;
+
+      return gate.promise.then((result) => ({
+        ...result,
+        skillId: context.instructionRuntime.skill.meta.id,
+        instructionEcho: run.instruction
+      }));
+    }
+  });
+
+  const initialRun = await runtimeService.submitTask({
+    instruction: "Start the main thread."
+  });
+
+  await waitForRunStatus(runtimeService, initialRun.id, "running");
+
+  const unrelatedRun = await runtimeService.submitTask({
+    instruction: "Handle another thread later."
+  });
+  const followUpRun = await runtimeService.submitTask({
+    instruction: "Continue the current thread next.",
+    threadId: initialRun.threadId,
+    parentRunId: initialRun.id
+  });
+
+  assert.equal(runtimeService.getRun(unrelatedRun.id)?.status, "pending");
+  assert.equal(runtimeService.getRun(followUpRun.id)?.status, "pending");
+
+  firstGate.resolve({
+    mode: "placeholder-execution",
+    summary: "initial complete",
+    instructionEcho: "",
+    skillId: "",
+    completedAt: new Date().toISOString()
+  });
+
+  await waitForRunStatus(runtimeService, initialRun.id, "completed");
+  await waitForRunStatus(runtimeService, followUpRun.id, "running");
+  assert.equal(runtimeService.getRun(unrelatedRun.id)?.status, "pending");
+
+  followUpGate.resolve({
+    mode: "placeholder-execution",
+    summary: "follow-up complete",
+    instructionEcho: "",
+    skillId: "",
+    completedAt: new Date().toISOString()
+  });
+
+  await waitForRunStatus(runtimeService, followUpRun.id, "completed");
+  await waitForRunStatus(runtimeService, unrelatedRun.id, "running");
+
+  unrelatedGate.resolve({
+    mode: "placeholder-execution",
+    summary: "unrelated complete",
+    instructionEcho: "",
+    skillId: "",
+    completedAt: new Date().toISOString()
+  });
+
+  await waitForRunStatus(runtimeService, unrelatedRun.id, "completed");
+
+  assert.deepEqual(startedInstructions, [
+    "Start the main thread.",
+    "Continue the current thread next.",
+    "Handle another thread later."
+  ]);
+});
+
 test("persistent runtime retries validation failures once and records rollback events", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const attempts: number[] = [];

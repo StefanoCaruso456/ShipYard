@@ -8,7 +8,7 @@ export async function invokeExecutorAgent(input: {
 }): Promise<AgentResult<ExecutorAgentOutput>> {
   const traceScope = getActiveTraceScope();
   const span = traceScope
-    ? await traceScope.activeSpan.startChild({
+      ? await traceScope.activeSpan.startChild({
         name: "executor",
         spanType: "role",
         inputSummary: input.invocation.input.plannerStep.summary,
@@ -17,7 +17,8 @@ export async function invokeExecutorAgent(input: {
           correlationId: input.invocation.correlationId,
           stepId: input.invocation.stepId,
           toolName: input.invocation.input.plannerStep.requiredTool ?? null
-        }
+        },
+        tags: ["role", "role:executor"]
       })
     : null;
 

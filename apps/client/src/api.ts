@@ -59,6 +59,8 @@ export function fetchRuntimeTrace(taskId: string) {
 export function submitRuntimeTask(input: {
   instruction: string;
   title?: string;
+  threadId?: string;
+  parentRunId?: string | null;
   simulateFailure?: boolean;
   attachments?: ComposerAttachment[];
 }) {
@@ -71,6 +73,14 @@ export function submitRuntimeTask(input: {
 
     if (input.title) {
       formData.append("title", input.title);
+    }
+
+    if (input.threadId) {
+      formData.append("threadId", input.threadId);
+    }
+
+    if (input.parentRunId) {
+      formData.append("parentRunId", input.parentRunId);
     }
 
     if (input.simulateFailure !== undefined) {

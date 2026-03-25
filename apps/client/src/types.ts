@@ -118,6 +118,8 @@ export type AttachmentCard = {
 
 export type RuntimeTask = {
   id: string;
+  threadId: string;
+  parentRunId: string | null;
   title: string | null;
   instruction: string;
   simulateFailure: boolean;
@@ -433,6 +435,13 @@ export type ComposerAttachment = {
   source: "local";
 };
 
+export type RuntimeQueuedFollowUpDraft = {
+  id: string;
+  instruction: string;
+  createdAt: string;
+  attachments: ComposerAttachment[];
+};
+
 export type UtilityTab = "run" | "diff" | "terminal" | "skills" | "automations";
 
 export type WorkspaceThreadStatus =
@@ -459,6 +468,24 @@ export type ProgressEvent = {
   tone: "default" | "info" | "success" | "warning" | "danger";
 };
 
+export type RuntimeThreadFocusedRun = {
+  id: string;
+  instruction: string;
+  status: RuntimeTaskStatus;
+  createdAt: string;
+  startedAt: string | null;
+  attachmentsCount: number;
+};
+
+export type RuntimeThreadQueuedItem = {
+  id: string;
+  instruction: string;
+  createdAt: string;
+  state: "queued" | "sending";
+  attachmentsCount: number;
+  parentRunId: string | null;
+};
+
 export type WorkspaceThread = {
   id: string;
   title: string;
@@ -472,6 +499,16 @@ export type WorkspaceThread = {
   messages: ThreadMessage[];
   progress: ProgressEvent[];
   activity?: AgentActivityItem[];
+  liveRuntime?: {
+    threadId: string;
+    focusedRunId: string | null;
+    latestRunId: string | null;
+    queuedRunIds: string[];
+    runIds: string[];
+    focusedRun: RuntimeThreadFocusedRun | null;
+    queuedFollowUps: RuntimeThreadQueuedItem[];
+    completedRunCount: number;
+  };
 };
 
 export type ThreadGroup = {

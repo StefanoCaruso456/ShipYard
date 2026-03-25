@@ -9,7 +9,7 @@ export async function invokePlannerAgent(input: {
 }): Promise<AgentResult<PlannerStepResult>> {
   const traceScope = getActiveTraceScope();
   const span = traceScope
-    ? await traceScope.activeSpan.startChild({
+      ? await traceScope.activeSpan.startChild({
         name: "planner",
         spanType: "role",
         inputSummary: "Planner agent invocation.",
@@ -17,7 +17,8 @@ export async function invokePlannerAgent(input: {
           role: input.invocation.role,
           correlationId: input.invocation.correlationId,
           iteration: input.invocation.input.iteration
-        }
+        },
+        tags: ["role", "role:planner"]
       })
     : null;
 

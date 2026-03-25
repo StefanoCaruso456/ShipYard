@@ -664,7 +664,8 @@ async function buildRolePayload(
         metadata: {
           role,
           runId: run.id
-        }
+        },
+        tags: ["context", `role:${role}`]
       })
     : null;
 
@@ -691,6 +692,7 @@ async function buildRolePayload(
       sectionIds: payload.sections.map((section) => section.id),
       omittedSectionIds: payload.omittedSections.map((section) => section.id),
       promptLength: payload.prompt.length,
+      rollingSummarySource: run.rollingSummary?.source ?? null,
       selectedFiles: run.context.relevantFiles.map((file) => ({
         path: file.path,
         source: file.source ?? null,

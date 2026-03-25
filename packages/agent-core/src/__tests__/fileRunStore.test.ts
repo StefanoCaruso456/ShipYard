@@ -148,6 +148,8 @@ function createRun(
 ): AgentRunRecord {
   return {
     id: overrides.id,
+    threadId: overrides.threadId ?? overrides.id,
+    parentRunId: overrides.parentRunId ?? null,
     title: overrides.title ?? "Stored run",
     instruction: overrides.instruction ?? `${overrides.id} instruction`,
     simulateFailure: overrides.simulateFailure ?? false,

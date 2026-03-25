@@ -23,6 +23,7 @@ type TaskWorkspaceProps = {
   composerMode: ComposerMode;
   composerValue: string;
   composerAttachments: ComposerAttachment[];
+  composerFocusRequestKey: number;
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
   transcribingAudio: boolean;
@@ -34,6 +35,7 @@ type TaskWorkspaceProps = {
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRequestSteer: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -47,6 +49,7 @@ export function TaskWorkspace({
   composerMode,
   composerValue,
   composerAttachments,
+  composerFocusRequestKey,
   feedback,
   submitting,
   transcribingAudio,
@@ -58,6 +61,7 @@ export function TaskWorkspace({
   onVoiceCaptureError,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRequestSteer,
   onSubmit
 }: TaskWorkspaceProps) {
   const runtimeState = backendConnected
@@ -66,6 +70,17 @@ export function TaskWorkspace({
       : "idle"
     : "error";
   const suggestionCards = buildSuggestions(project);
+  const steerMode =
+    project?.kind === "live" &&
+    thread?.source === "live" &&
+    thread.liveRuntime?.focusedRun &&
+    (thread.status === "running" || thread.status === "pending")
+      ? {
+          status: thread.status,
+          queuedCount: thread.liveRuntime.queuedFollowUps.length,
+          threadTitle: thread.title
+        }
+      : null;
 
   return (
     <section className="workspace">
@@ -107,6 +122,7 @@ export function TaskWorkspace({
             suggestions={suggestionCards}
             onSelectSuggestion={onSelectSuggestion}
             onReconnectProjectFolder={onReconnectProjectFolder}
+            onRequestSteer={onRequestSteer}
           />
         )}
       </div>
@@ -116,6 +132,8 @@ export function TaskWorkspace({
         composerMode={composerMode}
         composerValue={composerValue}
         attachments={composerAttachments}
+        steerMode={steerMode}
+        focusRequestKey={composerFocusRequestKey}
         feedback={feedback}
         submitting={submitting}
         transcribingAudio={transcribingAudio}
