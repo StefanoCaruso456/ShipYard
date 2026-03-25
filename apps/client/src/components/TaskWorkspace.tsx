@@ -77,7 +77,9 @@ export function TaskWorkspace({
       ? {
           status: thread.status,
           queuedCount: thread.liveRuntime.queuedFollowUps.length,
-          threadTitle: thread.title
+          threadTitle: thread.title,
+          activePrompt: thread.liveRuntime.focusedRun.instruction,
+          queuedFollowUps: thread.liveRuntime.queuedFollowUps
         }
       : null;
 
