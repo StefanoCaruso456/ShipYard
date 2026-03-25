@@ -116,6 +116,20 @@ export type AttachmentCard = {
   source: "local" | "runtime";
 };
 
+export type RuntimeTaskProject = {
+  id: string;
+  name: string | null;
+  kind: WorkspaceProjectKind;
+  environment: string | null;
+  description: string | null;
+  folder: {
+    name: string | null;
+    displayPath: string | null;
+    status: WorkspaceProjectFolderStatus | null;
+    provider: WorkspaceProjectFolder["provider"] | null;
+  } | null;
+};
+
 export type RuntimeTask = {
   id: string;
   threadId: string;
@@ -125,6 +139,7 @@ export type RuntimeTask = {
   simulateFailure: boolean;
   toolRequest?: unknown;
   attachments: RuntimeAttachment[];
+  project: RuntimeTaskProject | null;
   context?: {
     objective: string | null;
     constraints: string[];

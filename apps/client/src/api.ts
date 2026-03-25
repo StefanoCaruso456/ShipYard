@@ -7,7 +7,8 @@ import type {
   RuntimeStatusResponse,
   RuntimeTraceResponse,
   RuntimeTaskListResponse,
-  RuntimeTaskResponse
+  RuntimeTaskResponse,
+  WorkspaceProject
 } from "./types";
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, "");
@@ -63,8 +64,10 @@ export function submitRuntimeTask(input: {
   parentRunId?: string | null;
   simulateFailure?: boolean;
   attachments?: ComposerAttachment[];
+  project?: WorkspaceProject;
 }) {
   const attachments = input.attachments ?? [];
+  const project = input.project ? serializeRuntimeProject(input.project) : undefined;
 
   if (attachments.length > 0) {
     const formData = new FormData();
@@ -87,6 +90,10 @@ export function submitRuntimeTask(input: {
       formData.append("simulateFailure", String(input.simulateFailure));
     }
 
+    if (project) {
+      formData.append("project", JSON.stringify(project));
+    }
+
     for (const attachment of attachments) {
       formData.append("attachments", attachment.file, attachment.name);
     }
@@ -99,7 +106,10 @@ export function submitRuntimeTask(input: {
 
   return requestJson<RuntimeTaskResponse>("/api/runtime/tasks", {
     method: "POST",
-    body: JSON.stringify(input)
+    body: JSON.stringify({
+      ...input,
+      project
+    })
   });
 }
 
@@ -124,4 +134,22 @@ export function transcribeRuntimeAudio(input: {
     method: "POST",
     body: formData
   });
+}
+
+function serializeRuntimeProject(project: WorkspaceProject) {
+  return {
+    id: project.id,
+    name: project.name,
+    kind: project.kind,
+    environment: project.environment,
+    description: project.description,
+    folder: project.folder
+      ? {
+          name: project.folder.name,
+          displayPath: project.folder.displayPath,
+          status: project.folder.status,
+          provider: project.folder.provider
+        }
+      : null
+  };
 }

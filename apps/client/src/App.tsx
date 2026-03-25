@@ -51,6 +51,8 @@ import type {
   WorkspaceThread
 } from "./types";
 
+const defaultRuntimeProjectId = workspaceProjects[0]?.id ?? "shipyard-runtime";
+
 type Feedback = {
   tone: "success" | "danger" | "info";
   text: string;
@@ -278,12 +280,13 @@ function App() {
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
   const activeRuntimeTask =
-    activeProject?.kind === "live" && activeThread?.source === "live"
+    activeThread?.source === "live"
       ? runtimeTasks.find(
           (candidate) => candidate.id === activeThread.liveRuntime?.focusedRunId
-        ) ?? null
-      : activeProject?.kind === "live" && activeThreadId
-        ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
+        ) ??
+        (activeThreadId
+          ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
+          : null)
       : null;
 
   useEffect(() => {
@@ -484,9 +487,9 @@ function App() {
     }
 
     const submittedAttachments = composerAttachments;
-    const canSendToLiveRuntime = activeProject.kind === "live" && backendConnected;
+    const canSendToRuntime = backendConnected;
     const isLiveThreadFollowUp =
-      canSendToLiveRuntime &&
+      canSendToRuntime &&
       activeThread?.source === "live" &&
       Boolean(activeThread.liveRuntime?.threadId);
 
@@ -514,7 +517,8 @@ function App() {
           title: activeThread.title,
           threadId,
           parentRunId: activeThread.liveRuntime.latestRunId,
-          attachments: submittedAttachments
+          attachments: submittedAttachments,
+          project: activeProject
         });
 
         setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
@@ -564,7 +568,7 @@ function App() {
       threadId: draftId,
       instruction,
       attachments: submittedAttachments,
-      backendConnected: canSendToLiveRuntime
+      backendConnected: canSendToRuntime
     });
 
     setDraftThreadsByProject((current) => ({
@@ -583,13 +587,10 @@ function App() {
     setComposerAttachments([]);
     setComposerMode("text");
 
-    if (!canSendToLiveRuntime) {
+    if (!canSendToRuntime) {
       setSubmissionFeedback({
         tone: "info",
-        text:
-          activeProject.kind === "live"
-            ? "Saved locally. Start the runtime to send live tasks."
-            : `Saved locally inside ${activeProject.name}.`
+        text: "Saved locally. Start the runtime to send this thread live."
       });
       return;
     }
@@ -601,7 +602,8 @@ function App() {
       const response = await submitRuntimeTask({
         instruction,
         title: optimisticThread.title,
-        attachments: submittedAttachments
+        attachments: submittedAttachments,
+        project: activeProject
       });
 
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
@@ -896,21 +898,21 @@ function buildThreadsForProject(
   runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
   pendingLiveFollowUpsByThreadId: Record<string, RuntimeQueuedFollowUpDraft[]>
 ) {
-  if (project.kind === "live") {
-    return [
-      ...draftThreads,
-      ...groupRuntimeTasksByThread(runtimeTasks).map((threadRuns) =>
-        buildRuntimeThread(
-          threadRuns,
-          runtimeAttachmentPreviewsByTaskId,
-          runtimeTracesByTaskId,
-          pendingLiveFollowUpsByThreadId[threadRuns[0]?.threadId ?? ""] ?? []
-        )
-      )
-    ];
-  }
+  const projectRuntimeTasks = runtimeTasks.filter(
+    (task) => getRuntimeTaskProjectId(task) === project.id
+  );
 
-  return draftThreads;
+  return [
+    ...draftThreads,
+    ...groupRuntimeTasksByThread(projectRuntimeTasks).map((threadRuns) =>
+      buildRuntimeThread(
+        threadRuns,
+        runtimeAttachmentPreviewsByTaskId,
+        runtimeTracesByTaskId,
+        pendingLiveFollowUpsByThreadId[threadRuns[0]?.threadId ?? ""] ?? []
+      )
+    )
+  ];
 }
 
 function createDraftThread(projectName: string): WorkspaceThread {
@@ -944,7 +946,7 @@ function buildDraftSubmissionThread({
 }): WorkspaceThread {
   const timestamp = formatShellTimestamp(new Date());
   const statusMessage = backendConnected
-    ? "Request queued locally and sent to the runtime service."
+    ? "Accepted by the runtime service and waiting for execution."
     : "Saved in the local shell. Connect the runtime to run this thread live.";
   const nextThread = existingThread ?? {
     id: threadId,
@@ -1077,6 +1079,10 @@ function removeQueuedFollowUpDraft(
 
 function upsertRuntimeTask(currentTasks: RuntimeTask[], task: RuntimeTask) {
   return [task, ...currentTasks.filter((candidate) => candidate.id !== task.id)];
+}
+
+function getRuntimeTaskProjectId(task: RuntimeTask) {
+  return task.project?.id?.trim() || defaultRuntimeProjectId;
 }
 
 function groupRuntimeTasksByThread(runtimeTasks: RuntimeTask[]) {

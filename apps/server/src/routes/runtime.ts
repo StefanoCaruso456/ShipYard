@@ -330,6 +330,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     parentRunId?: unknown;
     simulateFailure?: unknown;
     toolRequest?: unknown;
+    project?: unknown;
     context?: unknown;
     phaseExecution?: unknown;
   };
@@ -376,6 +377,12 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     return toolRequest;
   }
 
+  const project = parseProjectInput(parseUnknownJson(body.project));
+
+  if ("error" in project) {
+    return project;
+  }
+
   const context = parseRunContextInput(parseUnknownJson(body.context));
 
   if ("error" in context) {
@@ -405,6 +412,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
           }))
         : []
     ),
+    project: project.value,
     context: context.value,
     phaseExecution: phaseExecution.value
   };
@@ -420,6 +428,7 @@ function serializeRun(run: AgentRunRecord) {
     simulateFailure: run.simulateFailure,
     toolRequest: run.toolRequest,
     attachments: run.attachments,
+    project: run.project ?? null,
     context: run.context,
     status: run.status,
     createdAt: run.createdAt,
@@ -439,6 +448,121 @@ function serializeRun(run: AgentRunRecord) {
 
 function parseRole(value: string): AgentRole | null {
   return value === "planner" || value === "executor" || value === "verifier" ? value : null;
+}
+
+function parseProjectInput(
+  value: unknown
+): { value: SubmitTaskInput["project"] } | { error: string } {
+  if (value === undefined || value === null || value === "") {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      error: "project must be an object when provided."
+    };
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  if (typeof candidate.id !== "string" || !candidate.id.trim()) {
+    return {
+      error: "project.id must be a non-empty string when provided."
+    };
+  }
+
+  if (candidate.kind !== undefined && candidate.kind !== "live" && candidate.kind !== "local") {
+    return {
+      error: "project.kind must be live or local when provided."
+    };
+  }
+
+  const folderInput = candidate.folder;
+
+  if (
+    folderInput !== undefined &&
+    folderInput !== null &&
+    (typeof folderInput !== "object" || Array.isArray(folderInput))
+  ) {
+    return {
+      error: "project.folder must be an object when provided."
+    };
+  }
+
+  const folder = folderInput
+    ? (() => {
+        const folderCandidate = folderInput as Record<string, unknown>;
+
+        if (
+          folderCandidate.status !== undefined &&
+          folderCandidate.status !== null &&
+          folderCandidate.status !== "connected" &&
+          folderCandidate.status !== "needs-access"
+        ) {
+          return {
+            error: "project.folder.status must be connected or needs-access when provided."
+          } as const;
+        }
+
+        if (
+          folderCandidate.provider !== undefined &&
+          folderCandidate.provider !== null &&
+          folderCandidate.provider !== "runtime" &&
+          folderCandidate.provider !== "browser-file-system-access"
+        ) {
+          return {
+            error:
+              "project.folder.provider must be runtime or browser-file-system-access when provided."
+          } as const;
+        }
+
+        return {
+          value: {
+            name:
+              typeof folderCandidate.name === "string" && folderCandidate.name.trim()
+                ? folderCandidate.name.trim()
+                : null,
+            displayPath:
+              typeof folderCandidate.displayPath === "string" && folderCandidate.displayPath.trim()
+                ? folderCandidate.displayPath.trim()
+                : null,
+            status:
+              folderCandidate.status === "connected" || folderCandidate.status === "needs-access"
+                ? folderCandidate.status
+                : null,
+            provider:
+              folderCandidate.provider === "runtime" ||
+              folderCandidate.provider === "browser-file-system-access"
+                ? folderCandidate.provider
+                : null
+          }
+        } as const;
+      })()
+    : { value: null };
+
+  if ("error" in folder) {
+    return folder;
+  }
+
+  return {
+    value: {
+      id: candidate.id.trim(),
+      name:
+        typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : null,
+      kind: candidate.kind === "local" ? "local" : "live",
+      environment:
+        typeof candidate.environment === "string" && candidate.environment.trim()
+          ? candidate.environment.trim()
+          : null,
+      description:
+        typeof candidate.description === "string" && candidate.description.trim()
+          ? candidate.description.trim()
+          : null,
+      folder: folder.value
+    }
+  };
 }
 
 function parseUnknownJson(value: unknown) {
