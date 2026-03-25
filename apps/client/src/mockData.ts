@@ -1,4 +1,5 @@
 import { toAttachmentCard } from "./attachments";
+import { createRuntimeProject } from "./projects";
 import type {
   AgentActivityItem,
   AutomationItem,
@@ -35,33 +36,7 @@ export const emptyProjectBrief: ProjectPayload = {
 };
 
 export const workspaceProjects: WorkspaceProject[] = [
-  {
-    id: "shipyard-runtime",
-    name: "Shipyard Runtime",
-    code: "SR",
-    environment: "Live backend",
-    description: "Connected to the persistent runtime service and run registry.",
-    kind: "live",
-    region: "Railway / Vercel"
-  },
-  {
-    id: "agent-lab",
-    name: "Agent Lab",
-    code: "AL",
-    environment: "Preview",
-    description: "Sandbox threads for future editing and recovery workflows.",
-    kind: "preview",
-    region: "Local simulation"
-  },
-  {
-    id: "ship-ops",
-    name: "Ship Ops",
-    code: "SO",
-    environment: "Preview",
-    description: "Operational playbooks, automation drafts, and runbook experiments.",
-    kind: "preview",
-    region: "Design mode"
-  }
+  createRuntimeProject()
 ];
 
 export const sidebarNavigation: SidebarNavItem[] = [
@@ -1379,6 +1354,23 @@ function deriveRoleDetail(span: RuntimeTraceSpan) {
 function parseRoleFromSpanName(name: string) {
   const [role] = name.split(":", 1);
   return role || name;
+}
+
+function deriveThreadTitle(instruction: string) {
+  const trimmed = instruction.trim();
+
+  if (!trimmed) {
+    return "New thread";
+  }
+
+  const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed;
+  const normalized = firstLine.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= 46) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 43).trimEnd()}...`;
 }
 
 function trimTracePrefix(name: string) {

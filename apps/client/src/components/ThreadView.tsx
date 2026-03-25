@@ -15,6 +15,7 @@ type ThreadViewProps = {
   runtimeState: "running" | "idle" | "error";
   suggestions: SuggestionCard[];
   onSelectSuggestion: (prompt: string) => void;
+  onReconnectProjectFolder: (projectId: string) => Promise<void>;
   onRequestSteer: () => void;
 };
 
@@ -24,9 +25,17 @@ export function ThreadView({
   runtimeState,
   suggestions,
   onSelectSuggestion,
+  onReconnectProjectFolder,
   onRequestSteer
 }: ThreadViewProps) {
   const isEmpty = !thread || thread.messages.length === 0;
+  const projectNeedsAccess = project?.kind === "local" && project.folder?.status === "needs-access";
+  const emptyRuntimeLabel =
+    project?.kind === "local"
+      ? projectNeedsAccess
+        ? "Local folder access needed"
+        : "Local folder connected"
+      : `Runtime ${runtimeState}`;
   const threadStatusTone = thread?.status === "failed" ? "error" : thread?.status ?? runtimeState;
   const statusLabel = thread
     ? thread.status === "pending"
@@ -44,23 +53,53 @@ export function ThreadView({
     return (
       <section className="thread-view thread-view--empty">
         <div className="thread-view__empty">
-          <p className="thread-view__runtime">Runtime {runtimeState}</p>
-          <h3>Let&apos;s build {project?.name ?? "Shipyard"}</h3>
-          <p>Start with a concrete task, repo question, or implementation request.</p>
+          <p className="thread-view__runtime">{emptyRuntimeLabel}</p>
+          <h3>
+            {projectNeedsAccess
+              ? `Reconnect ${project?.name ?? "project"}`
+              : `Let's build ${project?.name ?? "Shipyard"}`}
+          </h3>
+          <p>
+            {projectNeedsAccess
+              ? `Restore folder access for ${project?.folder?.name ?? project?.name ?? "this project"} before starting new threads.`
+              : project?.kind === "local"
+                ? `Connected folder: ${project.folder?.displayPath ?? project.name}. Start with a concrete task, repo question, or implementation request.`
+                : "Start with a concrete task, repo question, or implementation request."}
+          </p>
 
-          <div className="suggestion-grid">
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion.id}
-                type="button"
-                className="suggestion-card"
-                onClick={() => onSelectSuggestion(suggestion.prompt)}
-              >
-                <strong>{suggestion.title}</strong>
-                <span>{suggestion.prompt}</span>
-              </button>
-            ))}
-          </div>
+          {project?.kind === "local" ? (
+            <div className="thread-view__project-meta">
+              <span>{project.environment}</span>
+              <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
+              <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
+            </div>
+          ) : null}
+
+          {projectNeedsAccess && project ? (
+            <button
+              type="button"
+              className="thread-view__empty-action"
+              onClick={() => void onReconnectProjectFolder(project.id)}
+            >
+              Reconnect folder
+            </button>
+          ) : null}
+
+          {!projectNeedsAccess ? (
+            <div className="suggestion-grid">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  className="suggestion-card"
+                  onClick={() => onSelectSuggestion(suggestion.prompt)}
+                >
+                  <strong>{suggestion.title}</strong>
+                  <span>{suggestion.prompt}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
     );

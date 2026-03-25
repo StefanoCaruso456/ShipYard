@@ -146,10 +146,19 @@ a {
 }
 
 .sidebar__threads-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 0.35rem;
   color: #8e8e89;
   font-size: 0.84rem;
   font-weight: 600;
+}
+
+.sidebar__header-action {
+  width: 2rem;
+  height: 2rem;
+  color: #9f9f99;
 }
 
 .thread-list {
@@ -179,10 +188,27 @@ a {
   color: #d9d9d4;
 }
 
-.thread-group__project span {
+.thread-group__project-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.thread-group__project-copy strong,
+.thread-group__project-copy small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.thread-group__project-copy strong {
+  font-size: 0.98rem;
+  font-weight: 590;
+}
+
+.thread-group__project-copy small {
+  color: #8f8f8a;
+  font-size: 0.74rem;
 }
 
 .thread-group__menu {
@@ -353,6 +379,40 @@ a {
   margin: 0;
   color: #9c9c97;
   line-height: 1.6;
+}
+
+.thread-view__project-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.thread-view__project-meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #a7a7a1;
+  font-size: 0.76rem;
+}
+
+.thread-view__empty-action {
+  justify-self: center;
+  padding: 0.72rem 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.95rem;
+  background: #202020;
+  color: #ecece7;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.thread-view__empty-action:hover {
+  background: #272727;
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .suggestion-grid {
@@ -1494,6 +1554,179 @@ a {
   display: none;
 }
 
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1.4rem;
+  background: rgba(9, 9, 9, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.dialog {
+  width: min(34rem, 100%);
+  display: grid;
+  gap: 1.2rem;
+  padding: 1.15rem 1.15rem 1.1rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
+    #1d1d1d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 22px 48px rgba(0, 0, 0, 0.34);
+}
+
+.dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dialog__header h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.dialog__header p {
+  margin: 0;
+  color: #9d9d97;
+  line-height: 1.55;
+}
+
+.dialog__close,
+.dialog__folder-button,
+.dialog__secondary-button,
+.dialog__primary-button {
+  border: 1px solid transparent;
+  border-radius: 0.95rem;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.dialog__close {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  color: #cfcfc9;
+}
+
+.dialog__close:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dialog__body {
+  display: grid;
+  gap: 1rem;
+}
+
+.dialog__field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.dialog__field > span {
+  color: #bdbdb7;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.dialog__field input {
+  width: 100%;
+  padding: 0.78rem 0.88rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.95rem;
+  outline: none;
+  background: #181818;
+  color: inherit;
+}
+
+.dialog__field input:focus {
+  border-color: rgba(176, 201, 255, 0.54);
+}
+
+.dialog__folder-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.dialog__folder-button,
+.dialog__secondary-button,
+.dialog__primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.72rem 0.92rem;
+  background: #222222;
+  color: inherit;
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.dialog__folder-button:hover,
+.dialog__secondary-button:hover,
+.dialog__primary-button:hover {
+  background: #282828;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dialog__folder-button:disabled,
+.dialog__primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dialog__folder-status {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.dialog__folder-status strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+.dialog__folder-status span {
+  color: #9a9a95;
+  line-height: 1.45;
+}
+
+.dialog__error {
+  margin: 0;
+  color: #efc0c0;
+  font-size: 0.86rem;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.dialog__primary-button {
+  background: #f1f1eb;
+  color: #181818;
+  border-color: transparent;
+}
+
+.dialog__primary-button:hover {
+  background: #ffffff;
+}
+
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: 16.75rem minmax(0, 1fr);
@@ -1522,5 +1755,9 @@ a {
 
   .thread-group__menu-panel {
     min-width: 9.5rem;
+  }
+
+  .dialog__folder-row {
+    grid-template-columns: 1fr;
   }
 }

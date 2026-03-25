@@ -8,6 +8,8 @@ type ThreadListProps = {
   activeThreadId: string | null;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
+  onCreateThread: (projectId?: string) => void;
+  onReconnectProjectFolder: (projectId: string) => Promise<void>;
   onRenameProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
 };
@@ -18,6 +20,8 @@ export function ThreadList({
   activeThreadId,
   onSelectProject,
   onSelectThread,
+  onCreateThread,
+  onReconnectProjectFolder,
   onRenameProject,
   onDeleteProject
 }: ThreadListProps) {
@@ -59,9 +63,14 @@ export function ThreadList({
     onRenameProject(projectId);
   }
 
+  async function handleReconnect(projectId: string) {
+    setOpenMenuProjectId(null);
+    await onReconnectProjectFolder(projectId);
+  }
+
   function handleDelete(projectId: string) {
     setOpenMenuProjectId(null);
-    onDeleteProject(projectId);
+    void onDeleteProject(projectId);
   }
 
   return (
@@ -75,47 +84,76 @@ export function ThreadList({
               onClick={() => onSelectProject(project.id)}
             >
               <FolderIcon />
-              <span>{project.name}</span>
+              <span className="thread-group__project-copy">
+                <strong>{project.name}</strong>
+                <small>{project.folder?.displayPath ?? project.description}</small>
+              </span>
             </button>
 
-            <div
-              ref={openMenuProjectId === project.id ? menuRef : null}
-              className={`thread-group__menu ${openMenuProjectId === project.id ? "is-open" : ""}`}
+            <button
+              type="button"
+              className="thread-group__menu-trigger sidebar__icon-button"
+              onClick={() => onCreateThread(project.id)}
+              aria-label={`Create a new thread in ${project.name}`}
             >
-              <button
-                type="button"
-                className="thread-group__menu-trigger sidebar__icon-button"
-                onClick={() => toggleProjectMenu(project.id)}
-                aria-label={`Open actions for ${project.name}`}
-                aria-haspopup="menu"
-                aria-expanded={openMenuProjectId === project.id}
-              >
-                <MoreIcon />
-              </button>
+              <PlusIcon />
+            </button>
 
-              {openMenuProjectId === project.id ? (
-                <div className="thread-group__menu-panel" role="menu" aria-label={`${project.name} actions`}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="thread-group__menu-item"
-                    onClick={() => handleRename(project.id)}
-                  >
-                    <RenameIcon />
-                    <span>Rename</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="thread-group__menu-item thread-group__menu-item--danger"
-                    onClick={() => handleDelete(project.id)}
-                  >
-                    <DeleteIcon />
-                    <span>Delete</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            {project.kind === "local" || project.removable ? (
+              <div
+                ref={openMenuProjectId === project.id ? menuRef : null}
+                className={`thread-group__menu ${openMenuProjectId === project.id ? "is-open" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="thread-group__menu-trigger sidebar__icon-button"
+                  onClick={() => toggleProjectMenu(project.id)}
+                  aria-label={`Open actions for ${project.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={openMenuProjectId === project.id}
+                >
+                  <MoreIcon />
+                </button>
+
+                {openMenuProjectId === project.id ? (
+                  <div className="thread-group__menu-panel" role="menu" aria-label={`${project.name} actions`}>
+                    {project.kind === "local" ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="thread-group__menu-item"
+                        onClick={() => void handleReconnect(project.id)}
+                      >
+                        <FolderRefreshIcon />
+                        <span>{project.folder?.status === "connected" ? "Reconnect folder" : "Connect folder"}</span>
+                      </button>
+                    ) : null}
+                    {project.removable ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="thread-group__menu-item"
+                        onClick={() => handleRename(project.id)}
+                      >
+                        <RenameIcon />
+                        <span>Rename</span>
+                      </button>
+                    ) : null}
+                    {project.removable ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="thread-group__menu-item thread-group__menu-item--danger"
+                        onClick={() => handleDelete(project.id)}
+                      >
+                        <DeleteIcon />
+                        <span>Remove project</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="thread-group__threads">
@@ -166,12 +204,42 @@ function RenameIcon() {
   );
 }
 
+function FolderRefreshIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M4.2 6.8h3.6l1 1.4h7.2v5.3a1.1 1.1 0 0 1-1.1 1.1H5.3a1.1 1.1 0 0 1-1.1-1.1V8a1.1 1.1 0 0 1 1.1-1.2z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12.7 5.6a3 3 0 0 1 2.8 2M15.2 5.3v2.4h-2.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function MoreIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="4.25" cy="10" r="1.3" fill="currentColor" />
       <circle cx="10" cy="10" r="1.3" fill="currentColor" />
       <circle cx="15.75" cy="10" r="1.3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M10 4.8v10.4M4.8 10h10.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
