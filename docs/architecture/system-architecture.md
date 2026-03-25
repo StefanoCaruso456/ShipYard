@@ -100,3 +100,7 @@ Still not built:
 - richer trace storage and review flows
 - broader validation targets such as lint, typecheck, and targeted test execution
 - approval and review flows around diffs and execution
+- a typed runtime control plane for orchestrator, production lead, and specialist dev ownership
+- the broader agent team model beyond the current planner -> executor -> verifier loop
+- the Ship rebuild integration-test framework and intervention logging
+- the comparative analysis pipeline
