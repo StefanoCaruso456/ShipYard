@@ -74,17 +74,18 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           name: `model:${options.config.modelId}`,
           spanType: "model",
           inputSummary: context.plannedStep?.summary ?? summarizePrompt(run),
-        metadata: {
-          provider: options.config.provider,
-          modelId: options.config.modelId,
-          plannedStepId: context.plannedStep?.id ?? null,
-          roleContextSectionIds: context.roleContextSectionIds ?? [],
-          roleContextSectionCount: context.roleContextSectionIds?.length ?? 0,
-          attachmentCount: run.attachments.length,
-          attachmentKinds: [...new Set(run.attachments.map((attachment) => attachment.kind))],
-          promptLength: prompt.length
-        }
-      })
+          metadata: {
+            provider: options.config.provider,
+            modelId: options.config.modelId,
+            plannedStepId: context.plannedStep?.id ?? null,
+            roleContextSectionIds: context.roleContextSectionIds ?? [],
+            roleContextSectionCount: context.roleContextSectionIds?.length ?? 0,
+            attachmentCount: run.attachments.length,
+            attachmentKinds: [...new Set(run.attachments.map((attachment) => attachment.kind))],
+            promptLength: prompt.length
+          },
+          tags: ["model", `provider:${options.config.provider}`, `model:${options.config.modelId}`]
+        })
     : null;
 
     try {
@@ -110,6 +111,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         outputTokens: usage.outputTokens,
         totalTokens: usage.totalTokens,
         providerLatencyMs: usage.providerLatencyMs,
+        firstTokenLatencyMs: null,
         estimatedCostUsd: usage.estimatedCostUsd,
         estimatedCostStatus: usage.estimatedCostUsd == null ? "unavailable" : "calculated",
         providerMetadataPresent: generated.providerMetadata != null
@@ -120,6 +122,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         metadata: {
           finishReason: generated.finishReason,
           providerLatencyMs: usage.providerLatencyMs,
+          firstTokenLatencyMs: null,
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           totalTokens: usage.totalTokens,
@@ -145,6 +148,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         error: error instanceof Error ? error.message : String(error),
         metadata: {
           providerLatencyMs: Date.now() - startedAtMs,
+          firstTokenLatencyMs: null,
           estimatedCostUsd: null,
           estimatedCostStatus: "unavailable"
         }

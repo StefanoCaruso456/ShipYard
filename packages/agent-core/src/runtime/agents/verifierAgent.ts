@@ -9,7 +9,7 @@ export async function invokeVerifierAgent(input: {
 }): Promise<AgentResult<VerifierStepResult>> {
   const traceScope = getActiveTraceScope();
   const span = traceScope
-    ? await traceScope.activeSpan.startChild({
+      ? await traceScope.activeSpan.startChild({
         name: "verifier",
         spanType: "role",
         inputSummary: `Verifier agent invocation for ${input.invocation.stepId ?? input.invocation.runId}.`,
@@ -17,7 +17,8 @@ export async function invokeVerifierAgent(input: {
           role: input.invocation.role,
           correlationId: input.invocation.correlationId,
           stepId: input.invocation.stepId
-        }
+        },
+        tags: ["role", "role:verifier"]
       })
     : null;
 

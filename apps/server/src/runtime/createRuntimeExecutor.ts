@@ -31,47 +31,47 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       return openAIExecutor(run, context);
     }
 
+    const toolRequest = run.toolRequest;
     const traceScope = getActiveTraceScope();
-    const toolPath = extractToolPath(run.toolRequest);
-    const toolSpan = traceScope
-      ? await traceScope.activeSpan.startChild({
-          name: `tool:${run.toolRequest.toolName}`,
-          spanType: "tool",
-          inputSummary: summarizeToolRequest(run.toolRequest),
+    const toolPath = extractToolPath(toolRequest);
+    traceScope?.activeSpan.addEvent("tool_requested", {
+      message: summarizeToolRequest(toolRequest),
+      metadata: {
+        toolName: toolRequest.toolName,
+        path: toolPath,
+        plannedStepId: context.plannedStep?.id ?? null
+      }
+    });
+
+    const toolResult = await executeToolRequest(options.repoToolset, toolRequest).catch(
+      async (error) => {
+        traceScope?.activeSpan.addEvent("tool_failed", {
+          message: error instanceof Error ? error.message : String(error),
           metadata: {
-            toolName: run.toolRequest.toolName,
+            toolName: toolRequest.toolName,
             path: toolPath,
             plannedStepId: context.plannedStep?.id ?? null
           }
-        })
-      : null;
-
-    const toolResult = await executeToolRequest(options.repoToolset, run.toolRequest).catch(
-      async (error) => {
-        await toolSpan?.end({
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error)
         });
         throw error;
       }
     );
 
     if (!toolResult.ok) {
-      toolSpan?.annotate({
-        toolName: toolResult.toolName,
-        path: toolResult.error.path ?? toolPath,
-        validationStatus: toolResult.error.validationResult
-          ? toolResult.error.validationResult.success
-            ? "passed"
-            : "failed"
-          : null,
-        rollbackAttempted: toolResult.error.rollback?.attempted ?? false,
-        rollbackSucceeded: toolResult.error.rollback?.success ?? null
-      });
-      await toolSpan?.end({
-        status: "failed",
-        error: toolResult.error.message,
-        outputSummary: toolResult.error.code
+      traceScope?.activeSpan.addEvent("tool_failed", {
+        message: toolResult.error.message,
+        metadata: {
+          toolName: toolResult.toolName,
+          path: toolResult.error.path ?? toolPath,
+          validationStatus: toolResult.error.validationResult
+            ? toolResult.error.validationResult.success
+              ? "passed"
+              : "failed"
+            : null,
+          rollbackAttempted: toolResult.error.rollback?.attempted ?? false,
+          rollbackSucceeded: toolResult.error.rollback?.success ?? null,
+          errorCode: toolResult.error.code ?? null
+        }
       });
 
       const error = new Error(toolResult.error.message) as Error & {
@@ -91,15 +91,14 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       throw error;
     }
 
-    toolSpan?.annotate({
-      toolName: toolResult.toolName,
-      path: toolResult.data.path,
-      validationStatus: toolResult.data.validationResult.success ? "passed" : "failed",
-      changedFiles: [toolResult.data.path]
-    });
-    await toolSpan?.end({
-      status: "completed",
-      outputSummary: summarizeToolResult(toolResult)
+    traceScope?.activeSpan.addEvent("tool_completed", {
+      message: summarizeToolResult(toolResult),
+      metadata: {
+        toolName: toolResult.toolName,
+        path: toolResult.data.path,
+        validationStatus: toolResult.data.validationResult.success ? "passed" : "failed",
+        changedFiles: [toolResult.data.path]
+      }
     });
 
     return {
