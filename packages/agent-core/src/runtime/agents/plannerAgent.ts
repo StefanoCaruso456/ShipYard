@@ -10,7 +10,7 @@ export async function invokePlannerAgent(input: {
   const traceScope = getActiveTraceScope();
   const span = traceScope
     ? await traceScope.activeSpan.startChild({
-        name: `agent:planner:${input.invocation.runId}:${input.invocation.input.iteration}`,
+        name: "planner",
         spanType: "role",
         inputSummary: "Planner agent invocation.",
         metadata: {

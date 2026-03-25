@@ -8,10 +8,10 @@ import type {
   StartTraceSpanInput,
   TraceMetadata,
   TraceRunLog,
+  TraceRunSummary,
   TraceServiceStatus,
   TraceSpanEvent,
   TraceSpanSnapshot,
-  TraceSpanStatus,
   TraceSpanType
 } from "@shipyard/agent-core";
 
@@ -190,14 +190,17 @@ export function createLocalTraceLogger(options: LocalTraceLoggerOptions) {
       return null;
     }
 
+    const spans = indexedRun.spanIds
+      .map((spanId) => spanIndex.get(spanId))
+      .filter((span): span is MutableTraceSpanSnapshot => span !== undefined)
+      .map((span) => structuredClone(span));
+
     return {
       runId,
       rootSpanId: indexedRun.rootSpanId,
       updatedAt: indexedRun.updatedAt,
-      spans: indexedRun.spanIds
-        .map((spanId) => spanIndex.get(spanId))
-        .filter((span): span is MutableTraceSpanSnapshot => span !== undefined)
-        .map((span) => structuredClone(span))
+      summary: summarizeRunTrace(spans, indexedRun.rootSpanId),
+      spans
     };
   }
 
@@ -228,4 +231,104 @@ export function createLocalTraceLogger(options: LocalTraceLoggerOptions) {
     getRunTrace,
     listRunTraces
   };
+}
+
+function summarizeRunTrace(
+  spans: MutableTraceSpanSnapshot[],
+  rootSpanId: string | null
+): TraceRunSummary {
+  const rootSpan = rootSpanId ? spans.find((span) => span.id === rootSpanId) ?? null : null;
+  const toolSpans = spans.filter((span) => span.spanType === "tool");
+  const validationSpans = spans.filter((span) => span.spanType === "validation");
+  const rollbackSpans = spans.filter((span) => span.spanType === "rollback");
+  const selectedPaths = uniqueStrings(
+    spans.flatMap((span) => collectPaths(span.metadata.selectedFiles, "path"))
+  );
+  const changedPaths = uniqueStrings(
+    spans.flatMap((span) => collectMetadataStringArray(span.metadata.changedFiles))
+  );
+  const validationChecks = uniqueStrings(
+    validationSpans.flatMap((span) => collectMetadataStringArray(span.metadata.checks))
+  );
+  const inputTokens = readMetadataNumber(rootSpan?.metadata.inputTokens);
+  const outputTokens = readMetadataNumber(rootSpan?.metadata.outputTokens);
+  const totalTokens = readMetadataNumber(rootSpan?.metadata.totalTokens);
+  const providerLatencyMs = readMetadataNumber(rootSpan?.metadata.providerLatencyMs);
+  const estimatedCostUsd = readMetadataNumber(rootSpan?.metadata.estimatedCostUsd);
+
+  return {
+    status: rootSpan?.status ?? null,
+    totalDurationMs: rootSpan?.durationMs ?? null,
+    queueDelayMs: readMetadataNumber(rootSpan?.metadata.queueDelayMs),
+    model: {
+      provider: readMetadataString(rootSpan?.metadata.provider),
+      modelId: readMetadataString(rootSpan?.metadata.modelId)
+    },
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      providerLatencyMs,
+      estimatedCostUsd
+    },
+    files: {
+      selectedCount: selectedPaths.length,
+      selectedPaths,
+      changedCount: changedPaths.length,
+      changedPaths
+    },
+    tools: {
+      count: toolSpans.length,
+      names: uniqueStrings(
+        toolSpans
+          .map((span) => readMetadataString(span.metadata.toolName))
+          .filter((name): name is string => Boolean(name))
+      )
+    },
+    validation: {
+      status: readMetadataString(rootSpan?.metadata.validationStatus),
+      checks: validationChecks,
+      failureCount: validationSpans.filter((span) => span.status === "failed").length
+    },
+    retries: {
+      count: readMetadataNumber(rootSpan?.metadata.retryCount) ?? 0
+    },
+    rollbacks: {
+      count: rollbackSpans.length
+    },
+    attachments: {
+      count: readMetadataNumber(rootSpan?.metadata.attachmentCount) ?? 0,
+      kinds: collectMetadataStringArray(rootSpan?.metadata.attachmentKinds)
+    }
+  };
+}
+
+function readMetadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readMetadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function collectMetadataStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function collectPaths(value: unknown, key: string) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => (entry && typeof entry === "object" ? (entry as Record<string, unknown>)[key] : null))
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)];
 }
