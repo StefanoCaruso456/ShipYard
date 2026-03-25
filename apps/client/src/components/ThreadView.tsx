@@ -1,6 +1,7 @@
 import type { WorkspaceProject, WorkspaceThread } from "../types";
 import { AgentActivityFeed } from "./AgentActivityFeed";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
+import { ThreadMessageCard } from "./ThreadMessageCard";
 
 type SuggestionCard = {
   id: string;
@@ -69,13 +70,7 @@ export function ThreadView({
         <AttachmentPreviewList attachments={thread.attachments} />
 
         {userMessages.map((message) => (
-          <article key={message.id} className={`message message--${message.role}`}>
-            <div className="message__meta">
-              <strong>{message.label}</strong>
-              <span>{message.timestamp}</span>
-            </div>
-            <p>{message.body}</p>
-          </article>
+          <ThreadMessageCard key={message.id} message={message} />
         ))}
 
         {hasActivity || thread.source === "live" ? (
@@ -93,13 +88,7 @@ export function ThreadView({
           : null}
 
         {responseMessages.map((message) => (
-          <article key={message.id} className={`message message--${message.role}`}>
-            <div className="message__meta">
-              <strong>{message.label}</strong>
-              <span>{message.timestamp}</span>
-            </div>
-            <p>{message.body}</p>
-          </article>
+          <ThreadMessageCard key={message.id} message={message} />
         ))}
       </div>
     </section>

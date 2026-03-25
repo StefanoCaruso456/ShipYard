@@ -692,6 +692,12 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
   switch (span.spanType) {
     case "role":
       return capitalize(readString(span.metadata.role) ?? "Role");
+    case "coordinator":
+      return "Coordinator";
+    case "handoff":
+      return "Handoff";
+    case "merge":
+      return "Merge";
     case "context":
       return "Context";
     case "tool":
@@ -719,6 +725,12 @@ function deriveSpanLabel(span: RuntimeTraceSpan) {
   switch (span.spanType) {
     case "role":
       return deriveRoleLabel(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name));
+    case "coordinator":
+      return "Coordinator decision";
+    case "handoff":
+      return "Created role handoff";
+    case "merge":
+      return "Merged role result";
     case "context":
       return `Built ${readString(span.metadata.role) ?? "runtime"} context`;
     case "tool":
@@ -749,16 +761,28 @@ function deriveSpanDetail(span: RuntimeTraceSpan) {
     return deriveRoleDetail(span);
   }
 
+  if (span.spanType === "coordinator") {
+    return span.outputSummary?.trim() || "Recorded the next runtime branch decision.";
+  }
+
+  if (span.spanType === "handoff") {
+    return span.outputSummary?.trim() || "Passed a bounded payload to the next role.";
+  }
+
+  if (span.spanType === "merge") {
+    return span.outputSummary?.trim() || "Merged the latest role result into canonical runtime state.";
+  }
+
   if (span.spanType === "model") {
-    return "Generated the next response draft for the current step.";
+    return "Generated the response draft for the active step.";
   }
 
   if (span.spanType === "context") {
-    return "Pulled together the objective, rules, current state, and supporting context for this role.";
+    return "Included objective, constraints, current state, and supporting evidence for this role.";
   }
 
   if (span.spanType === "run") {
-    return "The runtime processed the task from planning through completion.";
+    return "Tracked the run from intake through completion.";
   }
 
   if (span.outputSummary?.trim()) {
@@ -781,15 +805,24 @@ function deriveSpanTone(span: RuntimeTraceSpan): AgentActivityItem["tone"] {
     return "info";
   }
 
-  if (span.spanType === "tool" || span.spanType === "model" || span.spanType === "validation") {
+  if (
+    span.spanType === "tool" ||
+    span.spanType === "model" ||
+    span.spanType === "validation" ||
+    span.spanType === "merge"
+  ) {
     return "success";
+  }
+
+  if (span.spanType === "coordinator" || span.spanType === "handoff" || span.spanType === "context") {
+    return "info";
   }
 
   return "default";
 }
 
 function deriveSpanSurface(span: RuntimeTraceSpan): AgentActivityItem["surface"] {
-  return span.spanType === "role" ? "primary" : "secondary";
+  return span.spanType === "role" || span.spanType === "coordinator" ? "primary" : "secondary";
 }
 
 function deriveEventBadge(eventName: string) {
@@ -842,6 +875,8 @@ function deriveEventBadge(eventName: string) {
 
 function deriveEventLabel(eventName: string) {
   switch (eventName) {
+    case "coordination_conflict_detected":
+      return "Coordination conflict";
     case "validation_gate_failed":
       return "Validation gate failed";
     case "validation_gate_passed":
@@ -882,6 +917,10 @@ function deriveEventLabel(eventName: string) {
 }
 
 function deriveEventTone(eventName: string): AgentActivityItem["tone"] {
+  if (eventName.includes("conflict")) {
+    return "warning";
+  }
+
   if (eventName.includes("failed") || eventName.includes("error")) {
     return "danger";
   }
@@ -1044,11 +1083,11 @@ function normalizeActivityText(value: string | null | undefined) {
 function deriveRoleLabel(role: string) {
   switch (role) {
     case "planner":
-      return "I’m deciding the next bounded step.";
+      return "Selected next step";
     case "executor":
-      return "I’m working on the current step.";
+      return "Executed planned step";
     case "verifier":
-      return "I’m checking the result before moving on.";
+      return "Reviewed execution";
     default:
       return `${capitalize(role)} step`;
   }
@@ -1061,14 +1100,14 @@ function deriveRoleDetail(span: RuntimeTraceSpan) {
   switch (role) {
     case "planner":
       return toolName
-        ? `I narrowed the task to a specific ${toolName} action so the next move stays scoped.`
-        : "I narrowed the task to a direct response so it stays focused and does not expand scope.";
+        ? `Bounded the next move to a scoped ${toolName} action.`
+        : "Bounded the next move to the current request without expanding scope.";
     case "executor":
       return toolName
-        ? `I’m carrying out the planned ${toolName} step and keeping the change limited to the intended target.`
-        : "I’m drafting the response for the current request and keeping it aligned with the planned step.";
+        ? `Executed the planned ${toolName} step and kept the change on the intended target.`
+        : "Executed the planned step and captured the current result.";
     case "verifier":
-      return "I’m checking that the result matches the request, stays on target, and is safe to accept.";
+      return "Checked intent match, target scope, validation state, and progression safety.";
     default:
       return span.outputSummary?.trim() || span.inputSummary?.trim() || "Runtime role step recorded.";
   }
