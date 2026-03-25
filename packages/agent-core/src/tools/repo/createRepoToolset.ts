@@ -76,6 +76,8 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
     execute: () => Promise<Result>
   ): Promise<Result> {
     const traceScope = getActiveTraceScope();
+    const toolCategory = classifyRepoTool(toolName);
+    const toolTags = createToolTags(toolName, toolCategory);
     const ownsSpan = Boolean(traceScope && traceScope.activeSpan.spanType !== "tool");
     const toolSpan =
       ownsSpan && traceScope
@@ -83,7 +85,12 @@ export function createRepoToolset(options: CreateRepoToolsetOptions = {}): RepoT
             name: `tool:${toolName}`,
             spanType: "tool",
             inputSummary,
-            metadata
+            metadata: {
+              ...metadata,
+              toolCategory,
+              toolTags
+            },
+            tags: toolTags
           })
         : traceScope?.activeSpan ?? null;
 
@@ -854,8 +861,11 @@ function annotateToolResult(
 
   if (!result.ok) {
     const error = result.error as RepoToolError;
+    const toolCategory = classifyRepoTool(result.toolName);
     span.annotate({
       toolName: result.toolName,
+      toolCategory,
+      toolTags: createToolTags(result.toolName, toolCategory),
       success: false,
       errorCode: error.code,
       path: error.path ?? null,
@@ -867,8 +877,11 @@ function annotateToolResult(
   }
 
   const data = result.data as Record<string, unknown>;
+  const toolCategory = classifyRepoTool(result.toolName);
   span.annotate({
     toolName: result.toolName,
+    toolCategory,
+    toolTags: createToolTags(result.toolName, toolCategory),
     success: true,
     path: typeof data.path === "string" ? data.path : null,
     resultCount:
@@ -879,6 +892,8 @@ function annotateToolResult(
           : Array.isArray(data.files)
             ? data.files.length
             : null,
+    selectedFiles: collectSelectedFilesFromToolResult(result.toolName, data),
+    changedFiles: collectChangedFilesFromToolResult(result.toolName, data),
     validationSucceeded:
       data.validationResult && typeof data.validationResult === "object"
         ? ((data.validationResult as ValidationResult).success ?? null)
@@ -915,6 +930,86 @@ function summarizeRepoToolResult(result: { ok: boolean; toolName: RepoToolName }
       return `Created ${typeof data.path === "string" ? data.path : "file"}.`;
     case "delete_file":
       return `Deleted ${typeof data.path === "string" ? data.path : "file"}.`;
+  }
+}
+
+function classifyRepoTool(toolName: RepoToolName) {
+  switch (toolName) {
+    case "list_files":
+    case "search_repo":
+    case "read_file":
+    case "read_file_range":
+      return "inspection";
+    case "edit_file_region":
+    case "create_file":
+    case "delete_file":
+      return "mutation";
+  }
+}
+
+function createToolTags(toolName: RepoToolName, toolCategory: ReturnType<typeof classifyRepoTool>) {
+  return [
+    "repo-tool",
+    `tool:${toolName}`,
+    `tool-category:${toolCategory}`
+  ];
+}
+
+function collectSelectedFilesFromToolResult(
+  toolName: RepoToolName,
+  data: Record<string, unknown>
+) {
+  switch (toolName) {
+    case "read_file":
+    case "read_file_range":
+      return typeof data.path === "string"
+        ? [
+            {
+              path: data.path,
+              source: "repo_tool",
+              reason: "read"
+            }
+          ]
+        : [];
+    case "search_repo":
+      if (!Array.isArray(data.matches)) {
+        return [];
+      }
+
+      return [...new Set(
+        data.matches
+          .map((match) =>
+            match && typeof match === "object"
+              ? (match as { path?: unknown }).path
+              : null
+          )
+          .filter(
+            (matchPath): matchPath is string =>
+              typeof matchPath === "string" && matchPath.trim().length > 0
+          )
+      )]
+        .slice(0, 20)
+        .map((path) => ({
+          path,
+          source: "repo_tool",
+          reason: "matched"
+        }));
+    default:
+      return [];
+  }
+}
+
+function collectChangedFilesFromToolResult(
+  toolName: RepoToolName,
+  data: Record<string, unknown>
+) {
+  switch (toolName) {
+    case "edit_file_region":
+    case "create_file":
+    case "delete_file":
+      return typeof data.path === "string" ? [data.path] : [];
+    default:
+      return [];
   }
 }
 

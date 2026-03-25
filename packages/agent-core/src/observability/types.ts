@@ -86,6 +86,23 @@ export type TraceRunSummary = {
   model: {
     provider: string | null;
     modelId: string | null;
+    callCount: number;
+    totalLatencyMs: number | null;
+    maxLatencyMs: number | null;
+    firstTokenLatencyMs: number | null;
+    models: Array<{
+      provider: string | null;
+      modelId: string | null;
+      callCount: number;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+      totalLatencyMs: number | null;
+      maxLatencyMs: number | null;
+      firstTokenLatencyMs: number | null;
+      estimatedCostUsd: number | null;
+      estimatedCostStatus: string | null;
+    }>;
   };
   usage: {
     inputTokens: number | null;
@@ -100,25 +117,78 @@ export type TraceRunSummary = {
     selectedPaths: string[];
     changedCount: number;
     changedPaths: string[];
+    selectionSources: string[];
+    selectionReasons: string[];
+    selectedBySource: Array<{
+      source: string;
+      count: number;
+    }>;
+    selectedByReason: Array<{
+      reason: string;
+      count: number;
+    }>;
   };
   tools: {
     count: number;
     names: string[];
+    categories: string[];
+    successCount: number;
+    failureCount: number;
+    totalLatencyMs: number | null;
+    maxLatencyMs: number | null;
+    byTool: Array<{
+      name: string;
+      category: string | null;
+      callCount: number;
+      successCount: number;
+      failureCount: number;
+      totalLatencyMs: number | null;
+      maxLatencyMs: number | null;
+      changedPaths: string[];
+      selectedPaths: string[];
+      tags: string[];
+      errorCodes: string[];
+    }>;
   };
   validation: {
     status: string | null;
     checks: string[];
+    successCount: number;
     failureCount: number;
+    lastFailureMessage: string | null;
   };
   retries: {
     count: number;
+    reasons: string[];
+    lastReason: string | null;
   };
   rollbacks: {
     count: number;
+    successCount: number;
+    failureCount: number;
+    affectedPaths: string[];
   };
   attachments: {
     count: number;
     kinds: string[];
+  };
+  context: {
+    roleCount: number;
+    totalAssemblies: number;
+    totalSectionCount: number;
+    totalPromptLength: number | null;
+    roles: Array<{
+      role: string;
+      assemblyCount: number;
+      sectionCount: number;
+      omittedSectionCount: number;
+      promptLength: number | null;
+      selectedFileCount: number;
+      selectedPaths: string[];
+      selectedSources: string[];
+      selectedReasons: string[];
+      hasRollingSummary: boolean;
+    }>;
   };
   orchestration: {
     status: string | null;

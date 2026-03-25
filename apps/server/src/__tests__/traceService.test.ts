@@ -82,6 +82,113 @@ test("local trace service records root and child spans", async () => {
   }
 });
 
+test("trace summary rolls up model tool and context insights", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-trace-rollup-"));
+  const traceService = createTraceService({
+    logPath: path.join(tempDir, "traces.jsonl"),
+    env: {}
+  });
+
+  try {
+    const runTrace = await traceService.startRun({
+      runId: "run-rollup",
+      taskId: "task-rollup",
+      name: "trace rollup",
+      inputSummary: "Inspect trace rollups."
+    });
+    const contextTrace = await runTrace.startChild({
+      name: "planner:context",
+      spanType: "context",
+      inputSummary: "Assemble planner context.",
+      metadata: {
+        role: "planner",
+        sectionIds: ["task-objective", "constraints"],
+        omittedSectionIds: ["known-failures"],
+        promptLength: 128,
+        rollingSummarySource: "result",
+        selectedFiles: [
+          {
+            path: "src/runtime.ts",
+            source: "task_input",
+            reason: "Explicitly referenced by the operator."
+          }
+        ]
+      },
+      tags: ["context", "role:planner"]
+    });
+    await contextTrace.end({
+      status: "completed",
+      outputSummary: "Assembled planner context."
+    });
+
+    const modelTrace = await runTrace.startChild({
+      name: "model:gpt-4o-mini",
+      spanType: "model",
+      inputSummary: "Plan the next step.",
+      metadata: {
+        provider: "openai",
+        modelId: "gpt-4o-mini",
+        inputTokens: 120,
+        outputTokens: 18,
+        totalTokens: 138,
+        providerLatencyMs: 812,
+        firstTokenLatencyMs: 201,
+        estimatedCostUsd: null,
+        estimatedCostStatus: "unavailable"
+      },
+      tags: ["model", "provider:openai", "model:gpt-4o-mini"]
+    });
+    await modelTrace.end({
+      status: "completed",
+      outputSummary: "Planned the next step."
+    });
+
+    const toolTrace = await runTrace.startChild({
+      name: "tool:search_repo",
+      spanType: "tool",
+      inputSummary: "Search the repo for runtime status.",
+      metadata: {
+        toolName: "search_repo",
+        toolCategory: "inspection",
+        toolTags: ["repo-tool", "tool:search_repo", "tool-category:inspection"],
+        selectedFiles: [
+          {
+            path: "src/runtime.ts",
+            source: "repo_tool",
+            reason: "Matched the search query."
+          }
+        ]
+      },
+      tags: ["repo-tool", "tool:search_repo", "tool-category:inspection"]
+    });
+    await toolTrace.end({
+      status: "completed",
+      outputSummary: "Found runtime.ts."
+    });
+
+    await runTrace.end({
+      status: "completed",
+      outputSummary: "Run completed."
+    });
+    await waitForTraceFlush(traceService);
+
+    const trace = traceService.getRunTrace("run-rollup");
+
+    assert.ok(trace);
+    assert.equal(trace?.summary.model.callCount, 1);
+    assert.equal(trace?.summary.model.models[0]?.modelId, "gpt-4o-mini");
+    assert.equal(trace?.summary.tools.categories[0], "inspection");
+    assert.equal(trace?.summary.tools.byTool[0]?.name, "search_repo");
+    assert.equal(trace?.summary.context.roleCount, 1);
+    assert.equal(trace?.summary.context.roles[0]?.role, "planner");
+    assert.equal(trace?.summary.context.roles[0]?.sectionCount, 2);
+    assert.equal(trace?.summary.files.selectedBySource[0]?.source, "repo_tool");
+  } finally {
+    await waitForTraceFlush(traceService);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime traces planner executor verifier and context spans for a successful run", async () => {
   const { instructionRuntime, assembler } = await createHarness();
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-trace-"));
@@ -154,6 +261,11 @@ test("runtime traces planner executor verifier and context spans for a successfu
     );
     assert.equal(trace?.summary.roleFlow, "orchestration");
     assert.equal(trace?.summary.model.modelId, null);
+    assert.equal(trace?.summary.context.roleCount, 3);
+    assert.deepEqual(
+      trace?.summary.context.roles.map((role) => role.role).sort(),
+      ["executor", "planner", "verifier"]
+    );
     assert.equal(trace?.summary.files.selectedCount, 1);
     assert.equal(trace?.summary.validation.status, "not_run");
     assert.equal(trace?.summary.orchestration?.status, "completed");
@@ -293,6 +405,9 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
     assert.ok(trace?.spans.some((span) => span.name.startsWith("tool:edit_file_region")));
     assert.ok(trace?.spans.some((span) => span.spanType === "validation"));
     assert.equal(trace?.summary.tools.names[0], "edit_file_region");
+    assert.equal(trace?.summary.tools.categories[0], "mutation");
+    assert.equal(trace?.summary.tools.byTool[0]?.successCount, 1);
+    assert.ok(trace?.summary.tools.byTool[0]?.tags.includes("tool-category:mutation"));
     assert.equal(trace?.summary.files.changedPaths[0], "src/example.ts");
     assert.equal(trace?.summary.validation.failureCount, 0);
     assert.equal(
@@ -357,6 +472,8 @@ test("runtime traces retry and rollback events on failed validation", async () =
 
     assert.ok(rootSpan?.events.some((event) => event.name === "retry_scheduled"));
     assert.ok(rootSpan?.events.some((event) => event.name === "rollback_succeeded"));
+    assert.equal(trace?.summary.retries.count, 1);
+    assert.equal(trace?.summary.rollbacks.successCount, 1);
   } finally {
     await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });
