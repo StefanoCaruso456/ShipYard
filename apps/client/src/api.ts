@@ -5,6 +5,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTaskSubmitContext,
   RuntimeTraceResponse,
   RuntimeTaskListResponse,
   RuntimeTaskResponse,
@@ -65,6 +66,7 @@ export function submitRuntimeTask(input: {
   simulateFailure?: boolean;
   attachments?: ComposerAttachment[];
   project?: WorkspaceProject;
+  context?: RuntimeTaskSubmitContext;
 }) {
   const attachments = input.attachments ?? [];
   const project = input.project ? serializeRuntimeProject(input.project) : undefined;
@@ -92,6 +94,10 @@ export function submitRuntimeTask(input: {
 
     if (project) {
       formData.append("project", JSON.stringify(project));
+    }
+
+    if (input.context) {
+      formData.append("context", JSON.stringify(input.context));
     }
 
     for (const attachment of attachments) {

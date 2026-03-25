@@ -130,6 +130,22 @@ export type RuntimeTaskProject = {
   } | null;
 };
 
+export type RuntimeTaskContext = {
+  objective: string | null;
+  constraints: string[];
+  relevantFiles: Array<{
+    path: string;
+    excerpt?: string | null;
+    startLine?: number | null;
+    endLine?: number | null;
+    source?: string | null;
+    reason?: string | null;
+  }>;
+  validationTargets: string[];
+};
+
+export type RuntimeTaskSubmitContext = RuntimeTaskContext;
+
 export type RuntimeTask = {
   id: string;
   threadId: string;
@@ -140,19 +156,7 @@ export type RuntimeTask = {
   toolRequest?: unknown;
   attachments: RuntimeAttachment[];
   project: RuntimeTaskProject | null;
-  context?: {
-    objective: string | null;
-    constraints: string[];
-    relevantFiles: Array<{
-      path: string;
-      excerpt?: string | null;
-      startLine?: number | null;
-      endLine?: number | null;
-      source?: string | null;
-      reason?: string | null;
-    }>;
-    validationTargets: string[];
-  };
+  context?: RuntimeTaskContext;
   status: RuntimeTaskStatus;
   createdAt: string;
   startedAt: string | null;
@@ -455,6 +459,19 @@ export type RuntimeQueuedFollowUpDraft = {
   instruction: string;
   createdAt: string;
   attachments: ComposerAttachment[];
+};
+
+export type LocalFileExecutionStatus = "applying" | "applied" | "failed";
+
+export type LocalFileExecutionEffect = {
+  taskId: string;
+  projectId: string;
+  status: LocalFileExecutionStatus;
+  summary: string;
+  timestamp: string;
+  files: string[];
+  details: string[];
+  error: string | null;
 };
 
 export type UtilityTab = "run" | "diff" | "terminal" | "skills" | "automations";
