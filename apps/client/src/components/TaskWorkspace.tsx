@@ -71,7 +71,6 @@ export function TaskWorkspace({
     : "error";
   const suggestionCards = buildSuggestions(project);
   const steerMode =
-    project?.kind === "live" &&
     thread?.source === "live" &&
     thread.liveRuntime?.focusedRun &&
     (thread.status === "running" || thread.status === "pending")

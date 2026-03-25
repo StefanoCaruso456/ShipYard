@@ -21,6 +21,7 @@ import {
   type AgentRuntimeStatus,
   type ExecuteRun,
   type PersistentAgentRuntimeService,
+  type RunProjectInput,
   type SubmitTaskInput
 } from "./types";
 import type { RunEvent, ValidationResult } from "../validation/types";
@@ -142,6 +143,7 @@ export async function createPersistentRuntimeService(
       simulateFailure: input.simulateFailure ?? false,
       toolRequest: input.toolRequest ?? null,
       attachments: normalizeRunAttachments(input.attachments),
+      project: normalizeRunProject(input.project),
       context: normalizeRunContextInput(input.context),
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -588,6 +590,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     parentRunId: run.parentRunId?.trim() ? run.parentRunId.trim() : null,
     toolRequest: run.toolRequest ?? null,
     attachments: normalizeRunAttachments(run.attachments),
+    project: normalizeRunProject(run.project),
     context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
     validationStatus: run.validationStatus ?? "not_run",
@@ -621,6 +624,37 @@ function normalizeRunAttachments(attachments: AgentRunRecord["attachments"] | Su
           }
         }))
     : [];
+}
+
+function normalizeRunProject(
+  project: AgentRunRecord["project"] | SubmitTaskInput["project"]
+): RunProjectInput | null {
+  if (!project?.id?.trim()) {
+    return null;
+  }
+
+  return {
+    id: project.id.trim(),
+    name: project.name?.trim() ? project.name.trim() : null,
+    kind: project.kind === "local" ? "local" : "live",
+    environment: project.environment?.trim() ? project.environment.trim() : null,
+    description: project.description?.trim() ? project.description.trim() : null,
+    folder: project.folder
+      ? {
+          name: project.folder.name?.trim() ? project.folder.name.trim() : null,
+          displayPath: project.folder.displayPath?.trim() ? project.folder.displayPath.trim() : null,
+          status:
+            project.folder.status === "connected" || project.folder.status === "needs-access"
+              ? project.folder.status
+              : null,
+          provider:
+            project.folder.provider === "runtime" ||
+            project.folder.provider === "browser-file-system-access"
+              ? project.folder.provider
+              : null
+        }
+      : null
+  };
 }
 
 function normalizeRunContextInput(
@@ -854,6 +888,10 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     validationTargetCount: run.context.validationTargets.length,
     validationTargets: run.context.validationTargets,
     requestedToolName: run.toolRequest?.toolName ?? null,
+    projectId: run.project?.id ?? null,
+    projectName: run.project?.name ?? null,
+    projectKind: run.project?.kind ?? null,
+    projectFolderPath: run.project?.folder?.displayPath ?? null,
     ...buildOrchestrationTraceMetadata(run.orchestration),
     ...buildPhaseExecutionTraceMetadata(run.phaseExecution)
   };

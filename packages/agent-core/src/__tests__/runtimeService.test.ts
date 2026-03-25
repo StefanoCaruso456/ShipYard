@@ -139,6 +139,34 @@ test("persistent runtime keeps staged follow-up runs on the same thread", async 
   assert.equal(storedFollowUp?.parentRunId, initialRun.id);
 });
 
+test("persistent runtime preserves project ownership metadata on queued runs", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Work inside the analytics dashboard project.",
+    project: {
+      id: "project-analytics",
+      name: "Analytics Dashboard",
+      kind: "local",
+      environment: "Local folder",
+      description: "Connected browser workspace.",
+      folder: {
+        name: "analytics-dashboard",
+        displayPath: "analytics-dashboard",
+        status: "connected",
+        provider: "browser-file-system-access"
+      }
+    }
+  });
+
+  const storedRun = runtimeService.getRun(run.id);
+
+  assert.equal(storedRun?.project?.id, "project-analytics");
+  assert.equal(storedRun?.project?.kind, "local");
+  assert.equal(storedRun?.project?.folder?.displayPath, "analytics-dashboard");
+});
+
 test("persistent runtime runs active-thread follow-ups before unrelated queued work", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const firstGate = createDeferred<AgentRunResult>();

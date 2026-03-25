@@ -300,6 +300,20 @@ export type RollingSummary = {
   source: "result" | "failure" | "retry";
 };
 
+export type RunProjectInput = {
+  id: string;
+  name?: string | null;
+  kind?: "live" | "local";
+  environment?: string | null;
+  description?: string | null;
+  folder?: {
+    name?: string | null;
+    displayPath?: string | null;
+    status?: "connected" | "needs-access" | null;
+    provider?: "runtime" | "browser-file-system-access" | null;
+  } | null;
+};
+
 export type SubmitTaskInput = {
   instruction: string;
   title?: string;
@@ -308,6 +322,7 @@ export type SubmitTaskInput = {
   simulateFailure?: boolean;
   toolRequest?: RepoMutationToolRequest | null;
   attachments?: RunAttachment[];
+  project?: RunProjectInput | null;
   context?: RunContextInput | null;
   phaseExecution?: PhaseExecutionInput | null;
 };
@@ -351,6 +366,7 @@ export type AgentRunRecord = {
   simulateFailure: boolean;
   toolRequest: RepoMutationToolRequest | null;
   attachments: RunAttachment[];
+  project?: RunProjectInput | null;
   context: RunContextInput;
   status: AgentRunStatus;
   createdAt: string;
