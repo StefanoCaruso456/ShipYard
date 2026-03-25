@@ -316,6 +316,7 @@ function renderLocalFilePlanInstructions(run: AgentRunRecord) {
     "Local workspace file action contract:",
     "When the request requires creating, updating, or deleting files in the connected local folder, append a <local-file-plan>...</local-file-plan> block to the end of your response.",
     "Inside that block emit valid JSON with exactly this shape: {\"operations\":[...]}",
+    "Inside the tags output raw JSON only. Do not wrap it in ``` fences. Do not prefix it with json. Do not add commentary inside the tags.",
     "Supported operations:",
     '- {"kind":"mkdir","path":"src/routes"}',
     '- {"kind":"write_file","path":"src/index.ts","content":"..."}',
@@ -324,6 +325,9 @@ function renderLocalFilePlanInstructions(run: AgentRunRecord) {
     "- Use only relative paths rooted at the connected local folder.",
     "- Never use absolute paths or .. segments.",
     "- Use write_file to create or fully replace a file with the desired content.",
+    "- Encode file content as valid JSON strings with escaped newlines like \\n.",
+    "- For scaffold requests, prefer short placeholder file contents unless the operator explicitly asks for a full implementation.",
+    "- Include every file or directory you want created in the operations array. A description in prose will not touch the local workspace.",
     "- Omit the block when no local filesystem change is needed.",
     "- Do not claim files were already written unless they are represented in the local file plan block. The client applies the plan after your response."
   ].join("\n");

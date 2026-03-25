@@ -108,14 +108,20 @@ export function ThreadView({
   const hasActivity = (thread.activity?.length ?? 0) > 0;
   const hiddenMessageIds = new Set<string>();
 
-  if (thread.source === "live" && thread.liveRuntime?.focusedRunId) {
+  if (
+    thread.source === "live" &&
+    thread.liveRuntime?.focusedRunId &&
+    (thread.status === "running" || thread.status === "pending")
+  ) {
     hiddenMessageIds.add(`${thread.liveRuntime.focusedRunId}-user`);
   }
 
   const filteredMessages = thread.messages.filter((message) => !hiddenMessageIds.has(message.id));
   const showLiveRuntimeStage = thread.source === "live" && Boolean(thread.liveRuntime?.focusedRun);
   const visibleMessages = hasActivity || showLiveRuntimeStage
-    ? filteredMessages.filter((message) => message.role !== "system")
+    ? filteredMessages.filter(
+        (message) => message.role !== "system" || message.label === "Local workspace"
+      )
     : filteredMessages;
   const userMessages = visibleMessages.filter((message) => message.role === "user");
   const responseMessages = visibleMessages.filter((message) => message.role !== "user");
