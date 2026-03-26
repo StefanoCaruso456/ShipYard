@@ -84,6 +84,10 @@ Complete
 
 ## Phase 10: Typed Runtime Control Plane
 
+Detailed phase guide:
+
+- [phase-10-typed-control-plane.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/phase-10-typed-control-plane.md)
+
 ### Goal
 
 Move the workflow model from implicit prompt behavior into explicit TypeScript state.
