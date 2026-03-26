@@ -58,9 +58,9 @@ export function Composer({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const previousQueuedCountRef = useRef(0);
   const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
   const [steerDrawerOpen, setSteerDrawerOpen] = useState(false);
+  const steerEnabled = Boolean(steerMode);
   const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
   const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
@@ -87,7 +87,7 @@ export function Composer({
       return;
     }
 
-    if (steerMode) {
+    if (steerEnabled) {
       setSteerDrawerOpen(true);
     }
 
@@ -97,37 +97,26 @@ export function Composer({
       textareaRef.current.value.length,
       textareaRef.current.value.length
     );
-  }, [focusRequestKey, steerMode]);
+  }, [focusRequestKey, steerEnabled]);
 
   useEffect(() => {
-    if (!steerMode) {
+    if (!steerEnabled) {
       setSteerDrawerOpen(false);
-      previousQueuedCountRef.current = 0;
+      return;
+    }
+
+    setSteerDrawerOpen(true);
+  }, [steerEnabled]);
+
+  useEffect(() => {
+    if (!steerEnabled) {
       return;
     }
 
     if (hasDraftContent) {
       setSteerDrawerOpen(true);
     }
-  }, [hasDraftContent, steerMode]);
-
-  useEffect(() => {
-    if (!steerMode) {
-      return;
-    }
-
-    const previousQueuedCount = previousQueuedCountRef.current;
-
-    if (
-      steerMode.queuedCount > previousQueuedCount &&
-      !hasDraftContent &&
-      !submitting
-    ) {
-      setSteerDrawerOpen(false);
-    }
-
-    previousQueuedCountRef.current = steerMode.queuedCount;
-  }, [hasDraftContent, steerMode, submitting]);
+  }, [hasDraftContent, steerEnabled]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
