@@ -13,6 +13,7 @@ import {
   normalizePhaseExecutionState
 } from "./phaseExecution";
 import { createRebuildState, normalizeRebuildState } from "./rebuildState";
+import { normalizeRunContextInputValue } from "./schemas";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import {
   cloneRunRecord,
@@ -27,8 +28,6 @@ import {
   type SubmitTaskInput
 } from "./types";
 import type { RunEvent, ValidationResult } from "../validation/types";
-
-type ExternalContextItem = NonNullable<AgentRunRecord["context"]["externalContext"]>[number];
 
 type CreatePersistentRuntimeServiceOptions = {
   instructionRuntime: AgentInstructionRuntime;
@@ -689,64 +688,7 @@ function normalizeRunProject(
 function normalizeRunContextInput(
   context: AgentRunRecord["context"] | SubmitTaskInput["context"]
 ): AgentRunRecord["context"] {
-  return {
-    objective: context?.objective?.trim() ? context.objective.trim() : null,
-    constraints: Array.isArray(context?.constraints)
-      ? context.constraints.map((constraint) => constraint.trim()).filter(Boolean)
-      : [],
-    relevantFiles: Array.isArray(context?.relevantFiles)
-      ? context.relevantFiles
-          .filter((file) => typeof file?.path === "string" && file.path.trim())
-          .map((file) => ({
-            path: file.path.trim(),
-            excerpt: file.excerpt?.trim() ? file.excerpt.trim() : null,
-            startLine: typeof file.startLine === "number" ? file.startLine : null,
-            endLine: typeof file.endLine === "number" ? file.endLine : null,
-            source: file.source?.trim() ? file.source.trim() : null,
-            reason: file.reason?.trim() ? file.reason.trim() : null
-          }))
-      : [],
-    externalContext: Array.isArray(context?.externalContext)
-      ? context.externalContext
-          .filter(
-            (item) =>
-              typeof item?.id === "string" &&
-              item.id.trim() &&
-              typeof item.kind === "string" &&
-              typeof item.title === "string" &&
-              item.title.trim() &&
-              typeof item.content === "string" &&
-              item.content.trim()
-          )
-          .map((item) => ({
-            id: item.id.trim(),
-            kind: normalizeExternalContextKind(item.kind),
-            title: item.title.trim(),
-            content: item.content.trim(),
-            source: item.source?.trim() ? item.source.trim() : null,
-            format: normalizeExternalContextFormat(item.format)
-          }))
-      : [],
-    validationTargets: Array.isArray(context?.validationTargets)
-      ? context.validationTargets.map((target) => target.trim()).filter(Boolean)
-      : []
-  };
-}
-
-function normalizeExternalContextKind(kind: string): ExternalContextItem["kind"] {
-  return kind === "schema" ||
-    kind === "prior_output" ||
-    kind === "test_result" ||
-    kind === "diff_summary" ||
-    kind === "validation_target"
-    ? kind
-    : "spec";
-}
-
-function normalizeExternalContextFormat(
-  format: string | null | undefined
-): ExternalContextItem["format"] {
-  return format === "markdown" || format === "json" ? format : "text";
+  return normalizeRunContextInputValue(context);
 }
 
 function normalizeRollingSummary(rollingSummary: AgentRunRecord["rollingSummary"]) {

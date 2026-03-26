@@ -664,7 +664,10 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       truncatedSectionIds: string[];
       omittedForBudgetSectionIds: string[];
       maxPromptChars: number | null;
+      maxPromptTokens: number | null;
+      maxOutputTokens: number | null;
       usedPromptChars: number | null;
+      usedPromptTokens: number | null;
       promptLength: number | null;
       selectedPaths: string[];
       selectedSources: string[];
@@ -688,7 +691,10 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       truncatedSectionIds: [],
       omittedForBudgetSectionIds: [],
       maxPromptChars: null,
+      maxPromptTokens: null,
+      maxOutputTokens: null,
       usedPromptChars: null,
+      usedPromptTokens: null,
       promptLength: null,
       selectedPaths: [],
       selectedSources: [],
@@ -708,7 +714,10 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       collectMetadataStringArray(span.metadata.omittedForBudgetSectionIds)
     ).sort();
     existing.maxPromptChars = readMetadataNumber(span.metadata.maxPromptChars);
+    existing.maxPromptTokens = readMetadataNumber(span.metadata.maxPromptTokens);
+    existing.maxOutputTokens = readMetadataNumber(span.metadata.maxOutputTokens);
     existing.usedPromptChars = readMetadataNumber(span.metadata.usedPromptChars);
+    existing.usedPromptTokens = readMetadataNumber(span.metadata.usedPromptTokens);
     existing.promptLength = readMetadataNumber(span.metadata.promptLength);
     existing.selectedPaths = uniqueStrings(fileSelections.map((entry) => entry.path)).sort();
     existing.selectedSources = uniqueStrings(
@@ -738,7 +747,10 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       truncatedSectionCount: role.truncatedSectionIds.length,
       omittedForBudgetSectionCount: role.omittedForBudgetSectionIds.length,
       maxPromptChars: role.maxPromptChars,
+      maxPromptTokens: role.maxPromptTokens,
+      maxOutputTokens: role.maxOutputTokens,
       usedPromptChars: role.usedPromptChars,
+      usedPromptTokens: role.usedPromptTokens,
       promptLength: role.promptLength,
       selectedFileCount: role.selectedPaths.length,
       selectedPaths: role.selectedPaths,
@@ -754,12 +766,16 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
   const promptLengths = roles
     .map((role) => role.promptLength)
     .filter((value): value is number => value != null);
+  const promptTokens = roles
+    .map((role) => role.usedPromptTokens)
+    .filter((value): value is number => value != null);
 
   return {
     roleCount: roles.length,
     totalAssemblies: contextSpans.length,
     totalSectionCount: roles.reduce((total, role) => total + role.sectionCount, 0),
     totalPromptLength: sumFiniteNumbers(promptLengths),
+    totalPromptTokens: sumFiniteNumbers(promptTokens),
     roles
   };
 }

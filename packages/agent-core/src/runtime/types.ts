@@ -854,6 +854,7 @@ export type ExecuteRun = (
     instructionRuntime: AgentInstructionRuntime;
     roleContextPrompt?: string | null;
     roleContextSectionIds?: string[];
+    maxOutputTokens?: number | null;
     plannedStep?: PlannerStep | null;
   }
 ) => Promise<AgentRunResult>;

@@ -362,21 +362,11 @@ test("live orchestration blocks execution when a delegated tool is outside the e
           executeRunCalls += 1;
 
           return {
-            mode: "repo-tool",
+            mode: "placeholder-execution",
             summary: scopedRun.instruction,
             instructionEcho: scopedRun.instruction,
             skillId: context.instructionRuntime.skill.meta.id,
-            completedAt: new Date().toISOString(),
-            toolResult: {
-              ok: true,
-              toolName: "read_file",
-              data: {
-                rootDir: "/tmp",
-                path: "src/example.ts",
-                content: "export const example = true;\n",
-                lineCount: 1
-              }
-            }
+            completedAt: new Date().toISOString()
           };
         },
         persistRun: () => {},

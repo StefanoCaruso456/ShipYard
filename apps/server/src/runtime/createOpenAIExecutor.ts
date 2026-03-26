@@ -5,7 +5,7 @@ import type {
   AgentRunResult,
   ExecuteRun
 } from "@shipyard/agent-core";
-import { getActiveTraceScope } from "@shipyard/agent-core";
+import { countTextTokens, getActiveTraceScope, getRoleContextPolicy } from "@shipyard/agent-core";
 import { generateText } from "ai";
 
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
@@ -65,10 +65,14 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
 
     const traceScope = getActiveTraceScope();
     const startedAtMs = Date.now();
+    const systemPrompt = buildSystemPrompt(context.instructionRuntime);
     const prompt = buildTaskPrompt(run, {
       roleContextPrompt: context.roleContextPrompt ?? null,
       plannedStep: context.plannedStep ?? null
     });
+    const promptTokenCount = countTextTokens(prompt);
+    const systemPromptTokenCount = countTextTokens(systemPrompt);
+    const maxOutputTokens = context.maxOutputTokens ?? getRoleContextPolicy("executor").maxOutputTokens;
     const modelSpan = traceScope
       ? await traceScope.activeSpan.startChild({
           name: `model:${options.config.modelId}`,
@@ -82,7 +86,11 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
             roleContextSectionCount: context.roleContextSectionIds?.length ?? 0,
             attachmentCount: run.attachments.length,
             attachmentKinds: [...new Set(run.attachments.map((attachment) => attachment.kind))],
-            promptLength: prompt.length
+            promptLength: prompt.length,
+            promptTokenCount,
+            systemPromptTokenCount,
+            totalRequestTokenCount: promptTokenCount + systemPromptTokenCount,
+            maxOutputTokens
           },
           tags: ["model", `provider:${options.config.provider}`, `model:${options.config.modelId}`]
         })
@@ -91,8 +99,9 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     try {
       const generated = await generateTextImpl({
         model: openai(options.config.modelId),
-        system: buildSystemPrompt(context.instructionRuntime),
-        prompt
+        system: systemPrompt,
+        prompt,
+        maxOutputTokens
       });
       const responseText = generated.text.trim();
       const completedAt = new Date().toISOString();
@@ -107,6 +116,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       modelSpan?.annotate({
         provider: options.config.provider,
         modelId: options.config.modelId,
+        maxOutputTokens,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         totalTokens: usage.totalTokens,
@@ -114,13 +124,24 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         firstTokenLatencyMs: null,
         estimatedCostUsd: usage.estimatedCostUsd,
         estimatedCostStatus: usage.estimatedCostUsd == null ? "unavailable" : "calculated",
-        providerMetadataPresent: generated.providerMetadata != null
+        providerMetadataPresent: generated.providerMetadata != null,
+        finishReason: generated.finishReason
       });
+      if (generated.finishReason === "length") {
+        modelSpan?.addEvent("model_output_capped", {
+          message: "Model output hit the configured token cap.",
+          metadata: {
+            maxOutputTokens,
+            modelId: options.config.modelId
+          }
+        });
+      }
       await modelSpan?.end({
         status: "completed",
         outputSummary: summarizeResponse(responseText),
         metadata: {
           finishReason: generated.finishReason,
+          maxOutputTokens,
           providerLatencyMs: usage.providerLatencyMs,
           firstTokenLatencyMs: null,
           inputTokens: usage.inputTokens,
@@ -210,6 +231,14 @@ function buildTaskPrompt(
     renderRunContext(run),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     renderLocalFilePlanInstructions(run),
+    [
+      "Response style:",
+      "- Start with the direct answer or outcome for the operator.",
+      "- Prefer short paragraphs unless multiple distinct items need to be enumerated.",
+      "- When listing multiple items, use flat bullet points that are easy to scan.",
+      "- Avoid internal runtime labels such as \"Runtime result\" and avoid raw trace jargon.",
+      "- Keep the reply concise, concrete, and implementation-focused."
+    ].join("\n"),
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]

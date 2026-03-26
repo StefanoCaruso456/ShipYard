@@ -44,7 +44,10 @@ export type OmittedContextSection = {
 
 export type RoleContextBudget = {
   maxPromptChars: number;
+  maxPromptTokens: number;
+  maxOutputTokens: number;
   usedPromptChars: number;
+  usedPromptTokens: number;
   truncatedSectionIds: string[];
   omittedForBudgetSectionIds: string[];
 };

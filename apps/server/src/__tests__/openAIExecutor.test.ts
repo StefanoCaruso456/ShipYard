@@ -88,6 +88,7 @@ test("createOpenAIExecutor maps AI SDK text into the runtime result", async () =
 
 test("createOpenAIExecutor adds local file plan instructions for browser-backed projects", async () => {
   let capturedPrompt = "";
+  let capturedMaxOutputTokens: number | undefined;
   const config: OpenAIExecutorConfig = {
     provider: "openai",
     configured: true,
@@ -97,8 +98,9 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async (input: { prompt?: string }) => {
+    generateTextImpl: (async (input: { prompt?: string; maxOutputTokens?: number }) => {
       capturedPrompt = input.prompt ?? "";
+      capturedMaxOutputTokens = input.maxOutputTokens;
 
       return {
         text:
@@ -140,6 +142,9 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
 
   assert.match(capturedPrompt, /Local workspace file action contract/);
   assert.match(capturedPrompt, /<local-file-plan>/);
+  assert.match(capturedPrompt, /Response style:/);
+  assert.match(capturedPrompt, /Avoid internal runtime labels such as "Runtime result"/);
+  assert.equal(capturedMaxOutputTokens, 1400);
   assert.equal(result.summary, "Scaffold plan ready.");
 });
 

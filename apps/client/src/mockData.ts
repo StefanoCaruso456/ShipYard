@@ -303,7 +303,12 @@ export function buildRuntimeThread(
       followUp.attachments.map((attachment) => toLocalAttachmentCard(attachment))
     )
   ];
-  const activity = buildRuntimeActivity(focusedRun, runtimeTracesByTaskId[focusedRun.id] ?? null);
+  const focusedLocalEffect = localFileEffectsByTaskId[focusedRun.id] ?? null;
+  const activity = buildRuntimeActivity(
+    focusedRun,
+    runtimeTracesByTaskId[focusedRun.id] ?? null,
+    focusedLocalEffect
+  );
   const queuedFollowUps = buildQueuedFollowUpItems(queuedRuns, optimisticFollowUps);
 
   return {
@@ -316,7 +321,7 @@ export function buildRuntimeThread(
     updatedLabel: deriveRuntimeThreadUpdatedLabel(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
     tags: buildRuntimeThreadTags(threadStatus, latestRun, queuedRuns.length + optimisticFollowUps.length),
     attachments: attachmentCards,
-    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun, localFileEffectsByTaskId),
+    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun),
     progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps, localFileEffectsByTaskId),
     activity,
     liveRuntime: {
@@ -416,8 +421,7 @@ function buildRuntimeThreadTags(
 
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
-  focusedRun: RuntimeTask,
-  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
+  focusedRun: RuntimeTask
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
@@ -462,35 +466,18 @@ function buildRuntimeThreadMessages(
       const visibleResponseText =
         stripLocalFilePlan(run.result.responseText ?? "") || run.result.summary;
 
-      messages.push(
-        createMessage(
-          `${run.id}-assistant`,
-          "assistant",
-          "Runtime result",
-          visibleResponseText,
-          formatDateTime(run.result.completedAt),
-          "success"
-        )
-      );
-    }
-
-    const localEffect = localFileEffectsByTaskId[run.id];
-
-    if (localEffect) {
-      messages.push(
-        createMessage(
-          `${run.id}-local-effect`,
-          localEffect.status === "failed" ? "assistant" : "system",
-          "Local workspace",
-          formatLocalWorkspaceEffect(localEffect),
-          formatDateTime(localEffect.timestamp),
-          localEffect.status === "failed"
-            ? "danger"
-            : localEffect.status === "applied"
-              ? "success"
-              : "info"
-        )
-      );
+      if (visibleResponseText.trim().length > 0) {
+        messages.push(
+          createMessage(
+            `${run.id}-assistant`,
+            "assistant",
+            "Assistant",
+            visibleResponseText,
+            formatDateTime(run.result.completedAt),
+            "default"
+          )
+        );
+      }
     }
 
     if (run.error) {
@@ -643,20 +630,6 @@ function buildRuntimeThreadProgress(
   }
 
   return progress;
-}
-
-function formatLocalWorkspaceEffect(effect: LocalFileExecutionEffect) {
-  if (effect.status === "applying") {
-    return effect.summary;
-  }
-
-  const detailLines = effect.details.slice(0, 8).map((detail) => `- ${detail}`);
-
-  if (detailLines.length === 0) {
-    return effect.error ?? effect.summary;
-  }
-
-  return `${effect.summary}\n\n${detailLines.join("\n")}`;
 }
 
 function buildQueuedFollowUpItems(
@@ -866,57 +839,199 @@ function createProgress(
   };
 }
 
-function buildRuntimeActivity(task: RuntimeTask, trace: RuntimeTraceRunLog | null) {
+function buildRuntimeActivity(
+  task: RuntimeTask,
+  trace: RuntimeTraceRunLog | null,
+  localEffect: LocalFileExecutionEffect | null = null
+) {
+  let activity: AgentActivityItem[] = [];
+
   if (trace && trace.spans.length > 0) {
-    return condenseActivityItems(flattenTrace(trace));
-  }
+    activity = flattenTrace(trace);
+  } else {
+    const events = task.events ?? [];
 
-  const events = task.events ?? [];
-
-  if (events.length > 0) {
-    return events.map((event, index) => ({
-      id: `${task.id}-event-${index}`,
-      kind: "event" as const,
-      badge: deriveEventBadge(event.type),
-      label: deriveEventLabel(event.type),
-      detail: event.message,
-      timestamp: formatDateTime(event.at),
-      tone: deriveEventTone(event.type),
-      depth: 0,
-      surface: "secondary" as const,
-      sourceType: "summary" as const,
-      sourceName: event.type,
-      meta: [event.toolName, event.path].filter(Boolean) as string[]
-    }));
-  }
-
-  if (task.rollingSummary?.text) {
-    const summaryTone: AgentActivityItem["tone"] =
-      task.rollingSummary.source === "failure"
-        ? "danger"
-        : task.rollingSummary.source === "retry"
-          ? "warning"
-          : "info";
-
-    return [
-      {
-        id: `${task.id}-summary`,
-        kind: "summary" as const,
-        badge: "Summary",
-        label: "Latest runtime summary",
-        detail: task.rollingSummary.text,
-        timestamp: formatDateTime(task.rollingSummary.updatedAt),
-        tone: summaryTone,
+    if (events.length > 0) {
+      activity = events.map((event, index) => ({
+        id: `${task.id}-event-${index}`,
+        kind: "event" as const,
+        badge: deriveEventBadge(event.type),
+        label: deriveEventLabel(event.type),
+        detail: event.message,
+        timestamp: formatDateTime(event.at),
+        tone: deriveEventTone(event.type),
         depth: 0,
-        surface: "primary" as const,
+        surface: "secondary" as const,
         sourceType: "summary" as const,
-        sourceName: task.rollingSummary.source,
-        meta: [humanizeKey(task.rollingSummary.source)]
-      }
-    ];
+        sourceName: event.type,
+        meta: [event.toolName, event.path].filter(Boolean) as string[]
+      }));
+    } else if (task.rollingSummary?.text) {
+      const summaryTone: AgentActivityItem["tone"] =
+        task.rollingSummary.source === "failure"
+          ? "danger"
+          : task.rollingSummary.source === "retry"
+            ? "warning"
+            : "info";
+
+      activity = [
+        {
+          id: `${task.id}-summary`,
+          kind: "summary" as const,
+          badge: "Summary",
+          label: "Latest runtime summary",
+          detail: task.rollingSummary.text,
+          timestamp: formatDateTime(task.rollingSummary.updatedAt),
+          tone: summaryTone,
+          depth: 0,
+          surface: "primary" as const,
+          sourceType: "summary" as const,
+          sourceName: task.rollingSummary.source,
+          meta: [humanizeKey(task.rollingSummary.source)]
+        }
+      ];
+    }
   }
 
-  return [];
+  const runOverview = buildRunOverviewItem(task, trace);
+
+  if (runOverview) {
+    activity = [runOverview, ...activity];
+  }
+
+  const localWorkspaceItem = buildLocalWorkspaceActivityItem(localEffect);
+
+  if (localWorkspaceItem) {
+    activity = [...activity, localWorkspaceItem];
+  }
+
+  return condenseActivityItems(activity);
+}
+
+function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | null): AgentActivityItem | null {
+  const traceSummary = trace?.summary ?? null;
+  const timestamp = formatDateTime(task.completedAt ?? task.startedAt ?? task.createdAt);
+  const meta: string[] = [];
+
+  if (traceSummary?.model.modelId) {
+    meta.push(traceSummary.model.modelId);
+  } else if (task.result?.modelId) {
+    meta.push(task.result.modelId);
+  }
+
+  if (typeof traceSummary?.usage.totalTokens === "number") {
+    meta.push(`${traceSummary.usage.totalTokens} tokens`);
+  }
+
+  if (traceSummary?.validation.status) {
+    meta.push(`validation ${traceSummary.validation.status}`);
+  }
+
+  if (traceSummary?.tools.count) {
+    meta.push(
+      `${traceSummary.tools.count} tool${traceSummary.tools.count === 1 ? "" : "s"}`
+    );
+  }
+
+  if (traceSummary?.files.changedCount) {
+    meta.push(
+      `${traceSummary.files.changedCount} file${traceSummary.files.changedCount === 1 ? "" : "s"} changed`
+    );
+  } else if (traceSummary?.files.selectedCount) {
+    meta.push(
+      `${traceSummary.files.selectedCount} file${traceSummary.files.selectedCount === 1 ? "" : "s"} referenced`
+    );
+  }
+
+  if (traceSummary?.retries.count) {
+    meta.push(
+      `${traceSummary.retries.count} retr${traceSummary.retries.count === 1 ? "y" : "ies"}`
+    );
+  }
+
+  if (
+    traceSummary?.phaseExecution?.totalTasks != null &&
+    traceSummary.phaseExecution.completedTasks != null
+  ) {
+    meta.push(
+      `${traceSummary.phaseExecution.completedTasks}/${traceSummary.phaseExecution.totalTasks} tasks complete`
+    );
+  }
+
+  return {
+    id: `${task.id}-run-overview`,
+    kind: "summary",
+    badge: "Run",
+    label:
+      task.status === "running"
+        ? "Run in progress"
+        : task.status === "pending"
+          ? "Run queued"
+          : task.status === "failed"
+            ? "Run failed"
+            : "Run completed",
+    detail:
+      task.status === "running"
+        ? "The runtime is still reasoning through the active request."
+        : task.status === "pending"
+          ? "The request is accepted and waiting in the persistent runtime queue."
+          : task.status === "failed"
+            ? task.error?.message ?? "The runtime ended in a failure state."
+            : task.result?.summary || "The latest request completed and the execution trace is available below.",
+    timestamp,
+    tone:
+      task.status === "failed"
+        ? "danger"
+        : task.status === "completed"
+          ? "success"
+          : "info",
+    depth: 0,
+    surface: "primary",
+    status: traceSummary?.status ?? undefined,
+    sourceType: "summary",
+    sourceName: "run-overview",
+    meta
+  };
+}
+
+function buildLocalWorkspaceActivityItem(
+  effect: LocalFileExecutionEffect | null
+): AgentActivityItem | null {
+  if (!effect) {
+    return null;
+  }
+
+  const fileMeta =
+    effect.files.length === 0
+      ? []
+      : effect.files.length === 1
+        ? effect.files
+        : [`${effect.files.length} files`, ...effect.files.slice(0, 2)];
+
+  return {
+    id: `${effect.taskId}-local-workspace`,
+    kind: "summary",
+    badge: "Workspace",
+    label:
+      effect.status === "applying"
+        ? "Applying local file plan"
+        : effect.status === "applied"
+          ? "Applied to local workspace"
+          : "Local workspace apply failed",
+    detail: effect.error ?? effect.summary,
+    timestamp: formatDateTime(effect.timestamp),
+    tone:
+      effect.status === "failed"
+        ? "danger"
+        : effect.status === "applied"
+          ? "success"
+          : "info",
+    depth: 0,
+    surface: "secondary",
+    sourceType: "summary",
+    sourceName: "local-workspace",
+    meta: fileMeta
+  };
 }
 
 function flattenTrace(trace: RuntimeTraceRunLog) {
@@ -1251,10 +1366,16 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const toolName = readString(span.metadata.toolName);
   const validationStatus = readString(span.metadata.validationStatus);
   const sectionIds = readStringArray(span.metadata.sectionIds);
+  const truncatedSectionIds = readStringArray(span.metadata.truncatedSectionIds);
+  const omittedForBudgetSectionIds = readStringArray(span.metadata.omittedForBudgetSectionIds);
   const changedFiles = readStringArray(span.metadata.changedFiles);
   const inputTokens = readNumber(span.metadata.inputTokens);
   const outputTokens = readNumber(span.metadata.outputTokens);
   const totalTokens = readNumber(span.metadata.totalTokens);
+  const usedPromptTokens = readNumber(span.metadata.usedPromptTokens);
+  const maxPromptTokens = readNumber(span.metadata.maxPromptTokens);
+  const maxOutputTokens = readNumber(span.metadata.maxOutputTokens);
+  const selectedFileCount = readMetadataArrayLength(span.metadata.selectedFiles);
 
   if (toolName && span.spanType !== "tool") {
     meta.push(toolName);
@@ -1278,6 +1399,32 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     meta.push(`${sectionIds.length} sections`);
   }
 
+  if (span.spanType === "context" && typeof usedPromptTokens === "number") {
+    meta.push(
+      typeof maxPromptTokens === "number"
+        ? `${usedPromptTokens}/${maxPromptTokens} prompt tokens`
+        : `${usedPromptTokens} prompt tokens`
+    );
+  }
+
+  if (span.spanType === "context" && truncatedSectionIds.length > 0) {
+    meta.push(
+      `${truncatedSectionIds.length} truncated section${truncatedSectionIds.length === 1 ? "" : "s"}`
+    );
+  }
+
+  if (span.spanType === "context" && omittedForBudgetSectionIds.length > 0) {
+    meta.push(
+      `${omittedForBudgetSectionIds.length} omitted for budget`
+    );
+  }
+
+  if (span.spanType === "context" && selectedFileCount > 0) {
+    meta.push(
+      `${selectedFileCount} file${selectedFileCount === 1 ? "" : "s"} referenced`
+    );
+  }
+
   if (validationStatus) {
     meta.push(`validation ${validationStatus}`);
   }
@@ -1286,6 +1433,10 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     meta.push(
       `${inputTokens ?? 0}/${outputTokens ?? 0}/${totalTokens ?? 0} tokens`
     );
+  }
+
+  if (span.spanType === "model" && typeof maxOutputTokens === "number") {
+    meta.push(`max ${maxOutputTokens} output tokens`);
   }
 
   if (typeof span.durationMs === "number") {
@@ -1382,6 +1533,10 @@ function areDuplicateActivityItems(left: AgentActivityItem, right: AgentActivity
 
 function normalizeActivityText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function readMetadataArrayLength(value: unknown) {
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function deriveRoleLabel(role: string) {

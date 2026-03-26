@@ -177,6 +177,7 @@ export type TraceRunSummary = {
     totalAssemblies: number;
     totalSectionCount: number;
     totalPromptLength: number | null;
+    totalPromptTokens: number | null;
     roles: Array<{
       role: string;
       assemblyCount: number;
@@ -185,7 +186,10 @@ export type TraceRunSummary = {
       truncatedSectionCount: number;
       omittedForBudgetSectionCount: number;
       maxPromptChars: number | null;
+      maxPromptTokens: number | null;
+      maxOutputTokens: number | null;
       usedPromptChars: number | null;
+      usedPromptTokens: number | null;
       promptLength: number | null;
       selectedFileCount: number;
       selectedPaths: string[];

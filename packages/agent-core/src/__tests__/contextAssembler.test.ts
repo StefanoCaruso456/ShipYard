@@ -186,6 +186,8 @@ test("executor payload truncates oversized external context and records budget m
   assert.equal(externalSection?.metadata?.truncated, true);
   assert.ok(payload.budget.truncatedSectionIds.includes("external-context:prior-output"));
   assert.ok(payload.budget.usedPromptChars <= payload.budget.maxPromptChars);
+  assert.ok(payload.budget.usedPromptTokens <= payload.budget.maxPromptTokens);
+  assert.ok(payload.budget.maxOutputTokens > 0);
   assert.match(externalSection?.content ?? "", /\[Truncated for executor context budget\./);
 });
 
@@ -220,6 +222,7 @@ test("verifier payload records budget-driven section omissions deterministically
     )
   );
   assert.ok(payload.budget.usedPromptChars <= payload.budget.maxPromptChars);
+  assert.ok(payload.budget.usedPromptTokens <= payload.budget.maxPromptTokens);
 });
 
 test("rolling summary defaults to omitted when no prior step state exists", async () => {
