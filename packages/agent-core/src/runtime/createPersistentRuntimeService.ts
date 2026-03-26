@@ -138,8 +138,6 @@ export async function createPersistentRuntimeService(
     const parentRunId = input.parentRunId?.trim() ? input.parentRunId.trim() : null;
     const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
 
-    const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
-
     const run: AgentRunRecord = {
       id: runId,
       threadId,
