@@ -24,6 +24,9 @@ export function LiveRuntimeStage({
   const liveRuntime = thread.liveRuntime;
   const focusedRun = liveRuntime?.focusedRun;
   const operatorView = liveRuntime?.operatorView;
+  const hasActivity = (thread.activity?.length ?? 0) > 0;
+  const shouldShowOperatorOverview =
+    Boolean(operatorView) && (!hasActivity || Boolean(operatorView?.approval?.activeGate));
 
   if (!liveRuntime || !focusedRun) {
     return null;
@@ -108,7 +111,7 @@ export function LiveRuntimeStage({
         </div>
       </article>
 
-      {operatorView ? (
+      {shouldShowOperatorOverview && operatorView ? (
         <OperatorRunOverview
           runId={focusedRun.id}
           operatorView={operatorView}
