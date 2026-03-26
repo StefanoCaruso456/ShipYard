@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   createControlPlaneState,
+  recordPhaseStarted,
+  recordStoryStarted,
   recordStoryRetry,
+  recordTaskStarted,
   syncControlPlaneState
 } from "../runtime/controlPlane";
 import { normalizePhaseExecutionInput } from "../runtime/phaseExecution";
@@ -26,6 +29,11 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
                 id: "task-runtime",
                 instruction: "Define runtime.",
                 expectedOutcome: "Define runtime"
+              },
+              {
+                id: "task-contracts",
+                instruction: "Expose runtime contracts.",
+                expectedOutcome: "Expose runtime contracts"
               }
             ]
           }
@@ -76,6 +84,41 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
   );
   assert.equal(controlPlane.artifacts[0]?.kind, "plan");
   assert.ok(controlPlane.specialistAgentRegistry.definitions.length > 0);
+
+  recordPhaseStarted(controlPlane, phaseExecution.phases[0]!);
+
+  const storyHandoff = controlPlane.handoffs.find((handoff) => handoff.id === "handoff:story:story-runtime");
+  const phaseHandoff = controlPlane.handoffs.find(
+    (handoff) => handoff.id === "handoff:phase:phase-foundation"
+  );
+
+  assert.equal(phaseHandoff?.status, "accepted");
+  assert.equal(storyHandoff?.status, "created");
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime"));
+  assert.deepEqual(storyHandoff?.acceptanceCriteria, ["Define runtime"]);
+  assert.equal(storyHandoff?.correlationId, "corr:story:story-runtime");
+  assert.equal(storyHandoff?.toAgentTypeId, "backend_dev");
+
+  recordStoryStarted(controlPlane, phaseExecution.phases[0]!.userStories[0]!);
+
+  const taskHandoff = controlPlane.handoffs.find((handoff) => handoff.id === "handoff:task:task-runtime");
+  const dependentTaskHandoff = controlPlane.handoffs.find(
+    (handoff) => handoff.id === "handoff:task:task-contracts"
+  );
+
+  assert.equal(storyHandoff?.status, "accepted");
+  assert.equal(taskHandoff?.status, "created");
+  assert.deepEqual(dependentTaskHandoff?.dependencyIds, ["task-runtime"]);
+  assert.equal(taskHandoff?.toAgentTypeId, "execution_subagent");
+
+  recordTaskStarted(
+    controlPlane,
+    phaseExecution.phases[0]!.userStories[0]!,
+    phaseExecution.phases[0]!.userStories[0]!.tasks[0]!
+  );
+
+  assert.equal(taskHandoff?.status, "accepted");
+  assert.deepEqual(taskHandoff?.validationTargets, ["Define runtime"]);
 });
 
 test("control plane sync records status transitions and retry interventions", () => {
