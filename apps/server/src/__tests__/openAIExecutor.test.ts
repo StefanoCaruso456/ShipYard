@@ -142,6 +142,8 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
 
   assert.match(capturedPrompt, /Local workspace file action contract/);
   assert.match(capturedPrompt, /<local-file-plan>/);
+  assert.match(capturedPrompt, /Response style:/);
+  assert.match(capturedPrompt, /Avoid internal runtime labels such as "Runtime result"/);
   assert.equal(capturedMaxOutputTokens, 1400);
   assert.equal(result.summary, "Scaffold plan ready.");
 });
