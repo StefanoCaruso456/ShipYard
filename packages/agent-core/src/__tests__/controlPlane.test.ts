@@ -83,6 +83,7 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
     )
   );
   assert.equal(controlPlane.artifacts[0]?.kind, "plan");
+  assert.equal(controlPlane.artifacts[0]?.payload?.kind, "plan");
   assert.ok(controlPlane.specialistAgentRegistry.definitions.length > 0);
 
   recordPhaseStarted(controlPlane, phaseExecution.phases[0]!);
@@ -94,10 +95,36 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
 
   assert.equal(phaseHandoff?.status, "accepted");
   assert.equal(storyHandoff?.status, "created");
+  assert.ok(phaseHandoff?.artifactIds.includes("artifact:phase-requirements:phase-foundation"));
+  assert.ok(phaseHandoff?.artifactIds.includes("artifact:phase-delegation:phase-foundation"));
+  assert.equal(phaseHandoff?.workPacket?.ownerAgentTypeId, "production_lead");
+  assert.deepEqual(
+    phaseHandoff?.workPacket?.sourceArtifactIds,
+    phaseHandoff?.artifactIds
+  );
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-architecture:story-runtime"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime"));
   assert.deepEqual(storyHandoff?.acceptanceCriteria, ["Define runtime"]);
   assert.equal(storyHandoff?.correlationId, "corr:story:story-runtime");
   assert.equal(storyHandoff?.toAgentTypeId, "backend_dev");
+  assert.equal(storyHandoff?.workPacket?.ownerAgentTypeId, "backend_dev");
+  assert.ok(
+    controlPlane.artifacts.some(
+      (artifact) => artifact.kind === "requirements" && artifact.entityId === "phase-foundation"
+    )
+  );
+  assert.ok(
+    controlPlane.artifacts.some(
+      (artifact) =>
+        artifact.kind === "architecture_decision" && artifact.entityId === "story-runtime"
+    )
+  );
+  assert.ok(
+    controlPlane.artifacts.some(
+      (artifact) => artifact.kind === "subtask_breakdown" && artifact.entityId === "story-runtime"
+    )
+  );
 
   recordStoryStarted(controlPlane, phaseExecution.phases[0]!.userStories[0]!);
 
@@ -108,8 +135,11 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
 
   assert.equal(storyHandoff?.status, "accepted");
   assert.equal(taskHandoff?.status, "created");
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime"));
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:task-delegation:task-runtime"));
   assert.deepEqual(dependentTaskHandoff?.dependencyIds, ["task-runtime"]);
   assert.equal(taskHandoff?.toAgentTypeId, "execution_subagent");
+  assert.equal(taskHandoff?.workPacket?.ownerAgentTypeId, "backend_dev");
 
   recordTaskStarted(
     controlPlane,
@@ -119,6 +149,7 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
 
   assert.equal(taskHandoff?.status, "accepted");
   assert.deepEqual(taskHandoff?.validationTargets, ["Define runtime"]);
+  assert.deepEqual(taskHandoff?.workPacket?.taskIds, ["task-runtime"]);
 });
 
 test("control plane sync records status transitions and retry interventions", () => {

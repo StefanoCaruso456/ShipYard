@@ -25,16 +25,28 @@ can be validated and traced objectively.
 
 ## How It Works
 
-The orchestrator produces explicit artifacts that include:
+The control plane now records typed artifacts for:
 
-- scope
+- plan
+- phase requirements
+- story architecture decisions
+- story subtask breakdowns
+- delegation briefs
+
+Each handoff also carries a structured work packet that includes:
+
+- source artifact ids
+- scope summary
 - constraints
-- file or domain targets
+- file targets
+- domain targets
+- acceptance criteria
 - validation targets
-- dependency order
+- dependency ids
+- task ids
 
-The production lead then routes work from those artifacts into specialist assignments and task
-handoffs.
+The production lead and specialist agents now delegate from those typed packets instead of relying
+on summary prose alone.
 
 ## Outcome
 
@@ -55,3 +67,4 @@ It only hardens the planning and handoff contract.
 - orchestrator outputs are stored as typed artifacts
 - decomposition produces structured work packets
 - production-lead delegation references artifacts directly
+- runtime tests prove the new artifacts and work packets are created deterministically

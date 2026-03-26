@@ -397,7 +397,28 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.equal(storyHandoff?.status, "completed");
   assert.equal(taskHandoff?.status, "completed");
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-architecture:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
   assert.deepEqual(taskHandoff?.dependencyIds, ["task-1"]);
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:task-delegation:task-2"));
+  assert.equal(storyHandoff?.workPacket?.ownerAgentTypeId, "backend_dev");
+  assert.deepEqual(taskHandoff?.workPacket?.taskIds, ["task-2"]);
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "requirements" && artifact.entityKind === "phase"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "architecture_decision" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "subtask_breakdown" && artifact.entityKind === "story"
+    )
+  );
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
       (artifact) =>
