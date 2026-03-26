@@ -379,6 +379,9 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.ok(trace?.summary.controlPlane?.artifactKinds.includes("subtask_breakdown"));
     assert.ok((trace?.summary.controlPlane?.handoffCount ?? 0) >= 3);
     assert.ok((trace?.summary.controlPlane?.workPacketCount ?? 0) >= 3);
+    assert.equal(trace?.summary.controlPlane?.conflictCount, 0);
+    assert.equal(trace?.summary.controlPlane?.openConflictCount, 0);
+    assert.equal(trace?.summary.controlPlane?.mergeDecisionCount, 0);
     assert.ok(
       trace?.spans
         .flatMap((span) => span.events)

@@ -5,6 +5,7 @@ import {
   createControlPlaneState,
   deriveOperatorRunView,
   normalizePhaseExecutionInput,
+  recordMergeGovernanceDecision,
   recordPhaseStarted,
   recordStoryStarted,
   recordTaskStarted,
@@ -310,4 +311,98 @@ test("operator view surfaces active approval gates for paused runs", () => {
   assert.equal(operatorView.approval?.activeGate?.status, "waiting");
   assert.match(operatorView.nextAction ?? "", /Review implementation approval/i);
   assert.ok(operatorView.journal.some((entry) => entry.label === "Approval gate waiting"));
+});
+
+test("operator view surfaces merge conflicts and production-lead decisions", () => {
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-merge",
+        name: "Merge",
+        description: "Exercise conflict governance.",
+        userStories: [
+          {
+            id: "story-merge",
+            title: "Merge story",
+            description: "Own the merge path.",
+            acceptanceCriteria: ["Merge safely"],
+            tasks: [
+              {
+                id: "task-merge",
+                instruction: "Merge the specialist output.",
+                expectedOutcome: "Merge completes cleanly."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+
+  phaseExecution.status = "in_progress";
+  phaseExecution.current = {
+    phaseId: "phase-merge",
+    storyId: "story-merge",
+    taskId: "task-merge"
+  };
+  phaseExecution.phases[0]!.status = "in_progress";
+  phaseExecution.phases[0]!.userStories[0]!.status = "in_progress";
+  phaseExecution.phases[0]!.userStories[0]!.tasks[0]!.status = "running";
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+  recordPhaseStarted(controlPlane, phaseExecution.phases[0]!);
+  recordStoryStarted(controlPlane, phaseExecution.phases[0]!.userStories[0]!);
+  recordTaskStarted(
+    controlPlane,
+    phaseExecution.phases[0]!.userStories[0]!,
+    phaseExecution.phases[0]!.userStories[0]!.tasks[0]!
+  );
+  recordMergeGovernanceDecision(controlPlane, {
+    conflicts: [
+      {
+        type: "unexpected_side_effects",
+        stepId: "task-merge-step-1",
+        reason: "Executor changed files outside the declared merge scope.",
+        detectedAt: Date.parse("2026-03-26T13:10:00.000Z"),
+        metadata: {
+          changedFiles: ["packages/agent-core/src/runtime/controlPlane.ts"],
+          expectedPath: "packages/agent-core/src/runtime/operatorView.ts",
+          expectedAgentTypeId: "backend_dev",
+          ownerAgentTypeId: "repo_tools_dev"
+        }
+      }
+    ],
+    entityKind: "task",
+    entityId: "task-merge",
+    outcome: "reassign",
+    summary: "Production lead should reassign the merge pass to repo tools."
+  });
+
+  const operatorView = deriveOperatorRunView(
+    createRun({
+      status: "running",
+      startedAt: "2026-03-26T13:09:00.000Z",
+      phaseExecution,
+      controlPlane
+    })
+  );
+
+  assert.equal(operatorView.conflicts.length, 1);
+  assert.equal(operatorView.conflicts[0]?.kind, "boundary_violation");
+  assert.ok(
+    operatorView.conflicts[0]?.conflictingPaths.includes(
+      "packages/agent-core/src/runtime/controlPlane.ts"
+    )
+  );
+  assert.equal(operatorView.mergeDecisions.length, 1);
+  assert.equal(operatorView.mergeDecisions[0]?.outcome, "reassign");
+  assert.match(operatorView.nextAction ?? "", /reassign/i);
+  assert.ok(
+    operatorView.journal.some((entry) => entry.label === "Boundary Violation conflict recorded")
+  );
+  assert.ok(
+    operatorView.journal.some((entry) => entry.label === "Merge decision: Reassign")
+  );
 });

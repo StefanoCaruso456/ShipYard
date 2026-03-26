@@ -1379,6 +1379,11 @@ function buildControlPlaneTraceMetadata(controlPlane: AgentRunRecord["controlPla
       controlPlaneCompletedHandoffCount: null,
       controlPlaneWorkPacketCount: null,
       controlPlaneWorkPacketOwnerAgentTypes: [],
+      controlPlaneConflictCount: null,
+      controlPlaneOpenConflictCount: null,
+      controlPlaneConflictKinds: [],
+      controlPlaneMergeDecisionCount: null,
+      controlPlaneMergeDecisionOutcomes: [],
       controlPlaneActiveApprovalGateId: null,
       controlPlaneCurrentEntityKind: null,
       controlPlaneCurrentEntityId: null
@@ -1401,6 +1406,14 @@ function buildControlPlaneTraceMetadata(controlPlane: AgentRunRecord["controlPla
       controlPlane.handoffs.flatMap((handoff) =>
         handoff.workPacket?.ownerAgentTypeId ? [handoff.workPacket.ownerAgentTypeId] : []
       )
+    ),
+    controlPlaneConflictCount: controlPlane.conflicts.length,
+    controlPlaneOpenConflictCount: controlPlane.conflicts.filter((conflict) => conflict.status === "open")
+      .length,
+    controlPlaneConflictKinds: uniqueStrings(controlPlane.conflicts.map((conflict) => conflict.kind)),
+    controlPlaneMergeDecisionCount: controlPlane.mergeDecisions.length,
+    controlPlaneMergeDecisionOutcomes: uniqueStrings(
+      controlPlane.mergeDecisions.map((decision) => decision.outcome)
     ),
     controlPlaneActiveApprovalGateId: controlPlane.activeApprovalGateId,
     controlPlaneCurrentEntityKind:

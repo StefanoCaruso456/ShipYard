@@ -499,6 +499,11 @@ export type RuntimeTraceRunLog = {
       completedHandoffCount: number;
       workPacketCount: number;
       workPacketOwnerAgentTypes: string[];
+      conflictCount: number;
+      openConflictCount: number;
+      conflictKinds: string[];
+      mergeDecisionCount: number;
+      mergeDecisionOutcomes: string[];
       activeApprovalGateId: string | null;
       currentEntityKind: string | null;
       currentEntityId: string | null;
@@ -656,6 +661,37 @@ export type RuntimeOperatorBlocker = {
   createdAt: string;
 };
 
+export type RuntimeOperatorConflict = {
+  id: string;
+  kind: string;
+  entityKind: "phase" | "story" | "task";
+  entityId: string;
+  summary: string;
+  status: "open" | "resolved";
+  detectedAt: string;
+  resolvedAt: string | null;
+  ownerLabel: string;
+  routeLabel: string | null;
+  conflictingPaths: string[];
+  expectedPaths: string[];
+  conflictingAgentLabels: string[];
+  resolutionDecisionId: string | null;
+};
+
+export type RuntimeOperatorMergeDecision = {
+  id: string;
+  entityKind: "phase" | "story" | "task";
+  entityId: string;
+  outcome: "accept" | "retry" | "reassign" | "reject";
+  summary: string;
+  decidedAt: string;
+  ownerLabel: string;
+  targetHandoffLabel: string | null;
+  reassignedToLabel: string | null;
+  conflictIds: string[];
+  notes: string | null;
+};
+
 export type RuntimeOperatorPlanningArtifact = {
   id: string;
   kind: string;
@@ -753,6 +789,8 @@ export type RuntimeOperatorView = {
     gates: RuntimeOperatorApprovalGate[];
   } | null;
   blockers: RuntimeOperatorBlocker[];
+  conflicts: RuntimeOperatorConflict[];
+  mergeDecisions: RuntimeOperatorMergeDecision[];
   planningArtifacts: RuntimeOperatorPlanningArtifact[];
   delegationPackets: RuntimeOperatorDelegationPacket[];
   journal: RuntimeOperatorJournalEntry[];

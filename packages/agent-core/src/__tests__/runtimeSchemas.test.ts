@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   controlPlaneArtifactSchema,
+  controlPlaneConflictSchema,
   controlPlaneHandoffSchema,
+  controlPlaneMergeDecisionSchema,
   normalizeRunContextInputValue,
   safeParseRunContextInput
 } from "../runtime/schemas";
@@ -196,4 +198,55 @@ test("control plane artifact and handoff schemas preserve typed runtime records"
   assert.deepEqual(handoff.validationTargets, ["pnpm typecheck"]);
   assert.equal(handoff.purpose, "Deliver the backend patch");
   assert.equal(handoff.workPacket?.ownerAgentTypeId, "backend_dev");
+});
+
+test("control plane conflict and merge decision schemas preserve governance records", () => {
+  const conflict = controlPlaneConflictSchema.parse({
+    id: " conflict-1 ",
+    kind: "boundary_violation",
+    entityKind: "task",
+    entityId: " task-1 ",
+    stepId: " step-1 ",
+    summary: " Executor wrote outside the assigned file targets. ",
+    status: "open",
+    detectedAt: "2026-03-26T06:00:00.000Z",
+    resolvedAt: null,
+    ownerRole: "production_lead",
+    ownerId: " prod-lead-1 ",
+    ownerAgentTypeId: "production_lead",
+    sourceHandoffId: " handoff:task:task-1 ",
+    relatedHandoffIds: [" handoff:task:task-1 ", " handoff:task:task-2 "],
+    conflictingPaths: [" packages/a.ts "],
+    expectedPaths: [" packages/b.ts "],
+    conflictingAgentTypeIds: ["backend_dev", "repo_tools_dev"],
+    resolutionDecisionId: " decision-1 ",
+    metadata: {
+      changedFiles: ["packages/a.ts"]
+    }
+  });
+  const decision = controlPlaneMergeDecisionSchema.parse({
+    id: " decision-1 ",
+    entityKind: "task",
+    entityId: " task-1 ",
+    conflictIds: [" conflict-1 "],
+    outcome: "reassign",
+    summary: " Reassign the task to repo tools. ",
+    decidedAt: "2026-03-26T06:01:00.000Z",
+    ownerRole: "production_lead",
+    ownerId: " prod-lead-1 ",
+    ownerAgentTypeId: "production_lead",
+    targetHandoffId: " handoff:task:task-1 ",
+    reassignedToAgentTypeId: "repo_tools_dev",
+    notes: " Preserve the original specialist boundary. "
+  });
+
+  assert.equal(conflict.id, "conflict-1");
+  assert.equal(conflict.stepId, "step-1");
+  assert.deepEqual(conflict.relatedHandoffIds, ["handoff:task:task-1", "handoff:task:task-2"]);
+  assert.deepEqual(conflict.conflictingPaths, ["packages/a.ts"]);
+  assert.equal(conflict.resolutionDecisionId, "decision-1");
+  assert.equal(decision.id, "decision-1");
+  assert.deepEqual(decision.conflictIds, ["conflict-1"]);
+  assert.equal(decision.reassignedToAgentTypeId, "repo_tools_dev");
+  assert.equal(decision.notes, "Preserve the original specialist boundary.");
 });

@@ -23,7 +23,7 @@ import type {
   ValidationResult,
   ValidationStatus
 } from "../validation/types";
-import type { TraceService } from "../observability/types";
+import type { TraceService, TraceValue } from "../observability/types";
 
 export type AgentRunStatus = "pending" | "running" | "paused" | "completed" | "failed";
 
@@ -455,6 +455,18 @@ export type ControlPlaneArtifactKind =
 
 export type ControlPlaneHandoffStatus = "created" | "accepted" | "completed";
 
+export type ControlPlaneConflictKind =
+  | "scope_overlap"
+  | "boundary_violation"
+  | "validation_failure"
+  | "intent_mismatch"
+  | "retry_cap_exceeded"
+  | "replan_cap_exceeded";
+
+export type ControlPlaneConflictStatus = "open" | "resolved";
+
+export type ControlPlaneMergeResolution = "accept" | "retry" | "reassign" | "reject";
+
 export type ControlPlaneApprovalGate = {
   id: string;
   kind: ApprovalGateKind;
@@ -630,6 +642,44 @@ export type ControlPlaneHandoff = {
   completedAt: string | null;
 };
 
+export type ControlPlaneConflict = {
+  id: string;
+  kind: ControlPlaneConflictKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  stepId: string | null;
+  summary: string;
+  status: ControlPlaneConflictStatus;
+  detectedAt: string;
+  resolvedAt: string | null;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  sourceHandoffId: string | null;
+  relatedHandoffIds: string[];
+  conflictingPaths: string[];
+  expectedPaths: string[];
+  conflictingAgentTypeIds: TeamSkillId[];
+  resolutionDecisionId: string | null;
+  metadata: TraceValue | null;
+};
+
+export type ControlPlaneMergeDecision = {
+  id: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  conflictIds: string[];
+  outcome: ControlPlaneMergeResolution;
+  summary: string;
+  decidedAt: string;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  targetHandoffId: string | null;
+  reassignedToAgentTypeId: TeamSkillId | null;
+  notes: string | null;
+};
+
 export type ControlPlaneIntervention = {
   id: string;
   kind: ControlPlaneInterventionKind;
@@ -666,6 +716,8 @@ type ControlPlaneNodeBase = {
   blockerIds: string[];
   artifactIds: string[];
   handoffIds: string[];
+  conflictIds: string[];
+  mergeDecisionIds: string[];
   interventionIds: string[];
   transitionLog: ControlPlaneTransition[];
 };
@@ -708,6 +760,8 @@ export type ControlPlaneState = {
   approvalGates: ControlPlaneApprovalGate[];
   artifacts: ControlPlaneArtifact[];
   handoffs: ControlPlaneHandoff[];
+  conflicts: ControlPlaneConflict[];
+  mergeDecisions: ControlPlaneMergeDecision[];
   interventions: ControlPlaneIntervention[];
   blockers: ControlPlaneBlocker[];
   lastFailureReason: string | null;
@@ -821,6 +875,37 @@ export type OperatorRunDelegationPacket = {
     | null;
 };
 
+export type OperatorRunConflict = {
+  id: string;
+  kind: ControlPlaneConflictKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  status: ControlPlaneConflictStatus;
+  detectedAt: string;
+  resolvedAt: string | null;
+  ownerLabel: string;
+  routeLabel: string | null;
+  conflictingPaths: string[];
+  expectedPaths: string[];
+  conflictingAgentLabels: string[];
+  resolutionDecisionId: string | null;
+};
+
+export type OperatorRunMergeDecision = {
+  id: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  outcome: ControlPlaneMergeResolution;
+  summary: string;
+  decidedAt: string;
+  ownerLabel: string;
+  targetHandoffLabel: string | null;
+  reassignedToLabel: string | null;
+  conflictIds: string[];
+  notes: string | null;
+};
+
 export type OperatorRunJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -860,6 +945,8 @@ export type OperatorRunView = {
     gates: OperatorRunApprovalGate[];
   } | null;
   blockers: OperatorRunBlocker[];
+  conflicts: OperatorRunConflict[];
+  mergeDecisions: OperatorRunMergeDecision[];
   planningArtifacts: OperatorRunPlanningArtifact[];
   delegationPackets: OperatorRunDelegationPacket[];
   journal: OperatorRunJournalEntry[];

@@ -15,6 +15,7 @@ import {
   createConflictRecord,
   recordCoordinationConflicts
 } from "./coordinator/conflicts";
+import { recordMergeGovernanceDecision } from "./controlPlane";
 import { mergeExecutorResult, mergePlannerResult, mergeVerifierResult } from "./coordinator/merge";
 import {
   cloneRunRecord,
@@ -329,6 +330,12 @@ export async function executeOrchestrationLoop(
             conflicts: [conflict],
             appendEvents: appendRunEvents
           });
+          recordMergeGovernanceDecision(options.run.controlPlane ?? null, {
+            conflicts: [conflict],
+            outcome: "reject",
+            summary: `${verifierResult.summary} Retry cap reached.`,
+            notes: "Retry budget was exhausted before the integration conflict could be cleared."
+          });
           await persist(options.persistRun, options.run);
           await traceCoordinatorDecision({
             stepId: plannerResult.step.id,
@@ -353,6 +360,12 @@ export async function executeOrchestrationLoop(
         });
         orchestration.stepRetryCount += 1;
         options.run.retryCount += 1;
+        recordMergeGovernanceDecision(options.run.controlPlane ?? null, {
+          conflicts,
+          outcome: "retry",
+          summary: verifierResult.summary,
+          notes: "Retry the current owner within the declared work packet boundary."
+        });
         orchestration.status = "executing";
         appendRunEvents(options.run, {
           at: new Date().toISOString(),
@@ -385,6 +398,12 @@ export async function executeOrchestrationLoop(
             conflicts: [conflict],
             appendEvents: appendRunEvents
           });
+          recordMergeGovernanceDecision(options.run.controlPlane ?? null, {
+            conflicts: [conflict],
+            outcome: "reject",
+            summary: `${verifierResult.summary} Replan cap reached.`,
+            notes: "The run exhausted the allowed replans for this integration conflict."
+          });
           await persist(options.persistRun, options.run);
           await traceCoordinatorDecision({
             stepId: plannerResult.step.id,
@@ -409,6 +428,12 @@ export async function executeOrchestrationLoop(
         });
         orchestration.replanCount += 1;
         options.run.retryCount += 1;
+        recordMergeGovernanceDecision(options.run.controlPlane ?? null, {
+          conflicts,
+          outcome: "reassign",
+          summary: verifierResult.summary,
+          notes: "Production lead should reshape or reassign the integration path before the next attempt."
+        });
         orchestration.stepRetryCount = 0;
         orchestration.currentStep = null;
         orchestration.status = "planning";
@@ -426,6 +451,12 @@ export async function executeOrchestrationLoop(
         await persist(options.persistRun, options.run);
         continue;
       case "fail":
+        recordMergeGovernanceDecision(options.run.controlPlane ?? null, {
+          conflicts,
+          outcome: "reject",
+          summary: verifierResult.summary,
+          notes: "Verifier rejected the integration result without a safe retry path."
+        });
         await traceCoordinatorDecision({
           stepId: plannerResult.step.id,
           decision: "fail",

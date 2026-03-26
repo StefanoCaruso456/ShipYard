@@ -952,6 +952,11 @@ function readControlPlaneSummary(metadata: TraceMetadata | undefined) {
     completedHandoffCount: readMetadataNumber(metadata.controlPlaneCompletedHandoffCount) ?? 0,
     workPacketCount: readMetadataNumber(metadata.controlPlaneWorkPacketCount) ?? 0,
     workPacketOwnerAgentTypes: collectMetadataStringArray(metadata.controlPlaneWorkPacketOwnerAgentTypes),
+    conflictCount: readMetadataNumber(metadata.controlPlaneConflictCount) ?? 0,
+    openConflictCount: readMetadataNumber(metadata.controlPlaneOpenConflictCount) ?? 0,
+    conflictKinds: collectMetadataStringArray(metadata.controlPlaneConflictKinds),
+    mergeDecisionCount: readMetadataNumber(metadata.controlPlaneMergeDecisionCount) ?? 0,
+    mergeDecisionOutcomes: collectMetadataStringArray(metadata.controlPlaneMergeDecisionOutcomes),
     activeApprovalGateId: readMetadataString(metadata.controlPlaneActiveApprovalGateId),
     currentEntityKind: readMetadataString(metadata.controlPlaneCurrentEntityKind),
     currentEntityId: readMetadataString(metadata.controlPlaneCurrentEntityId)

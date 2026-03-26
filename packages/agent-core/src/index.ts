@@ -72,6 +72,7 @@ export {
 export {
   createControlPlaneState,
   normalizeControlPlaneState,
+  recordMergeGovernanceDecision,
   recordPhaseCompleted,
   recordPhaseFailed,
   recordPhaseStarted,
@@ -120,7 +121,9 @@ export {
 } from "./runtime/rebuildState";
 export {
   controlPlaneArtifactSchema,
+  controlPlaneConflictSchema,
   controlPlaneHandoffSchema,
+  controlPlaneMergeDecisionSchema,
   normalizeRunContextInputValue,
   runContextInputSchema,
   safeParseRunContextInput
@@ -197,6 +200,9 @@ export type {
   ControlPlaneArtifactKind,
   ControlPlaneArtifactPayload,
   ControlPlaneBlocker,
+  ControlPlaneConflict,
+  ControlPlaneConflictKind,
+  ControlPlaneConflictStatus,
   ControlPlaneDecomposedTask,
   ControlPlaneDelegationBriefArtifactPayload,
   ControlPlaneEntityKind,
@@ -205,6 +211,8 @@ export type {
   ControlPlaneHandoffStatus,
   ControlPlaneIntervention,
   ControlPlaneInterventionKind,
+  ControlPlaneMergeDecision,
+  ControlPlaneMergeResolution,
   ControlPlaneArchitectureDecisionArtifactPayload,
   ControlPlanePlanArtifactPayload,
   ControlPlanePhaseNode,
@@ -261,9 +269,11 @@ export type {
   OperatorJournalTone,
   OperatorRunBlocker,
   OperatorRunApprovalGate,
+  OperatorRunConflict,
   OperatorRunCurrentWork,
   OperatorRunDelegationPacket,
   OperatorRunJournalEntry,
+  OperatorRunMergeDecision,
   OperatorRunOwner,
   OperatorRunPlanningArtifact,
   OperatorRunProgress,

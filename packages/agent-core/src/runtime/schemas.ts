@@ -3,9 +3,14 @@ import { z } from "zod";
 import type {
   ControlPlaneArtifact,
   ControlPlaneArtifactKind,
+  ControlPlaneConflict,
+  ControlPlaneConflictKind,
+  ControlPlaneConflictStatus,
   ControlPlaneEntityKind,
   ControlPlaneHandoff,
   ControlPlaneHandoffStatus,
+  ControlPlaneMergeDecision,
+  ControlPlaneMergeResolution,
   ControlPlaneRole,
   ExternalContextFormat,
   ExternalContextInput,
@@ -61,6 +66,27 @@ const controlPlaneHandoffStatuses = [
   "completed"
 ] as const satisfies readonly ControlPlaneHandoffStatus[];
 
+const controlPlaneConflictKinds = [
+  "scope_overlap",
+  "boundary_violation",
+  "validation_failure",
+  "intent_mismatch",
+  "retry_cap_exceeded",
+  "replan_cap_exceeded"
+] as const satisfies readonly ControlPlaneConflictKind[];
+
+const controlPlaneConflictStatuses = [
+  "open",
+  "resolved"
+] as const satisfies readonly ControlPlaneConflictStatus[];
+
+const controlPlaneMergeResolutions = [
+  "accept",
+  "retry",
+  "reassign",
+  "reject"
+] as const satisfies readonly ControlPlaneMergeResolution[];
+
 const externalContextKinds = [
   "spec",
   "schema",
@@ -89,6 +115,9 @@ export const controlPlaneRoleSchema = z.enum(controlPlaneRoles);
 export const controlPlaneEntityKindSchema = z.enum(controlPlaneEntityKinds);
 export const controlPlaneArtifactKindSchema = z.enum(controlPlaneArtifactKinds);
 export const controlPlaneHandoffStatusSchema = z.enum(controlPlaneHandoffStatuses);
+export const controlPlaneConflictKindSchema = z.enum(controlPlaneConflictKinds);
+export const controlPlaneConflictStatusSchema = z.enum(controlPlaneConflictStatuses);
+export const controlPlaneMergeResolutionSchema = z.enum(controlPlaneMergeResolutions);
 export const externalContextKindSchema = z.enum(externalContextKinds);
 export const externalContextFormatSchema = z.enum(externalContextFormats);
 
@@ -227,6 +256,86 @@ export const controlPlaneHandoffSchema = z
       createdAt: value.createdAt,
       acceptedAt: normalizeOptionalTrimmedString(value.acceptedAt),
       completedAt: normalizeOptionalTrimmedString(value.completedAt)
+    })
+  );
+
+export const controlPlaneConflictSchema = z
+  .object({
+    id: nonEmptyTrimmedStringSchema,
+    kind: controlPlaneConflictKindSchema,
+    entityKind: controlPlaneEntityKindSchema,
+    entityId: nonEmptyTrimmedStringSchema,
+    stepId: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    summary: nonEmptyTrimmedStringSchema,
+    status: controlPlaneConflictStatusSchema,
+    detectedAt: nonEmptyTrimmedStringSchema,
+    resolvedAt: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    ownerRole: controlPlaneRoleSchema,
+    ownerId: nonEmptyTrimmedStringSchema,
+    ownerAgentTypeId: z.union([teamSkillIdSchema, z.null()]),
+    sourceHandoffId: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    relatedHandoffIds: z.array(z.string()).optional().default([]),
+    conflictingPaths: z.array(z.string()).optional().default([]),
+    expectedPaths: z.array(z.string()).optional().default([]),
+    conflictingAgentTypeIds: z.array(teamSkillIdSchema).optional().default([]),
+    resolutionDecisionId: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    metadata: z.unknown().optional()
+  })
+  .transform(
+    (value): ControlPlaneConflict => ({
+      id: value.id,
+      kind: value.kind,
+      entityKind: value.entityKind,
+      entityId: value.entityId,
+      stepId: normalizeOptionalTrimmedString(value.stepId),
+      summary: value.summary,
+      status: value.status,
+      detectedAt: value.detectedAt,
+      resolvedAt: normalizeOptionalTrimmedString(value.resolvedAt),
+      ownerRole: value.ownerRole,
+      ownerId: value.ownerId,
+      ownerAgentTypeId: value.ownerAgentTypeId,
+      sourceHandoffId: normalizeOptionalTrimmedString(value.sourceHandoffId),
+      relatedHandoffIds: normalizeStringArray(value.relatedHandoffIds),
+      conflictingPaths: normalizeStringArray(value.conflictingPaths),
+      expectedPaths: normalizeStringArray(value.expectedPaths),
+      conflictingAgentTypeIds: value.conflictingAgentTypeIds,
+      resolutionDecisionId: normalizeOptionalTrimmedString(value.resolutionDecisionId),
+      metadata: (value.metadata as ControlPlaneConflict["metadata"] | undefined) ?? null
+    })
+  );
+
+export const controlPlaneMergeDecisionSchema = z
+  .object({
+    id: nonEmptyTrimmedStringSchema,
+    entityKind: controlPlaneEntityKindSchema,
+    entityId: nonEmptyTrimmedStringSchema,
+    conflictIds: z.array(z.string()).optional().default([]),
+    outcome: controlPlaneMergeResolutionSchema,
+    summary: nonEmptyTrimmedStringSchema,
+    decidedAt: nonEmptyTrimmedStringSchema,
+    ownerRole: controlPlaneRoleSchema,
+    ownerId: nonEmptyTrimmedStringSchema,
+    ownerAgentTypeId: z.union([teamSkillIdSchema, z.null()]),
+    targetHandoffId: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    reassignedToAgentTypeId: z.union([teamSkillIdSchema, z.null(), z.undefined()]).optional(),
+    notes: z.union([z.string(), z.null(), z.undefined()]).optional()
+  })
+  .transform(
+    (value): ControlPlaneMergeDecision => ({
+      id: value.id,
+      entityKind: value.entityKind,
+      entityId: value.entityId,
+      conflictIds: normalizeStringArray(value.conflictIds),
+      outcome: value.outcome,
+      summary: value.summary,
+      decidedAt: value.decidedAt,
+      ownerRole: value.ownerRole,
+      ownerId: value.ownerId,
+      ownerAgentTypeId: value.ownerAgentTypeId,
+      targetHandoffId: normalizeOptionalTrimmedString(value.targetHandoffId),
+      reassignedToAgentTypeId: value.reassignedToAgentTypeId ?? null,
+      notes: normalizeOptionalTrimmedString(value.notes)
     })
   );
 

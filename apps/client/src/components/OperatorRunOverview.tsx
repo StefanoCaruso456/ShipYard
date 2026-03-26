@@ -26,6 +26,8 @@ export function OperatorRunOverview({
   const visibleJournal = operatorView.journal.slice(0, 8);
   const visiblePlanningArtifacts = operatorView.planningArtifacts.slice(0, 6);
   const visibleDelegationPackets = operatorView.delegationPackets.slice(0, 6);
+  const visibleConflicts = operatorView.conflicts.slice(0, 6);
+  const visibleMergeDecisions = operatorView.mergeDecisions.slice(0, 6);
   const activeGate = operatorView.approval?.activeGate ?? null;
   const [comment, setComment] = useState("");
   const [submittingDecision, setSubmittingDecision] =
@@ -253,6 +255,82 @@ export function OperatorRunOverview({
         </section>
       ) : null}
 
+      {operatorView.conflicts.length > 0 ? (
+        <section className="operator-overview__conflicts">
+          <div className="operator-overview__section-head">
+            <strong>Merge conflicts</strong>
+            <span>{operatorView.conflicts.length}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            {visibleConflicts.map((conflict) => (
+              <article key={conflict.id} className="operator-overview__detail-card">
+                <div className="operator-overview__journal-head">
+                  <strong>{humanizeArtifactKind(conflict.kind)}</strong>
+                  <span>{formatDateTime(conflict.detectedAt)}</span>
+                </div>
+                <span className="operator-overview__eyebrow">
+                  {conflict.entityKind} {conflict.entityId} · {conflict.ownerLabel}
+                </span>
+                <p>{conflict.summary}</p>
+                <div className="operator-overview__meta">
+                  <span>{humanizeConflictStatus(conflict.status)}</span>
+                  {conflict.routeLabel ? <span>{conflict.routeLabel}</span> : null}
+                </div>
+                {conflict.conflictingPaths.length > 0 ? (
+                  <div className="operator-overview__packet-group">
+                    <span className="operator-overview__eyebrow">Overlapping files</span>
+                    <p>{conflict.conflictingPaths.slice(0, 3).join(" | ")}</p>
+                  </div>
+                ) : null}
+                {conflict.conflictingAgentLabels.length > 0 ? (
+                  <div className="operator-overview__meta">
+                    {conflict.conflictingAgentLabels.map((label) => (
+                      <span key={`${conflict.id}-${label}`}>{label}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {operatorView.mergeDecisions.length > 0 ? (
+        <section className="operator-overview__decisions">
+          <div className="operator-overview__section-head">
+            <strong>Merge decisions</strong>
+            <span>{operatorView.mergeDecisions.length}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            {visibleMergeDecisions.map((decision) => (
+              <article key={decision.id} className="operator-overview__detail-card">
+                <div className="operator-overview__journal-head">
+                  <strong>{humanizeMergeOutcome(decision.outcome)}</strong>
+                  <span>{formatDateTime(decision.decidedAt)}</span>
+                </div>
+                <span className="operator-overview__eyebrow">
+                  {decision.entityKind} {decision.entityId} · {decision.ownerLabel}
+                </span>
+                <p>{decision.summary}</p>
+                <div className="operator-overview__meta">
+                  <span>{decision.conflictIds.length} conflict{decision.conflictIds.length === 1 ? "" : "s"}</span>
+                  {decision.targetHandoffLabel ? <span>{decision.targetHandoffLabel}</span> : null}
+                  {decision.reassignedToLabel ? <span>{decision.reassignedToLabel}</span> : null}
+                </div>
+                {decision.notes ? (
+                  <div className="operator-overview__packet-group">
+                    <span className="operator-overview__eyebrow">Notes</span>
+                    <p>{decision.notes}</p>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {operatorView.blockers.length > 0 ? (
         <section className="operator-overview__blockers">
           <div className="operator-overview__section-head">
@@ -410,5 +488,22 @@ function humanizePacketStatus(status: string) {
       return "Completed";
     default:
       return status;
+  }
+}
+
+function humanizeConflictStatus(status: "open" | "resolved") {
+  return status === "resolved" ? "Resolved" : "Open";
+}
+
+function humanizeMergeOutcome(outcome: "accept" | "retry" | "reassign" | "reject") {
+  switch (outcome) {
+    case "accept":
+      return "Accepted";
+    case "retry":
+      return "Retry requested";
+    case "reassign":
+      return "Reassign scope";
+    default:
+      return "Rejected";
   }
 }

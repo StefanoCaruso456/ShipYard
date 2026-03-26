@@ -22,14 +22,28 @@ rejected, retried, or reassigned.
 
 ## How It Works
 
-When outputs collide or violate assignment boundaries, the runtime records:
+The control plane now records typed merge governance state:
+
+- `conflicts` for scope overlap, boundary violations, validation failures, and exhausted retry/replan paths
+- `merge decisions` owned by the production lead with outcomes: `accept`, `retry`, `reassign`, or `reject`
+
+Conflicts are currently created from two sources:
+
+- overlapping story or task handoffs with colliding file or domain scope
+- verifier/runtime integration failures during execution
+
+Each record captures:
 
 - what conflicted
 - who owned the conflicting work
+- which handoffs or file targets were involved
 - what resolution was chosen
 - whether the result was retry, reassign, reject, or accept
 
-The production lead remains the workflow authority for those integration outcomes.
+The operator view and trace summary now surface open conflicts and merge decisions directly.
+
+The production lead remains the workflow authority for those integration outcomes, even when the
+runtime records the first governance decision automatically.
 
 ## Outcome
 
@@ -38,6 +52,7 @@ After this phase:
 - merge decisions are visible and auditable
 - retries and reassignments are more disciplined
 - specialists can work in parallel with stronger governance
+- overlap and boundary problems show up in the operator view without reading raw state
 
 ## What This Phase Does Not Do
 

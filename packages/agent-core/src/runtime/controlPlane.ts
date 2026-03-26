@@ -7,12 +7,16 @@ import type {
   ControlPlaneArtifact,
   ControlPlaneArchitectureDecisionArtifactPayload,
   ControlPlaneBlocker,
+  ControlPlaneConflict,
+  ControlPlaneConflictKind,
   ControlPlaneDecomposedTask,
   ControlPlaneDelegationBriefArtifactPayload,
   ControlPlaneEntityKind,
   ControlPlaneEntityStatus,
   ControlPlaneHandoff,
   ControlPlaneIntervention,
+  ControlPlaneMergeDecision,
+  ControlPlaneMergeResolution,
   ControlPlanePlanArtifactPayload,
   ControlPlanePhaseNode,
   ControlPlaneRequirementsArtifactPayload,
@@ -82,6 +86,8 @@ export function createControlPlaneState(phaseExecution: PhaseExecutionState): Co
     approvalGates: buildApprovalGates(phaseExecution),
     artifacts: [],
     handoffs: [],
+    conflicts: [],
+    mergeDecisions: [],
     interventions: [],
     blockers: [],
     lastFailureReason: phaseExecution.lastFailureReason,
@@ -158,11 +164,54 @@ export function normalizeControlPlaneState(
         workPacket: normalizeWorkPacket(handoff.workPacket)
       }))
     : [];
+  normalized.conflicts = Array.isArray(normalized.conflicts)
+    ? normalized.conflicts.map((conflict) => ({
+        ...conflict,
+        stepId: conflict.stepId ?? null,
+        resolvedAt: conflict.resolvedAt ?? null,
+        ownerAgentTypeId: conflict.ownerAgentTypeId ?? inferAgentTypeId(conflict.ownerId),
+        sourceHandoffId: conflict.sourceHandoffId ?? null,
+        relatedHandoffIds: Array.isArray(conflict.relatedHandoffIds)
+          ? conflict.relatedHandoffIds
+          : [],
+        conflictingPaths: Array.isArray(conflict.conflictingPaths)
+          ? conflict.conflictingPaths
+          : [],
+        expectedPaths: Array.isArray(conflict.expectedPaths) ? conflict.expectedPaths : [],
+        conflictingAgentTypeIds: Array.isArray(conflict.conflictingAgentTypeIds)
+          ? uniqueSkillIds(conflict.conflictingAgentTypeIds)
+          : [],
+        resolutionDecisionId: conflict.resolutionDecisionId ?? null,
+        metadata: conflict.metadata ?? null
+      }))
+    : [];
+  normalized.mergeDecisions = Array.isArray(normalized.mergeDecisions)
+    ? normalized.mergeDecisions.map((decision) => ({
+        ...decision,
+        conflictIds: Array.isArray(decision.conflictIds) ? decision.conflictIds : [],
+        ownerAgentTypeId: decision.ownerAgentTypeId ?? inferAgentTypeId(decision.ownerId),
+        targetHandoffId: decision.targetHandoffId ?? null,
+        reassignedToAgentTypeId: decision.reassignedToAgentTypeId ?? null,
+        notes: decision.notes ?? null
+      }))
+    : [];
   normalized.interventions = Array.isArray(normalized.interventions)
     ? normalized.interventions
     : [];
   normalized.blockers = Array.isArray(normalized.blockers) ? normalized.blockers : [];
   normalized.phases = Array.isArray(normalized.phases) ? normalized.phases : [];
+  for (const phase of normalized.phases) {
+    phase.conflictIds = Array.isArray(phase.conflictIds) ? phase.conflictIds : [];
+    phase.mergeDecisionIds = Array.isArray(phase.mergeDecisionIds) ? phase.mergeDecisionIds : [];
+    for (const story of phase.userStories) {
+      story.conflictIds = Array.isArray(story.conflictIds) ? story.conflictIds : [];
+      story.mergeDecisionIds = Array.isArray(story.mergeDecisionIds) ? story.mergeDecisionIds : [];
+      for (const task of story.tasks) {
+        task.conflictIds = Array.isArray(task.conflictIds) ? task.conflictIds : [];
+        task.mergeDecisionIds = Array.isArray(task.mergeDecisionIds) ? task.mergeDecisionIds : [];
+      }
+    }
+  }
   normalized.approvalGates = Array.isArray(normalized.approvalGates)
     ? normalized.approvalGates.map((gate) => ({
         ...gate,
@@ -322,6 +371,104 @@ export function recordApprovalGateDecision(
   resolveInterventionById(controlPlane, approvalInterventionId(gate.id));
 }
 
+export function recordMergeGovernanceDecision(
+  controlPlane: ControlPlaneState | null,
+  input: {
+    conflicts: Array<{
+      type: string;
+      stepId: string | null;
+      reason: string;
+      detectedAt: number;
+      metadata?: TraceValue;
+    }>;
+    entityKind?: ControlPlaneEntityKind | null;
+    entityId?: string | null;
+    outcome: ControlPlaneMergeResolution;
+    summary: string;
+    targetHandoffId?: string | null;
+    reassignedToAgentTypeId?: TeamSkillId | null;
+    notes?: string | null;
+  }
+) {
+  if (!controlPlane || input.conflicts.length === 0) {
+    return;
+  }
+
+  const entity = resolveGovernanceEntity(controlPlane, input.entityKind, input.entityId);
+
+  if (!entity) {
+    return;
+  }
+
+  const sourceHandoffId = defaultHandoffId(entity.entityKind, entity.entityId);
+  const conflictIds = input.conflicts.map((conflict) =>
+    upsertConflict(
+      controlPlane,
+      buildGovernanceConflict(controlPlane, entity.entityKind, entity.entityId, sourceHandoffId, conflict)
+    ).id
+  );
+
+  const decision = upsertMergeDecision(controlPlane, {
+    id: `decision:${entity.entityKind}:${entity.entityId}:${input.outcome}`,
+    entityKind: entity.entityKind,
+    entityId: entity.entityId,
+    conflictIds,
+    outcome: input.outcome,
+    summary: input.summary,
+    ownerRole: "production_lead",
+    ownerId: PRODUCTION_LEAD_ID,
+    targetHandoffId: input.targetHandoffId ?? sourceHandoffId,
+    reassignedToAgentTypeId: input.reassignedToAgentTypeId ?? null,
+    notes: input.notes ?? null
+  });
+
+  for (const conflictId of conflictIds) {
+    const conflict = controlPlane.conflicts.find((candidate) => candidate.id === conflictId);
+
+    if (conflict) {
+      conflict.resolutionDecisionId = decision.id;
+    }
+  }
+
+  if (input.outcome === "retry") {
+    upsertIntervention(controlPlane, {
+      id: governanceInterventionId(entity.entityKind, entity.entityId, "retry"),
+      kind: "retry",
+      entityKind: entity.entityKind,
+      entityId: entity.entityId,
+      summary: input.summary,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID
+    });
+    return;
+  }
+
+  if (input.outcome === "accept") {
+    resolveConflicts(controlPlane, entity.entityKind, entity.entityId);
+    resolveInterventions(controlPlane, entity.entityKind, entity.entityId);
+    resolveBlockers(controlPlane, entity.entityKind, entity.entityId);
+    return;
+  }
+
+  upsertIntervention(controlPlane, {
+    id: governanceInterventionId(entity.entityKind, entity.entityId, input.outcome),
+    kind: "manual_review",
+    entityKind: entity.entityKind,
+    entityId: entity.entityId,
+    summary: input.summary,
+    ownerRole: "production_lead",
+    ownerId: PRODUCTION_LEAD_ID
+  });
+  upsertBlocker(controlPlane, {
+    id: governanceBlockerId(entity.entityKind, entity.entityId),
+    entityKind: entity.entityKind,
+    entityId: entity.entityId,
+    summary: input.summary,
+    ownerRole: "production_lead",
+    ownerId: PRODUCTION_LEAD_ID
+  });
+}
+
 export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase: Phase) {
   if (!controlPlane) {
     return;
@@ -443,6 +590,7 @@ export function recordTaskCompleted(
 
   completeHandoff(controlPlane, `handoff:task:${task.id}`);
   resolveBlockers(controlPlane, "task", task.id);
+  resolveConflicts(controlPlane, "task", task.id);
   upsertArtifact(controlPlane, {
     id: `artifact:task-result:${task.id}`,
     kind: "task_result",
@@ -545,6 +693,7 @@ export function recordStoryCompleted(
 
   completeHandoff(controlPlane, `handoff:story:${story.id}`);
   resolveBlockers(controlPlane, "story", story.id);
+  resolveConflicts(controlPlane, "story", story.id);
   resolveInterventions(controlPlane, "story", story.id);
   upsertArtifact(controlPlane, {
     id: `artifact:story-summary:${story.id}`,
@@ -667,6 +816,7 @@ export function recordPhaseCompleted(
 
   completeHandoff(controlPlane, `handoff:phase:${phase.id}`);
   resolveBlockers(controlPlane, "phase", phase.id);
+  resolveConflicts(controlPlane, "phase", phase.id);
   resolveInterventions(controlPlane, "phase", phase.id);
   upsertArtifact(controlPlane, {
     id: `artifact:phase-summary:${phase.id}`,
@@ -1240,6 +1390,8 @@ function createPhaseNode(
     blockerIds: [],
     artifactIds: [],
     handoffIds: [],
+    conflictIds: [],
+    mergeDecisionIds: [],
     interventionIds: [],
     transitionLog: [],
     userStories: phase.userStories.map((story) =>
@@ -1269,6 +1421,8 @@ function createStoryNode(
     blockerIds: [],
     artifactIds: [],
     handoffIds: [],
+    conflictIds: [],
+    mergeDecisionIds: [],
     interventionIds: [],
     transitionLog: [],
     tasks: story.tasks.map((task) => createTaskNode(story, task, updatedAt, specialistAgentRegistry))
@@ -1297,6 +1451,8 @@ function createTaskNode(
     blockerIds: [],
     artifactIds: [],
     handoffIds: [],
+    conflictIds: [],
+    mergeDecisionIds: [],
     interventionIds: [],
     transitionLog: []
   };
@@ -1558,6 +1714,106 @@ function upsertHandoff(
 
   attachEntityId(controlPlane, handoff.entityKind, handoff.entityId, "handoffIds", handoff.id);
   traceControlPlaneHandoff(controlPlane, normalizedHandoff);
+  detectHandoffScopeConflicts(controlPlane, normalizedHandoff);
+}
+
+function upsertConflict(
+  controlPlane: ControlPlaneState,
+  conflict: Omit<ControlPlaneConflict, "ownerAgentTypeId" | "resolvedAt" | "resolutionDecisionId" | "metadata"> & {
+    ownerAgentTypeId?: TeamSkillId | null;
+    resolvedAt?: string | null;
+    resolutionDecisionId?: string | null;
+    metadata?: TraceValue;
+  }
+) {
+  const existing = controlPlane.conflicts.find((candidate) => candidate.id === conflict.id);
+  const ownerAgentTypeId =
+    conflict.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, conflict.ownerId);
+  const normalizedConflict: ControlPlaneConflict = {
+    ...conflict,
+    ownerAgentTypeId,
+    resolvedAt: conflict.resolvedAt ?? null,
+    resolutionDecisionId: conflict.resolutionDecisionId ?? existing?.resolutionDecisionId ?? null,
+    metadata: conflict.metadata ?? null
+  };
+
+  if (existing) {
+    existing.kind = normalizedConflict.kind;
+    existing.summary = normalizedConflict.summary;
+    existing.status = normalizedConflict.status;
+    existing.detectedAt = normalizedConflict.detectedAt;
+    existing.resolvedAt = normalizedConflict.resolvedAt;
+    existing.ownerRole = normalizedConflict.ownerRole;
+    existing.ownerId = normalizedConflict.ownerId;
+    existing.ownerAgentTypeId = ownerAgentTypeId;
+    existing.sourceHandoffId = normalizedConflict.sourceHandoffId;
+    existing.relatedHandoffIds = uniqueStrings(normalizedConflict.relatedHandoffIds);
+    existing.conflictingPaths = uniqueStrings(normalizedConflict.conflictingPaths);
+    existing.expectedPaths = uniqueStrings(normalizedConflict.expectedPaths);
+    existing.conflictingAgentTypeIds = uniqueSkillIds(normalizedConflict.conflictingAgentTypeIds);
+    existing.resolutionDecisionId = normalizedConflict.resolutionDecisionId;
+    existing.metadata = normalizedConflict.metadata;
+  } else {
+    controlPlane.conflicts.push({
+      ...normalizedConflict,
+      relatedHandoffIds: uniqueStrings(normalizedConflict.relatedHandoffIds),
+      conflictingPaths: uniqueStrings(normalizedConflict.conflictingPaths),
+      expectedPaths: uniqueStrings(normalizedConflict.expectedPaths),
+      conflictingAgentTypeIds: uniqueSkillIds(normalizedConflict.conflictingAgentTypeIds)
+    });
+  }
+
+  attachEntityId(controlPlane, conflict.entityKind, conflict.entityId, "conflictIds", conflict.id);
+  const stored = controlPlane.conflicts.find((candidate) => candidate.id === conflict.id)!;
+  traceControlPlaneConflict(controlPlane, stored);
+  return stored;
+}
+
+function upsertMergeDecision(
+  controlPlane: ControlPlaneState,
+  decision: Omit<ControlPlaneMergeDecision, "decidedAt" | "ownerAgentTypeId"> & {
+    ownerAgentTypeId?: TeamSkillId | null;
+  }
+) {
+  const existing = controlPlane.mergeDecisions.find((candidate) => candidate.id === decision.id);
+  const ownerAgentTypeId =
+    decision.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, decision.ownerId);
+  const normalizedDecision: ControlPlaneMergeDecision = {
+    ...decision,
+    ownerAgentTypeId,
+    decidedAt: existing?.decidedAt ?? new Date().toISOString()
+  };
+
+  if (existing) {
+    existing.conflictIds = uniqueStrings([
+      ...existing.conflictIds,
+      ...normalizedDecision.conflictIds
+    ]);
+    existing.outcome = normalizedDecision.outcome;
+    existing.summary = normalizedDecision.summary;
+    existing.ownerRole = normalizedDecision.ownerRole;
+    existing.ownerId = normalizedDecision.ownerId;
+    existing.ownerAgentTypeId = ownerAgentTypeId;
+    existing.targetHandoffId = normalizedDecision.targetHandoffId;
+    existing.reassignedToAgentTypeId = normalizedDecision.reassignedToAgentTypeId;
+    existing.notes = normalizedDecision.notes;
+  } else {
+    controlPlane.mergeDecisions.push({
+      ...normalizedDecision,
+      conflictIds: uniqueStrings(normalizedDecision.conflictIds)
+    });
+  }
+
+  attachEntityId(
+    controlPlane,
+    decision.entityKind,
+    decision.entityId,
+    "mergeDecisionIds",
+    decision.id
+  );
+  const stored = controlPlane.mergeDecisions.find((candidate) => candidate.id === decision.id)!;
+  traceControlPlaneMergeDecision(controlPlane, stored);
+  return stored;
 }
 
 function traceControlPlaneArtifact(controlPlane: ControlPlaneState, artifact: ControlPlaneArtifact) {
@@ -1620,6 +1876,186 @@ function traceControlPlaneHandoff(controlPlane: ControlPlaneState, handoff: Cont
       controlPlaneStatus: controlPlane.status
     }
   });
+}
+
+function traceControlPlaneConflict(controlPlane: ControlPlaneState, conflict: ControlPlaneConflict) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  traceScope.activeSpan.addEvent("control_plane_conflict_recorded", {
+    message: `${conflict.kind} conflict recorded for ${conflict.entityKind} ${conflict.entityId}.`,
+    metadata: {
+      conflictId: conflict.id,
+      conflictKind: conflict.kind,
+      entityKind: conflict.entityKind,
+      entityId: conflict.entityId,
+      stepId: conflict.stepId,
+      conflictStatus: conflict.status,
+      ownerRole: conflict.ownerRole,
+      ownerId: conflict.ownerId,
+      ownerAgentTypeId: conflict.ownerAgentTypeId,
+      sourceHandoffId: conflict.sourceHandoffId,
+      relatedHandoffIds: previewStrings(conflict.relatedHandoffIds),
+      conflictingPaths: previewStrings(conflict.conflictingPaths),
+      expectedPaths: previewStrings(conflict.expectedPaths),
+      conflictingAgentTypeIds: previewStrings(conflict.conflictingAgentTypeIds),
+      resolutionDecisionId: conflict.resolutionDecisionId,
+      conflictMetadata: conflict.metadata,
+      controlPlaneStatus: controlPlane.status
+    }
+  });
+}
+
+function traceControlPlaneMergeDecision(
+  controlPlane: ControlPlaneState,
+  decision: ControlPlaneMergeDecision
+) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  traceScope.activeSpan.addEvent("control_plane_merge_decision_recorded", {
+    message: `${decision.outcome} decision recorded for ${decision.entityKind} ${decision.entityId}.`,
+    metadata: {
+      decisionId: decision.id,
+      entityKind: decision.entityKind,
+      entityId: decision.entityId,
+      mergeOutcome: decision.outcome,
+      conflictIds: previewStrings(decision.conflictIds),
+      conflictCount: decision.conflictIds.length,
+      ownerRole: decision.ownerRole,
+      ownerId: decision.ownerId,
+      ownerAgentTypeId: decision.ownerAgentTypeId,
+      targetHandoffId: decision.targetHandoffId,
+      reassignedToAgentTypeId: decision.reassignedToAgentTypeId,
+      decisionNotes: decision.notes,
+      decisionSummary: decision.summary,
+      controlPlaneStatus: controlPlane.status
+    }
+  });
+}
+
+function detectHandoffScopeConflicts(controlPlane: ControlPlaneState, handoff: ControlPlaneHandoff) {
+  if (
+    handoff.status === "completed" ||
+    handoff.workPacket === null ||
+    handoff.entityKind === "phase"
+  ) {
+    return;
+  }
+
+  for (const other of controlPlane.handoffs) {
+    if (
+      other.id === handoff.id ||
+      other.status === "completed" ||
+      other.workPacket === null ||
+      other.entityKind !== handoff.entityKind
+    ) {
+      continue;
+    }
+
+    if (
+      handoff.workPacket.ownerAgentTypeId === other.workPacket.ownerAgentTypeId &&
+      handoff.toId === other.toId
+    ) {
+      continue;
+    }
+
+    if (sharesDependency(handoff, other)) {
+      continue;
+    }
+
+    const overlappingPaths = intersection(
+      handoff.workPacket.fileTargets,
+      other.workPacket.fileTargets
+    );
+    const overlappingDomains = intersection(
+      handoff.workPacket.domainTargets,
+      other.workPacket.domainTargets
+    );
+
+    if (overlappingPaths.length === 0 && overlappingDomains.length === 0) {
+      continue;
+    }
+
+    const conflict = upsertConflict(controlPlane, {
+      id: scopeConflictId(handoff.id, other.id),
+      kind: "scope_overlap",
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      stepId: null,
+      summary: `Parallel ${handoff.entityKind} handoffs overlap on ${renderScopeOverlapSummary(
+        overlappingPaths,
+        overlappingDomains
+      )}.`,
+      status: "open",
+      detectedAt: new Date().toISOString(),
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID,
+      sourceHandoffId: handoff.id,
+      relatedHandoffIds: [handoff.id, other.id],
+      conflictingPaths: overlappingPaths,
+      expectedPaths: uniqueStrings([
+        ...handoff.workPacket.fileTargets,
+        ...other.workPacket.fileTargets
+      ]),
+      conflictingAgentTypeIds: uniqueSkillIds(
+        [
+          handoff.workPacket.ownerAgentTypeId,
+          other.workPacket.ownerAgentTypeId
+        ].filter((value): value is TeamSkillId => value !== null)
+      ),
+      metadata: {
+        overlappingDomains: overlappingDomains,
+        leftHandoffId: handoff.id,
+        rightHandoffId: other.id
+      }
+    });
+    const preferredAgentTypeId =
+      other.status === "accepted"
+        ? other.workPacket.ownerAgentTypeId
+        : handoff.workPacket.ownerAgentTypeId;
+    const decision = upsertMergeDecision(controlPlane, {
+      id: `decision:scope-overlap:${sortedPairId(handoff.id, other.id)}`,
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      conflictIds: [conflict.id],
+      outcome: "reassign",
+      summary: `Production lead should consolidate overlapping ${handoff.entityKind} scope before both handoffs proceed.`,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID,
+      targetHandoffId: handoff.id,
+      reassignedToAgentTypeId: preferredAgentTypeId ?? null,
+      notes:
+        preferredAgentTypeId && preferredAgentTypeId !== handoff.workPacket.ownerAgentTypeId
+          ? `Prefer ${humanizeSpecialistAgentType(preferredAgentTypeId)} because it already owns the accepted overlapping scope.`
+          : null
+    });
+
+    conflict.resolutionDecisionId = decision.id;
+    upsertIntervention(controlPlane, {
+      id: governanceInterventionId(handoff.entityKind, handoff.entityId, "reassign"),
+      kind: "manual_review",
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      summary: decision.summary,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID
+    });
+    upsertBlocker(controlPlane, {
+      id: governanceBlockerId(handoff.entityKind, handoff.entityId),
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      summary: decision.summary,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID
+    });
+  }
 }
 
 function summarizeArtifactPayloadForTrace(payload: ControlPlaneArtifact["payload"]): TraceValue {
@@ -1808,6 +2244,21 @@ function resolveBlockers(
   }
 }
 
+function resolveConflicts(
+  controlPlane: ControlPlaneState,
+  entityKind: ControlPlaneEntityKind,
+  entityId: string
+) {
+  const resolvedAt = new Date().toISOString();
+
+  for (const conflict of controlPlane.conflicts) {
+    if (conflict.entityKind === entityKind && conflict.entityId === entityId && conflict.status === "open") {
+      conflict.status = "resolved";
+      conflict.resolvedAt = resolvedAt;
+    }
+  }
+}
+
 function resolveInterventions(
   controlPlane: ControlPlaneState,
   entityKind: ControlPlaneEntityKind,
@@ -1849,7 +2300,13 @@ function attachEntityId(
   controlPlane: ControlPlaneState,
   entityKind: ControlPlaneEntityKind,
   entityId: string,
-  key: "artifactIds" | "handoffIds" | "interventionIds" | "blockerIds",
+  key:
+    | "artifactIds"
+    | "handoffIds"
+    | "interventionIds"
+    | "blockerIds"
+    | "conflictIds"
+    | "mergeDecisionIds",
   value: string
 ) {
   const entity = findEntityNode(controlPlane, entityKind, entityId);
@@ -1910,6 +2367,207 @@ function findTaskNode(controlPlane: ControlPlaneState, taskId: string) {
   }
 
   return null;
+}
+
+function resolveGovernanceEntity(
+  controlPlane: ControlPlaneState,
+  entityKind: ControlPlaneEntityKind | null | undefined,
+  entityId: string | null | undefined
+) {
+  if (entityKind && entityId) {
+    return {
+      entityKind,
+      entityId
+    };
+  }
+
+  if (controlPlane.current.taskId) {
+    return {
+      entityKind: "task" as const,
+      entityId: controlPlane.current.taskId
+    };
+  }
+
+  if (controlPlane.current.storyId) {
+    return {
+      entityKind: "story" as const,
+      entityId: controlPlane.current.storyId
+    };
+  }
+
+  if (controlPlane.current.phaseId) {
+    return {
+      entityKind: "phase" as const,
+      entityId: controlPlane.current.phaseId
+    };
+  }
+
+  return null;
+}
+
+function buildGovernanceConflict(
+  controlPlane: ControlPlaneState,
+  entityKind: ControlPlaneEntityKind,
+  entityId: string,
+  sourceHandoffId: string | null,
+  conflict: {
+    type: string;
+    stepId: string | null;
+    reason: string;
+    detectedAt: number;
+    metadata?: TraceValue;
+  }
+): Omit<ControlPlaneConflict, "ownerAgentTypeId" | "resolvedAt" | "resolutionDecisionId"> & {
+  metadata?: TraceValue | null;
+} {
+  const metadataObject = toRecord(conflict.metadata);
+  const conflictingPaths = readStringArray(metadataObject.changedFiles);
+  const expectedPaths = uniqueStrings([
+    ...readStringArray(metadataObject.expectedPath),
+    ...readStringArray(metadataObject.expectedPaths)
+  ]);
+  const conflictingAgentTypeIds = uniqueSkillIds(
+    [
+      readSkillId(metadataObject.ownerAgentTypeId),
+      readSkillId(metadataObject.expectedAgentTypeId)
+    ].filter((value): value is TeamSkillId => value !== null)
+  );
+
+  return {
+    id: governanceConflictId(entityKind, entityId, conflict.stepId, conflict.type),
+    kind: mapConflictKind(conflict.type),
+    entityKind,
+    entityId,
+    stepId: conflict.stepId,
+    summary: conflict.reason,
+    status: "open",
+    detectedAt: new Date(conflict.detectedAt).toISOString(),
+    ownerRole: "production_lead",
+    ownerId: PRODUCTION_LEAD_ID,
+    sourceHandoffId,
+    relatedHandoffIds: sourceHandoffId ? [sourceHandoffId] : [],
+    conflictingPaths,
+    expectedPaths,
+    conflictingAgentTypeIds,
+    metadata: conflict.metadata ?? null
+  };
+}
+
+function mapConflictKind(type: string): ControlPlaneConflictKind {
+  switch (type) {
+    case "unexpected_side_effects":
+    case "verifier_target_mismatch":
+      return "boundary_violation";
+    case "verifier_intent_mismatch":
+      return "intent_mismatch";
+    case "retry_cap_exceeded":
+      return "retry_cap_exceeded";
+    case "replan_cap_exceeded":
+      return "replan_cap_exceeded";
+    default:
+      return "validation_failure";
+  }
+}
+
+function sharesDependency(left: ControlPlaneHandoff, right: ControlPlaneHandoff) {
+  if (left.entityKind !== "task" || right.entityKind !== "task") {
+    return false;
+  }
+
+  return (
+    left.dependencyIds.includes(right.entityId) ||
+    right.dependencyIds.includes(left.entityId)
+  );
+}
+
+function intersection(left: string[], right: string[]) {
+  const rightSet = new Set(right);
+  return uniqueStrings(left.filter((value) => rightSet.has(value)));
+}
+
+function renderScopeOverlapSummary(paths: string[], domains: string[]) {
+  if (paths.length > 0) {
+    return paths.slice(0, 2).join(", ");
+  }
+
+  return domains.slice(0, 2).join(", ");
+}
+
+function sortedPairId(left: string, right: string) {
+  return [left, right].sort((a, b) => a.localeCompare(b)).join(":");
+}
+
+function scopeConflictId(leftHandoffId: string, rightHandoffId: string) {
+  return `conflict:scope-overlap:${sortedPairId(leftHandoffId, rightHandoffId)}`;
+}
+
+function governanceConflictId(
+  entityKind: ControlPlaneEntityKind,
+  entityId: string,
+  stepId: string | null,
+  type: string
+) {
+  return `conflict:${entityKind}:${entityId}:${stepId ?? "run"}:${type}`;
+}
+
+function defaultHandoffId(entityKind: ControlPlaneEntityKind, entityId: string) {
+  return `handoff:${entityKind}:${entityId}`;
+}
+
+function governanceInterventionId(
+  entityKind: ControlPlaneEntityKind,
+  entityId: string,
+  outcome: ControlPlaneMergeResolution
+) {
+  return `intervention:governance:${entityKind}:${entityId}:${outcome}`;
+}
+
+function governanceBlockerId(entityKind: ControlPlaneEntityKind, entityId: string) {
+  return `blocker:governance:${entityKind}:${entityId}`;
+}
+
+function toRecord(value: TraceValue | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, TraceValue>)
+    : {};
+}
+
+function readStringArray(value: TraceValue | undefined) {
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueStrings(
+    value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+  );
+}
+
+function readSkillId(value: TraceValue | undefined): TeamSkillId | null {
+  return typeof value === "string" && isTeamSkillId(value) ? value : null;
+}
+
+function isTeamSkillId(value: string): value is TeamSkillId {
+  return [
+    "production_lead",
+    "execution_subagent",
+    "frontend_dev",
+    "backend_dev",
+    "repo_tools_dev",
+    "observability_dev",
+    "rebuild_dev"
+  ].includes(value);
+}
+
+function humanizeSpecialistAgentType(value: TeamSkillId) {
+  return value
+    .split(/[_-]+/g)
+    .filter(Boolean)
+    .map((segment) => `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`)
+    .join(" ");
 }
 
 function storyOwnerId(agentTypeId: TeamSkillId, storyId: string) {

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createControlPlaneState,
+  recordMergeGovernanceDecision,
   recordPhaseStarted,
   recordStoryStarted,
   recordStoryRetry,
@@ -216,4 +217,122 @@ test("control plane sync records status transitions and retry interventions", ()
       (intervention) => intervention.kind === "retry" && intervention.entityId === "story-retry"
     )
   );
+});
+
+test("control plane records overlap conflicts and production-lead merge decisions", () => {
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-governance",
+        name: "Governance",
+        description: "Detect overlapping specialist scope.",
+        userStories: [
+          {
+            id: "story-frontend",
+            title: "Frontend scope",
+            description: "Own the shared file from the frontend side.",
+            preferredSpecialistAgentTypeId: "frontend_dev",
+            acceptanceCriteria: ["Frontend ownership is clear"],
+            tasks: [
+              {
+                id: "task-frontend",
+                instruction: "Update the shared file from the frontend side.",
+                expectedOutcome: "Frontend patch lands cleanly.",
+                context: {
+                  objective: null,
+                  constraints: [],
+                  relevantFiles: [
+                    {
+                      path: "apps/client/src/App.tsx"
+                    }
+                  ],
+                  validationTargets: []
+                }
+              }
+            ]
+          },
+          {
+            id: "story-observability",
+            title: "Observability scope",
+            description: "Own the same file from the observability side.",
+            preferredSpecialistAgentTypeId: "observability_dev",
+            acceptanceCriteria: ["Observability ownership is clear"],
+            tasks: [
+              {
+                id: "task-observability",
+                instruction: "Update the shared file from the observability side.",
+                expectedOutcome: "Observability patch lands cleanly.",
+                context: {
+                  objective: null,
+                  constraints: [],
+                  relevantFiles: [
+                    {
+                      path: "apps/client/src/App.tsx"
+                    }
+                  ],
+                  validationTargets: []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+  recordPhaseStarted(controlPlane, phaseExecution.phases[0]!);
+
+  const overlapConflict = controlPlane.conflicts.find((conflict) => conflict.kind === "scope_overlap");
+  const overlapDecision = controlPlane.mergeDecisions.find(
+    (decision) => decision.outcome === "reassign"
+  );
+
+  assert.ok(overlapConflict);
+  assert.equal(overlapConflict?.entityKind, "story");
+  assert.ok(overlapConflict?.conflictingPaths.includes("apps/client/src/App.tsx"));
+  assert.ok(overlapConflict?.relatedHandoffIds.includes("handoff:story:story-frontend"));
+  assert.ok(overlapConflict?.relatedHandoffIds.includes("handoff:story:story-observability"));
+  assert.ok(overlapDecision);
+  assert.equal(overlapDecision?.entityId, "story-observability");
+  assert.ok(
+    overlapDecision?.reassignedToAgentTypeId === "frontend_dev" ||
+      overlapDecision?.reassignedToAgentTypeId === "observability_dev"
+  );
+
+  recordMergeGovernanceDecision(controlPlane, {
+    conflicts: [
+      {
+        type: "unexpected_side_effects",
+        stepId: "task-observability-step-1",
+        reason: "Execution wrote outside the declared work packet.",
+        detectedAt: Date.parse("2026-03-26T13:00:00.000Z"),
+        metadata: {
+          changedFiles: ["apps/server/src/index.ts"],
+          expectedPath: "apps/client/src/App.tsx",
+          expectedAgentTypeId: "observability_dev"
+        }
+      }
+    ],
+    entityKind: "task",
+    entityId: "task-observability",
+    outcome: "retry",
+    summary: "Retry the observability task inside its assigned scope."
+  });
+
+  const boundaryConflict = controlPlane.conflicts.find(
+    (conflict) =>
+      conflict.entityId === "task-observability" && conflict.kind === "boundary_violation"
+  );
+  const retryDecision = controlPlane.mergeDecisions.find(
+    (decision) => decision.entityId === "task-observability" && decision.outcome === "retry"
+  );
+
+  assert.ok(boundaryConflict);
+  assert.deepEqual(boundaryConflict?.expectedPaths, ["apps/client/src/App.tsx"]);
+  assert.deepEqual(boundaryConflict?.conflictingPaths, ["apps/server/src/index.ts"]);
+  assert.ok(retryDecision);
+  assert.equal(boundaryConflict?.resolutionDecisionId, retryDecision?.id);
 });

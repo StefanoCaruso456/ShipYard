@@ -1053,6 +1053,22 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
     );
   }
 
+  if (traceSummary?.controlPlane?.openConflictCount) {
+    meta.push(
+      `${traceSummary.controlPlane.openConflictCount} open conflict${
+        traceSummary.controlPlane.openConflictCount === 1 ? "" : "s"
+      }`
+    );
+  }
+
+  if (traceSummary?.controlPlane?.mergeDecisionCount) {
+    meta.push(
+      `${traceSummary.controlPlane.mergeDecisionCount} merge decision${
+        traceSummary.controlPlane.mergeDecisionCount === 1 ? "" : "s"
+      }`
+    );
+  }
+
   return {
     id: `${task.id}-run-overview`,
     kind: "summary",
@@ -1376,6 +1392,10 @@ function deriveEventBadge(eventName: string) {
     return "Artifact";
   }
 
+  if (eventName.includes("conflict")) {
+    return "Conflict";
+  }
+
   if (eventName.includes("merge")) {
     return "State";
   }
@@ -1433,6 +1453,10 @@ function deriveEventLabel(eventName: string) {
       return "Planning artifact recorded";
     case "control_plane_handoff_recorded":
       return "Delegation packet recorded";
+    case "control_plane_conflict_recorded":
+      return "Merge conflict recorded";
+    case "control_plane_merge_decision_recorded":
+      return "Merge decision recorded";
     case "state_merged":
       return "State updated";
     case "state_merge_failed":
@@ -1563,6 +1587,8 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const toolName = readString(event.metadata?.toolName);
   const gateId = readString(event.metadata?.gateId);
   const artifactKind = readString(event.metadata?.artifactKind);
+  const conflictKind = readString(event.metadata?.conflictKind);
+  const mergeOutcome = readString(event.metadata?.mergeOutcome);
   const handoffStatus = readString(event.metadata?.handoffStatus);
   const ownerAgentTypeId = readString(event.metadata?.workPacketOwnerAgentTypeId);
   const entityKind = readString(event.metadata?.entityKind);
@@ -1582,6 +1608,14 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
 
   if (artifactKind) {
     meta.push(artifactKind);
+  }
+
+  if (conflictKind) {
+    meta.push(conflictKind);
+  }
+
+  if (mergeOutcome) {
+    meta.push(mergeOutcome);
   }
 
   if (handoffStatus) {
