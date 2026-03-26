@@ -42,7 +42,7 @@ export function extractLocalFilePlan(text: string | null | undefined) {
   }
 
   try {
-    const candidate = JSON.parse(match[1]) as unknown;
+    const candidate = parseLocalFilePlanPayload(match[1]);
 
     return {
       strippedText,
@@ -59,6 +59,38 @@ export function extractLocalFilePlan(text: string | null | undefined) {
           : "Invalid local file plan JSON."
     };
   }
+}
+
+function parseLocalFilePlanPayload(rawPayload: string) {
+  const candidates = buildPlanPayloadCandidates(rawPayload);
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error("Invalid local file plan JSON.");
+}
+
+function buildPlanPayloadCandidates(rawPayload: string) {
+  const trimmed = rawPayload.trim();
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const withoutLanguageTag = withoutFence.replace(/^json\s*/i, "").trim();
+  const firstBraceIndex = withoutLanguageTag.indexOf("{");
+  const lastBraceIndex = withoutLanguageTag.lastIndexOf("}");
+  const extractedObject =
+    firstBraceIndex >= 0 && lastBraceIndex > firstBraceIndex
+      ? withoutLanguageTag.slice(firstBraceIndex, lastBraceIndex + 1).trim()
+      : withoutLanguageTag;
+
+  return [...new Set([trimmed, withoutFence, withoutLanguageTag, extractedObject].filter(Boolean))];
 }
 
 export function stripLocalFilePlan(text: string | null | undefined) {
