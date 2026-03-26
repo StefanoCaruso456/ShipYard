@@ -49,7 +49,6 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
       }`}
     >
       <div className="message__meta">
-        <strong>{message.label}</strong>
         <span>{message.timestamp}</span>
       </div>
 
