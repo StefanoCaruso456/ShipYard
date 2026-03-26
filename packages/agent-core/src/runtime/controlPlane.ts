@@ -5,21 +5,30 @@ import type {
   ControlPlaneAgent,
   ControlPlaneApprovalGate,
   ControlPlaneArtifact,
+  ControlPlaneArchitectureDecisionArtifactPayload,
   ControlPlaneBlocker,
+  ControlPlaneDecomposedTask,
+  ControlPlaneDelegationBriefArtifactPayload,
   ControlPlaneEntityKind,
   ControlPlaneEntityStatus,
   ControlPlaneHandoff,
   ControlPlaneIntervention,
+  ControlPlanePlanArtifactPayload,
   ControlPlanePhaseNode,
+  ControlPlaneRequirementsArtifactPayload,
   ControlPlaneRole,
+  ControlPlaneRoutingDecisionSource,
   ControlPlaneState,
   ControlPlaneStoryNode,
+  ControlPlaneSubtaskBreakdownArtifactPayload,
   ControlPlaneTaskNode,
   ControlPlaneTransition,
   ControlPlaneValidationState,
+  ControlPlaneWorkPacket,
   Phase,
   PhaseExecutionState,
   SpecialistAgentDefinition,
+  SpecialistAgentTypeId,
   Task,
   TeamSkillId,
   UserStory,
@@ -84,7 +93,8 @@ export function createControlPlaneState(phaseExecution: PhaseExecutionState): Co
     summary: renderPlanSummary(phaseExecution),
     createdAt: updatedAt,
     producerRole: "orchestrator",
-    producerId: ORCHESTRATOR_ID
+    producerId: ORCHESTRATOR_ID,
+    payload: buildPlanArtifactPayload(phaseExecution)
   });
 
   updateAgentStatuses(controlPlane);
@@ -122,7 +132,8 @@ export function normalizeControlPlaneState(
   normalized.artifacts = Array.isArray(normalized.artifacts)
     ? normalized.artifacts.map((artifact) => ({
         ...artifact,
-        path: artifact.path ?? null
+        path: artifact.path ?? null,
+        payload: normalizeArtifactPayload(artifact.payload)
       }))
     : [];
   normalized.handoffs = Array.isArray(normalized.handoffs)
@@ -140,7 +151,8 @@ export function normalizeControlPlaneState(
           : [],
         validationTargets: Array.isArray(handoff.validationTargets)
           ? handoff.validationTargets
-          : []
+          : [],
+        workPacket: normalizeWorkPacket(handoff.workPacket)
       }))
     : [];
   normalized.interventions = Array.isArray(normalized.interventions)
@@ -318,17 +330,7 @@ export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase
     return;
   }
 
-  const delegationArtifactId = `artifact:phase-delegation:${phase.id}`;
-  upsertArtifact(controlPlane, {
-    id: delegationArtifactId,
-    kind: "delegation_brief",
-    entityKind: "phase",
-    entityId: phase.id,
-    summary: renderPhaseDelegationSummary(phase),
-    createdAt: new Date().toISOString(),
-    producerRole: "orchestrator",
-    producerId: ORCHESTRATOR_ID
-  });
+  const { artifactIds, workPacket } = ensurePhaseDelegationArtifacts(controlPlane, phase);
   upsertHandoff(controlPlane, {
     id: `handoff:phase:${phase.id}`,
     fromRole: "orchestrator",
@@ -338,11 +340,12 @@ export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase
     entityKind: "phase",
     entityId: phase.id,
     correlationId: correlationId("phase", phase.id),
-    artifactIds: [delegationArtifactId],
+    artifactIds,
     dependencyIds: [],
     acceptanceCriteria: phase.userStories.map((story) => story.title),
     validationTargets: phase.userStories.flatMap((story) => story.acceptanceCriteria),
     purpose: `Coordinate phase delivery for ${phase.name}.`,
+    workPacket,
     status: "accepted"
   });
 
@@ -362,6 +365,7 @@ export function recordStoryStarted(controlPlane: ControlPlaneState | null, story
     return;
   }
 
+  const { artifactIds, workPacket } = ensureStoryDelegationArtifacts(controlPlane, story);
   prepareTaskDelegations(controlPlane, story);
   upsertHandoff(controlPlane, {
     id: `handoff:story:${story.id}`,
@@ -372,11 +376,12 @@ export function recordStoryStarted(controlPlane: ControlPlaneState | null, story
     entityKind: "story",
     entityId: story.id,
     correlationId: correlationId("story", story.id),
-    artifactIds: [`artifact:story-delegation:${story.id}`],
+    artifactIds,
     dependencyIds: [],
     acceptanceCriteria: [...story.acceptanceCriteria],
     validationTargets: deriveStoryValidationTargets(story),
     purpose: `Own delivery for story ${story.title}.`,
+    workPacket,
     status: "accepted"
   });
 }
@@ -397,6 +402,7 @@ export function recordTaskStarted(
     return;
   }
 
+  const { artifactIds, workPacket } = ensureTaskDelegationArtifacts(controlPlane, story, task);
   upsertHandoff(controlPlane, {
     id: `handoff:task:${task.id}`,
     fromRole: storyNode.ownerRole,
@@ -406,11 +412,12 @@ export function recordTaskStarted(
     entityKind: "task",
     entityId: task.id,
     correlationId: correlationId("task", task.id),
-    artifactIds: [`artifact:task-delegation:${task.id}`],
+    artifactIds,
     dependencyIds: findTaskDependencyIds(story, task.id),
     acceptanceCriteria: [task.expectedOutcome],
     validationTargets: deriveTaskValidationTargets(task),
     purpose: `Execute task ${task.id}.`,
+    workPacket,
     status: "accepted"
   });
 }
@@ -833,14 +840,82 @@ function buildApprovalGates(phaseExecution: PhaseExecutionState): ControlPlaneAp
   );
 }
 
-function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStory) {
-  const storyNode = findStoryNode(controlPlane, story.id);
+function ensurePhaseDelegationArtifacts(controlPlane: ControlPlaneState, phase: Phase) {
+  const requirementsArtifactId = `artifact:phase-requirements:${phase.id}`;
+  const delegationArtifactId = `artifact:phase-delegation:${phase.id}`;
+  const requirementsPayload = buildPhaseRequirementsPayload(
+    phase,
+    controlPlane.specialistAgentRegistry
+  );
+  const delegationPayload = buildPhaseDelegationBriefPayload(phase);
+  const artifactIds = [requirementsArtifactId, delegationArtifactId];
 
-  if (!storyNode) {
-    return;
-  }
+  upsertArtifact(controlPlane, {
+    id: requirementsArtifactId,
+    kind: "requirements",
+    entityKind: "phase",
+    entityId: phase.id,
+    summary: renderPhaseRequirementsSummary(phase),
+    createdAt: new Date().toISOString(),
+    producerRole: "orchestrator",
+    producerId: ORCHESTRATOR_ID,
+    payload: requirementsPayload
+  });
+  upsertArtifact(controlPlane, {
+    id: delegationArtifactId,
+    kind: "delegation_brief",
+    entityKind: "phase",
+    entityId: phase.id,
+    summary: renderPhaseDelegationSummary(phase),
+    createdAt: new Date().toISOString(),
+    producerRole: "orchestrator",
+    producerId: ORCHESTRATOR_ID,
+    payload: delegationPayload
+  });
 
+  return {
+    artifactIds,
+    workPacket: buildPhaseWorkPacket(phase, requirementsPayload, artifactIds)
+  };
+}
+
+function ensureStoryDelegationArtifacts(controlPlane: ControlPlaneState, story: UserStory) {
+  const architectureArtifactId = `artifact:story-architecture:${story.id}`;
+  const breakdownArtifactId = `artifact:story-breakdown:${story.id}`;
   const delegationArtifactId = `artifact:story-delegation:${story.id}`;
+  const architecturePayload = buildStoryArchitectureDecisionPayload(
+    story,
+    controlPlane.specialistAgentRegistry
+  );
+  const breakdownPayload = buildStorySubtaskBreakdownPayload(
+    story,
+    controlPlane.specialistAgentRegistry
+  );
+  const delegationPayload = buildStoryDelegationBriefPayload(story);
+  const artifactIds = [architectureArtifactId, breakdownArtifactId, delegationArtifactId];
+
+  upsertArtifact(controlPlane, {
+    id: architectureArtifactId,
+    kind: "architecture_decision",
+    entityKind: "story",
+    entityId: story.id,
+    summary: renderStoryArchitectureDecisionSummary(story, architecturePayload),
+    createdAt: new Date().toISOString(),
+    producerRole: "orchestrator",
+    producerId: ORCHESTRATOR_ID,
+    payload: architecturePayload
+  });
+  upsertArtifact(controlPlane, {
+    id: breakdownArtifactId,
+    kind: "subtask_breakdown",
+    entityKind: "story",
+    entityId: story.id,
+    summary: renderStorySubtaskBreakdownSummary(story),
+    createdAt: new Date().toISOString(),
+    producerRole: "orchestrator",
+    producerId: ORCHESTRATOR_ID,
+    payload: breakdownPayload
+  });
   upsertArtifact(controlPlane, {
     id: delegationArtifactId,
     kind: "delegation_brief",
@@ -849,9 +924,245 @@ function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStor
     summary: renderStoryDelegationSummary(story),
     createdAt: new Date().toISOString(),
     producerRole: "production_lead",
-    producerId: PRODUCTION_LEAD_ID
+    producerId: PRODUCTION_LEAD_ID,
+    payload: delegationPayload
   });
 
+  return {
+    artifactIds,
+    workPacket: buildStoryWorkPacket(story, architecturePayload, breakdownPayload, artifactIds)
+  };
+}
+
+function ensureTaskDelegationArtifacts(
+  controlPlane: ControlPlaneState,
+  story: UserStory,
+  task: Task
+) {
+  const storyBreakdownArtifactId = `artifact:story-breakdown:${story.id}`;
+  const delegationArtifactId = `artifact:task-delegation:${task.id}`;
+  const taskDefinition = resolveStoryDefinition(story, task, controlPlane.specialistAgentRegistry);
+  const delegationPayload = buildTaskDelegationBriefPayload(story, task);
+  const artifactIds = [storyBreakdownArtifactId, delegationArtifactId];
+
+  // Keep the story breakdown artifact fresh so task routing always points at the latest
+  // deterministic decomposition contract.
+  ensureStoryDelegationArtifacts(controlPlane, story);
+  upsertArtifact(controlPlane, {
+    id: delegationArtifactId,
+    kind: "delegation_brief",
+    entityKind: "task",
+    entityId: task.id,
+    summary: renderTaskDelegationSummary(story, task),
+    createdAt: new Date().toISOString(),
+    producerRole: "specialist_dev",
+    producerId: storyOwnerId(taskDefinition.agentTypeId, story.id),
+    payload: delegationPayload
+  });
+
+  return {
+    artifactIds,
+    workPacket: buildTaskWorkPacket(story, task, taskDefinition.agentTypeId, artifactIds)
+  };
+}
+
+function buildPlanArtifactPayload(phaseExecution: PhaseExecutionState): ControlPlanePlanArtifactPayload {
+  return {
+    kind: "plan",
+    version: 1,
+    phaseIds: phaseExecution.phases.map((phase) => phase.id),
+    storyIds: phaseExecution.phases.flatMap((phase) => phase.userStories.map((story) => story.id)),
+    taskIds: phaseExecution.phases.flatMap((phase) =>
+      phase.userStories.flatMap((story) => story.tasks.map((task) => task.id))
+    ),
+    validationTargets: uniqueStrings(
+      phaseExecution.phases.flatMap((phase) =>
+        phase.userStories.flatMap((story) => deriveStoryValidationTargets(story))
+      )
+    )
+  };
+}
+
+function buildPhaseRequirementsPayload(
+  phase: Phase,
+  registry = createSpecialistAgentRegistry()
+): ControlPlaneRequirementsArtifactPayload {
+  return {
+    kind: "requirements",
+    version: 1,
+    scopeSummary: phase.description,
+    constraints: derivePhaseConstraints(phase),
+    fileTargets: derivePhaseFileTargets(phase),
+    domainTargets: derivePhaseDomainTargets(phase, registry),
+    validationTargets: uniqueStrings(
+      phase.userStories.flatMap((story) => deriveStoryValidationTargets(story))
+    ),
+    storyIds: phase.userStories.map((story) => story.id),
+    taskIds: derivePhaseTaskIds(phase),
+    approvalGateKind: phase.approvalGate?.kind ?? null
+  };
+}
+
+function buildStoryArchitectureDecisionPayload(
+  story: UserStory,
+  registry = createSpecialistAgentRegistry()
+): ControlPlaneArchitectureDecisionArtifactPayload {
+  const routingDecision = resolveStoryRoutingDecision(story, registry);
+
+  return {
+    kind: "architecture_decision",
+    version: 1,
+    storyId: story.id,
+    selectedSpecialistAgentTypeId: routingDecision.definition.agentTypeId,
+    decisionSource: routingDecision.decisionSource,
+    rationale: routingDecision.rationale,
+    domainTargets: [...routingDecision.definition.domainTags],
+    fileTargets: deriveStoryFileTargets(story),
+    allowedToolNames: uniqueStrings(
+      story.tasks.flatMap((task) => deriveAllowedToolNames(task))
+    ) as ControlPlaneArchitectureDecisionArtifactPayload["allowedToolNames"],
+    validationTargets: deriveStoryValidationTargets(story),
+    taskIds: story.tasks.map((task) => task.id)
+  };
+}
+
+function buildStorySubtaskBreakdownPayload(
+  story: UserStory,
+  registry = createSpecialistAgentRegistry()
+): ControlPlaneSubtaskBreakdownArtifactPayload {
+  const tasks: ControlPlaneDecomposedTask[] = story.tasks.map((task) => {
+    const definition = resolveStoryDefinition(story, task, registry);
+
+    return {
+      taskId: task.id,
+      instruction: task.instruction,
+      expectedOutcome: task.expectedOutcome,
+      dependencyIds: findTaskDependencyIds(story, task.id),
+      specialistAgentTypeId: definition.agentTypeId,
+      allowedToolNames: deriveAllowedToolNames(task),
+      validationTargets: deriveTaskValidationTargets(task),
+      relevantFiles: deriveTaskFileTargets(task),
+      constraints: deriveTaskConstraints(task)
+    };
+  });
+
+  return {
+    kind: "subtask_breakdown",
+    version: 1,
+    storyId: story.id,
+    dependencyStrategy: "sequential",
+    tasks
+  };
+}
+
+function buildPhaseDelegationBriefPayload(phase: Phase): ControlPlaneDelegationBriefArtifactPayload {
+  return {
+    kind: "delegation_brief",
+    version: 1,
+    scopeSummary: phase.description,
+    acceptanceCriteria: phase.userStories.map((story) => story.title),
+    validationTargets: uniqueStrings(
+      phase.userStories.flatMap((story) => deriveStoryValidationTargets(story))
+    ),
+    dependencyIds: []
+  };
+}
+
+function buildStoryDelegationBriefPayload(story: UserStory): ControlPlaneDelegationBriefArtifactPayload {
+  return {
+    kind: "delegation_brief",
+    version: 1,
+    scopeSummary: story.description,
+    acceptanceCriteria: [...story.acceptanceCriteria],
+    validationTargets: deriveStoryValidationTargets(story),
+    dependencyIds: []
+  };
+}
+
+function buildTaskDelegationBriefPayload(
+  story: UserStory,
+  task: Task
+): ControlPlaneDelegationBriefArtifactPayload {
+  return {
+    kind: "delegation_brief",
+    version: 1,
+    scopeSummary: `Execute ${task.id} for ${story.title}.`,
+    acceptanceCriteria: [task.expectedOutcome],
+    validationTargets: deriveTaskValidationTargets(task),
+    dependencyIds: findTaskDependencyIds(story, task.id)
+  };
+}
+
+function buildPhaseWorkPacket(
+  phase: Phase,
+  requirements: ControlPlaneRequirementsArtifactPayload,
+  sourceArtifactIds: string[]
+): ControlPlaneWorkPacket {
+  return {
+    version: 1,
+    sourceArtifactIds: [...sourceArtifactIds],
+    scopeSummary: requirements.scopeSummary,
+    constraints: [...requirements.constraints],
+    fileTargets: [...requirements.fileTargets],
+    domainTargets: [...requirements.domainTargets],
+    acceptanceCriteria: phase.userStories.map((story) => story.title),
+    validationTargets: [...requirements.validationTargets],
+    dependencyIds: [],
+    taskIds: [...requirements.taskIds],
+    ownerAgentTypeId: "production_lead"
+  };
+}
+
+function buildStoryWorkPacket(
+  story: UserStory,
+  architecture: ControlPlaneArchitectureDecisionArtifactPayload,
+  breakdown: ControlPlaneSubtaskBreakdownArtifactPayload,
+  sourceArtifactIds: string[]
+): ControlPlaneWorkPacket {
+  return {
+    version: 1,
+    sourceArtifactIds: [...sourceArtifactIds],
+    scopeSummary: story.description,
+    constraints: deriveStoryConstraints(story),
+    fileTargets: [...architecture.fileTargets],
+    domainTargets: [...architecture.domainTargets],
+    acceptanceCriteria: [...story.acceptanceCriteria],
+    validationTargets: deriveStoryValidationTargets(story),
+    dependencyIds: [],
+    taskIds: breakdown.tasks.map((task) => task.taskId),
+    ownerAgentTypeId: architecture.selectedSpecialistAgentTypeId
+  };
+}
+
+function buildTaskWorkPacket(
+  story: UserStory,
+  task: Task,
+  ownerAgentTypeId: SpecialistAgentTypeId,
+  sourceArtifactIds: string[]
+): ControlPlaneWorkPacket {
+  return {
+    version: 1,
+    sourceArtifactIds: [...sourceArtifactIds],
+    scopeSummary: task.instruction,
+    constraints: deriveTaskConstraints(task),
+    fileTargets: deriveTaskFileTargets(task),
+    domainTargets: deriveTaskDomainTargets(story, task),
+    acceptanceCriteria: [task.expectedOutcome],
+    validationTargets: deriveTaskValidationTargets(task),
+    dependencyIds: findTaskDependencyIds(story, task.id),
+    taskIds: [task.id],
+    ownerAgentTypeId
+  };
+}
+
+function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStory) {
+  const storyNode = findStoryNode(controlPlane, story.id);
+
+  if (!storyNode) {
+    return;
+  }
+
+  const { artifactIds, workPacket } = ensureStoryDelegationArtifacts(controlPlane, story);
   const existing = findHandoff(controlPlane, `handoff:story:${story.id}`);
   upsertHandoff(controlPlane, {
     id: `handoff:story:${story.id}`,
@@ -862,11 +1173,12 @@ function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStor
     entityKind: "story",
     entityId: story.id,
     correlationId: correlationId("story", story.id),
-    artifactIds: [delegationArtifactId],
+    artifactIds,
     dependencyIds: [],
     acceptanceCriteria: [...story.acceptanceCriteria],
     validationTargets: deriveStoryValidationTargets(story),
     purpose: `Own delivery for story ${story.title}.`,
+    workPacket,
     status: existing?.status ?? "created"
   });
 }
@@ -885,18 +1197,7 @@ function prepareTaskDelegations(controlPlane: ControlPlaneState, story: UserStor
       continue;
     }
 
-    const delegationArtifactId = `artifact:task-delegation:${task.id}`;
-    upsertArtifact(controlPlane, {
-      id: delegationArtifactId,
-      kind: "delegation_brief",
-      entityKind: "task",
-      entityId: task.id,
-      summary: renderTaskDelegationSummary(story, task),
-      createdAt: new Date().toISOString(),
-      producerRole: storyNode.ownerRole,
-      producerId: storyNode.ownerId
-    });
-
+    const { artifactIds, workPacket } = ensureTaskDelegationArtifacts(controlPlane, story, task);
     const existing = findHandoff(controlPlane, `handoff:task:${task.id}`);
     upsertHandoff(controlPlane, {
       id: `handoff:task:${task.id}`,
@@ -907,11 +1208,12 @@ function prepareTaskDelegations(controlPlane: ControlPlaneState, story: UserStor
       entityKind: "task",
       entityId: task.id,
       correlationId: correlationId("task", task.id),
-      artifactIds: [delegationArtifactId],
+      artifactIds,
       dependencyIds: findTaskDependencyIds(story, task.id),
       acceptanceCriteria: [task.expectedOutcome],
       validationTargets: deriveTaskValidationTargets(task),
       purpose: `Execute task ${task.id}.`,
+      workPacket,
       status: existing?.status ?? "created"
     });
   }
@@ -1161,8 +1463,9 @@ function mapStatus(
 
 function upsertArtifact(
   controlPlane: ControlPlaneState,
-  artifact: Omit<ControlPlaneArtifact, "producerAgentTypeId"> & {
+  artifact: Omit<ControlPlaneArtifact, "producerAgentTypeId" | "payload"> & {
     producerAgentTypeId?: TeamSkillId | null;
+    payload?: ControlPlaneArtifact["payload"];
   }
 ) {
   const existing = controlPlane.artifacts.find((candidate) => candidate.id === artifact.id);
@@ -1174,11 +1477,13 @@ function upsertArtifact(
     existing.createdAt = artifact.createdAt;
     existing.producerAgentTypeId = producerAgentTypeId;
     existing.path = artifact.path ?? null;
+    existing.payload = artifact.payload ?? null;
   } else {
     controlPlane.artifacts.push({
       ...artifact,
       producerAgentTypeId,
-      path: artifact.path ?? null
+      path: artifact.path ?? null,
+      payload: artifact.payload ?? null
     });
   }
 
@@ -1189,10 +1494,16 @@ function upsertHandoff(
   controlPlane: ControlPlaneState,
   handoff: Omit<
     ControlPlaneHandoff,
-    "createdAt" | "acceptedAt" | "completedAt" | "fromAgentTypeId" | "toAgentTypeId"
+    | "createdAt"
+    | "acceptedAt"
+    | "completedAt"
+    | "fromAgentTypeId"
+    | "toAgentTypeId"
+    | "workPacket"
   > & {
     fromAgentTypeId?: TeamSkillId | null;
     toAgentTypeId?: TeamSkillId | null;
+    workPacket?: ControlPlaneHandoff["workPacket"];
     status: ControlPlaneHandoff["status"];
   }
 ) {
@@ -1220,6 +1531,7 @@ function upsertHandoff(
     existing.acceptanceCriteria = [...handoff.acceptanceCriteria];
     existing.validationTargets = [...handoff.validationTargets];
     existing.purpose = handoff.purpose;
+    existing.workPacket = handoff.workPacket ?? null;
     existing.status = handoff.status;
     existing.acceptedAt = handoff.status === "created" ? null : existing.acceptedAt ?? now;
     existing.completedAt = handoff.status === "completed" ? now : existing.completedAt;
@@ -1228,6 +1540,7 @@ function upsertHandoff(
       ...handoff,
       fromAgentTypeId,
       toAgentTypeId,
+      workPacket: handoff.workPacket ?? null,
       createdAt: now,
       acceptedAt: handoff.status === "created" ? null : now,
       completedAt: handoff.status === "completed" ? now : null
@@ -1440,6 +1753,87 @@ function approvalBlockerId(gateId: string) {
   return `blocker:approval-gate:${gateId}`;
 }
 
+function derivePhaseConstraints(phase: Phase) {
+  return uniqueStrings([
+    ...(phase.approvalGate?.instructions ? [phase.approvalGate.instructions] : []),
+    ...phase.userStories.flatMap((story) => deriveStoryConstraints(story))
+  ]);
+}
+
+function deriveStoryConstraints(story: UserStory) {
+  return uniqueStrings(story.tasks.flatMap((task) => deriveTaskConstraints(task)));
+}
+
+function deriveTaskConstraints(task: Task) {
+  return uniqueStrings([
+    ...(task.context?.constraints ?? []),
+    ...(task.allowedToolNames?.length
+      ? [`Allowed tools: ${task.allowedToolNames.join(", ")}`]
+      : []),
+    ...(task.toolRequest ? [`Seed tool request: ${task.toolRequest.toolName}`] : [])
+  ]);
+}
+
+function derivePhaseTaskIds(phase: Phase) {
+  return phase.userStories.flatMap((story) => story.tasks.map((task) => task.id));
+}
+
+function derivePhaseFileTargets(phase: Phase) {
+  return uniqueStrings(phase.userStories.flatMap((story) => deriveStoryFileTargets(story)));
+}
+
+function deriveStoryFileTargets(story: UserStory) {
+  return uniqueStrings(story.tasks.flatMap((task) => deriveTaskFileTargets(task)));
+}
+
+function deriveTaskFileTargets(task: Task) {
+  return uniqueStrings([
+    ...(task.context?.relevantFiles.map((file) => file.path) ?? []),
+    ...deriveToolRequestPaths(task)
+  ]);
+}
+
+function deriveToolRequestPaths(task: Task) {
+  if (!task.toolRequest) {
+    return [];
+  }
+
+  const input = task.toolRequest.input as Record<string, unknown>;
+
+  return typeof input.path === "string" && input.path.trim() ? [input.path.trim()] : [];
+}
+
+function derivePhaseDomainTargets(
+  phase: Phase,
+  registry = createSpecialistAgentRegistry()
+) {
+  return uniqueStrings(
+    phase.userStories.flatMap((story) => deriveStoryDomainTargets(story, registry))
+  );
+}
+
+function deriveStoryDomainTargets(
+  story: UserStory,
+  registry = createSpecialistAgentRegistry()
+) {
+  return [...resolveStoryDefinition(story, null, registry).domainTags];
+}
+
+function deriveTaskDomainTargets(
+  story: UserStory,
+  task: Task,
+  registry = createSpecialistAgentRegistry()
+) {
+  return [...resolveStoryDefinition(story, task, registry).domainTags];
+}
+
+function deriveAllowedToolNames(task: Task) {
+  return uniqueStrings([
+    ...(task.allowedToolNames ?? []),
+    ...(task.toolRequest ? [task.toolRequest.toolName] : [])
+  ]) as ControlPlaneDecomposedTask["allowedToolNames"];
+}
+
 function deriveStoryValidationTargets(story: UserStory) {
   return story.validationGates.length > 0
     ? story.validationGates.map((gate) => gate.description)
@@ -1464,6 +1858,82 @@ function resolveStoryDefinition(
   registry = createSpecialistAgentRegistry()
 ): SpecialistAgentDefinition {
   return getSpecialistDefinition(resolveSpecialistAgentType({ story, task }), registry);
+}
+
+function resolveStoryRoutingDecision(
+  story: UserStory,
+  registry = createSpecialistAgentRegistry()
+): {
+  definition: SpecialistAgentDefinition;
+  decisionSource: ControlPlaneRoutingDecisionSource;
+  rationale: string;
+} {
+  const definition = resolveStoryDefinition(story, null, registry);
+  const requiredTaskAgentTypes = uniqueStrings(
+    story.tasks
+      .map((task) => task.requiredSpecialistAgentTypeId)
+      .filter((agentTypeId): agentTypeId is SpecialistAgentTypeId => agentTypeId !== null)
+  );
+
+  if (story.preferredSpecialistAgentTypeId) {
+    return {
+      definition,
+      decisionSource: "story_preference",
+      rationale: `Story preference selected ${definition.label} for ${story.title}.`
+    };
+  }
+
+  if (requiredTaskAgentTypes.length > 0) {
+    return {
+      definition,
+      decisionSource: "task_requirement",
+      rationale: `Task requirements routed ${story.title} to ${definition.label}.`
+    };
+  }
+
+  return {
+    definition,
+    decisionSource: "registry_default",
+    rationale: `No explicit specialist preference was set, so ${story.title} defaulted to ${definition.label}.`
+  };
+}
+
+function normalizeArtifactPayload(payload: ControlPlaneArtifact["payload"] | undefined) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  return structuredClone(payload);
+}
+
+function normalizeWorkPacket(workPacket: ControlPlaneHandoff["workPacket"] | undefined) {
+  if (!workPacket || typeof workPacket !== "object") {
+    return null;
+  }
+
+  return {
+    version: 1,
+    sourceArtifactIds: Array.isArray(workPacket.sourceArtifactIds)
+      ? uniqueStrings(workPacket.sourceArtifactIds)
+      : [],
+    scopeSummary: workPacket.scopeSummary,
+    constraints: Array.isArray(workPacket.constraints) ? uniqueStrings(workPacket.constraints) : [],
+    fileTargets: Array.isArray(workPacket.fileTargets) ? uniqueStrings(workPacket.fileTargets) : [],
+    domainTargets: Array.isArray(workPacket.domainTargets)
+      ? uniqueStrings(workPacket.domainTargets)
+      : [],
+    acceptanceCriteria: Array.isArray(workPacket.acceptanceCriteria)
+      ? [...workPacket.acceptanceCriteria]
+      : [],
+    validationTargets: Array.isArray(workPacket.validationTargets)
+      ? [...workPacket.validationTargets]
+      : [],
+    dependencyIds: Array.isArray(workPacket.dependencyIds)
+      ? uniqueStrings(workPacket.dependencyIds)
+      : [],
+    taskIds: Array.isArray(workPacket.taskIds) ? uniqueStrings(workPacket.taskIds) : [],
+    ownerAgentTypeId: workPacket.ownerAgentTypeId ?? null
+  } satisfies ControlPlaneWorkPacket;
 }
 
 function uniqueSkillIds(skillIds: TeamSkillId[]) {
@@ -1528,8 +1998,23 @@ function renderPlanSummary(phaseExecution: PhaseExecutionState) {
   return `Typed delivery plan with ${phaseExecution.progress.totalPhases} phase(s), ${phaseExecution.progress.totalStories} storie(s), and ${phaseExecution.progress.totalTasks} task(s).`;
 }
 
+function renderPhaseRequirementsSummary(phase: Phase) {
+  return `Requirements packet for ${phase.name} spanning ${phase.userStories.length} story delegation(s).`;
+}
+
 function renderPhaseDelegationSummary(phase: Phase) {
   return `Production lead owns ${phase.name} with ${phase.userStories.length} story delegation(s).`;
+}
+
+function renderStoryArchitectureDecisionSummary(
+  story: UserStory,
+  payload: ControlPlaneArchitectureDecisionArtifactPayload
+) {
+  return `Architecture routing for ${story.title} selects ${payload.selectedSpecialistAgentTypeId}.`;
+}
+
+function renderStorySubtaskBreakdownSummary(story: UserStory) {
+  return `Structured subtask breakdown for ${story.title} across ${story.tasks.length} task(s).`;
 }
 
 function renderStoryDelegationSummary(story: UserStory) {
@@ -1627,6 +2112,7 @@ function completeHandoff(controlPlane: ControlPlaneState, handoffId: string) {
     acceptanceCriteria: [...handoff.acceptanceCriteria],
     validationTargets: [...handoff.validationTargets],
     purpose: handoff.purpose,
+    workPacket: handoff.workPacket,
     status: "completed"
   });
 }

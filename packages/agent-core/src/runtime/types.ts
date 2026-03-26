@@ -444,6 +444,9 @@ export type ControlPlaneEntityStatus = "pending" | "in_progress" | "blocked" | "
 
 export type ControlPlaneArtifactKind =
   | "plan"
+  | "requirements"
+  | "architecture_decision"
+  | "subtask_breakdown"
   | "delegation_brief"
   | "task_result"
   | "validation_report"
@@ -499,6 +502,83 @@ export type ControlPlaneAgent = {
   parentAgentId: string | null;
 };
 
+export type ControlPlaneRoutingDecisionSource =
+  | "story_preference"
+  | "task_requirement"
+  | "registry_default";
+
+export type ControlPlanePlanArtifactPayload = {
+  kind: "plan";
+  version: 1;
+  phaseIds: string[];
+  storyIds: string[];
+  taskIds: string[];
+  validationTargets: string[];
+};
+
+export type ControlPlaneRequirementsArtifactPayload = {
+  kind: "requirements";
+  version: 1;
+  scopeSummary: string;
+  constraints: string[];
+  fileTargets: string[];
+  domainTargets: string[];
+  validationTargets: string[];
+  storyIds: string[];
+  taskIds: string[];
+  approvalGateKind: ApprovalGateKind | null;
+};
+
+export type ControlPlaneArchitectureDecisionArtifactPayload = {
+  kind: "architecture_decision";
+  version: 1;
+  storyId: string;
+  selectedSpecialistAgentTypeId: SpecialistAgentTypeId;
+  decisionSource: ControlPlaneRoutingDecisionSource;
+  rationale: string;
+  domainTargets: string[];
+  fileTargets: string[];
+  allowedToolNames: RepoToolName[];
+  validationTargets: string[];
+  taskIds: string[];
+};
+
+export type ControlPlaneDecomposedTask = {
+  taskId: string;
+  instruction: string;
+  expectedOutcome: string;
+  dependencyIds: string[];
+  specialistAgentTypeId: SpecialistAgentTypeId;
+  allowedToolNames: RepoToolName[];
+  validationTargets: string[];
+  relevantFiles: string[];
+  constraints: string[];
+};
+
+export type ControlPlaneSubtaskBreakdownArtifactPayload = {
+  kind: "subtask_breakdown";
+  version: 1;
+  storyId: string;
+  dependencyStrategy: "sequential";
+  tasks: ControlPlaneDecomposedTask[];
+};
+
+export type ControlPlaneDelegationBriefArtifactPayload = {
+  kind: "delegation_brief";
+  version: 1;
+  scopeSummary: string;
+  acceptanceCriteria: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+};
+
+export type ControlPlaneArtifactPayload =
+  | ControlPlanePlanArtifactPayload
+  | ControlPlaneRequirementsArtifactPayload
+  | ControlPlaneArchitectureDecisionArtifactPayload
+  | ControlPlaneSubtaskBreakdownArtifactPayload
+  | ControlPlaneDelegationBriefArtifactPayload;
+
 export type ControlPlaneArtifact = {
   id: string;
   kind: ControlPlaneArtifactKind;
@@ -510,6 +590,21 @@ export type ControlPlaneArtifact = {
   producerId: string;
   producerAgentTypeId: TeamSkillId | null;
   path?: string | null;
+  payload: ControlPlaneArtifactPayload | null;
+};
+
+export type ControlPlaneWorkPacket = {
+  version: 1;
+  sourceArtifactIds: string[];
+  scopeSummary: string;
+  constraints: string[];
+  fileTargets: string[];
+  domainTargets: string[];
+  acceptanceCriteria: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+  taskIds: string[];
+  ownerAgentTypeId: TeamSkillId | null;
 };
 
 export type ControlPlaneHandoff = {
@@ -528,6 +623,7 @@ export type ControlPlaneHandoff = {
   acceptanceCriteria: string[];
   validationTargets: string[];
   purpose: string;
+  workPacket: ControlPlaneWorkPacket | null;
   status: ControlPlaneHandoffStatus;
   createdAt: string;
   acceptedAt: string | null;
