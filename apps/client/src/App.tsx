@@ -931,10 +931,7 @@ function App() {
         ...current,
         [activeProject.id]: response.task.threadId
       }));
-      setSubmissionFeedback({
-        tone: "success",
-        text: "Thread accepted by the persistent runtime."
-      });
+      setSubmissionFeedback(null);
 
       void loadRuntimeSnapshot();
     } catch (error) {

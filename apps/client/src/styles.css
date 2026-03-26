@@ -1555,15 +1555,14 @@ a {
   background: #262626;
 }
 
-.message--assistant {
-  max-width: 52rem;
-}
-
+.message--assistant,
 .message--system {
-  border-color: rgba(255, 255, 255, 0.05);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.01)),
-    #1d1d1d;
+  max-width: 52rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .message--tone-success {
@@ -1756,6 +1755,26 @@ a {
 
 .message__attachments {
   margin-top: 0.15rem;
+}
+
+.message--assistant .message__meta,
+.message--system .message__meta {
+  margin-bottom: 0;
+}
+
+.message--assistant .message__body,
+.message--system .message__body {
+  gap: 0.42rem;
+}
+
+.message--assistant .message__paragraph,
+.message--assistant .message__preview {
+  color: #e2e2dc;
+}
+
+.message--system .message__paragraph,
+.message--system .message__preview {
+  color: #b8b8b2;
 }
 
 .workspace-panel {
