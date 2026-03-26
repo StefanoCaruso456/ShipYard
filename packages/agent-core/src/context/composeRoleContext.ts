@@ -18,6 +18,7 @@ const nonDroppableSectionIds = new Set([
   "task-input",
   "project-rules",
   "skill-guidance",
+  "specialist-skill-guidance",
   "current-run-state"
 ]);
 
@@ -28,6 +29,7 @@ const sectionCharLimits: Record<string, number> = {
   "task-constraints": 1_000,
   "project-rules": 3_000,
   "skill-guidance": 4_500,
+  "specialist-skill-guidance": 2_400,
   "current-run-state": 2_800,
   "relevant-files": 2_600,
   "recent-tool-results": 2_600,

@@ -1,7 +1,8 @@
-import type { AgentRole, RoleSkillView } from "../instructions/types";
+import type { AgentRole, RoleSkillView, TeamSkillDocument } from "../instructions/types";
 import type {
   AgentRunRecord,
   AgentRuntimeStatus,
+  ControlPlaneAgent,
   ExternalContextInput,
   RelevantFileContext,
   RepoToolResult
@@ -74,6 +75,7 @@ export type SharedRoleContext = {
   runtimeContract: string;
   projectRules: ProjectRulesDocument;
   roleSkillView: RoleSkillView;
+  assignedAgent: (ControlPlaneAgent & { skillDocuments: TeamSkillDocument[] }) | null;
   run: AgentRunRecord;
   runtimeStatus: AgentRuntimeStatus;
   taskObjective: string;

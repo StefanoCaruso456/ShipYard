@@ -36,9 +36,11 @@ export type {
   InstructionSection,
   ParsedSkill,
   RoleSkillView,
-  SkillMeta
+  SkillMeta,
+  TeamSkillDocument
 } from "./instructions/types";
 export { loadSkill } from "./instructions/loadSkill";
+export { loadSpecialistSkills } from "./instructions/loadSpecialistSkills";
 export { parseFrontmatter } from "./instructions/parseFrontmatter";
 export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
 export { buildExecutorContext } from "./context/buildExecutorContext";
@@ -59,6 +61,13 @@ export { createFileRunStore } from "./runtime/createFileRunStore";
 export { createInMemoryRunStore } from "./runtime/createInMemoryRunStore";
 export { createPostgresRunStore } from "./runtime/createPostgresRunStore";
 export { createPersistentRuntimeService } from "./runtime/createPersistentRuntimeService";
+export {
+  createSpecialistAgentRegistry,
+  DEFAULT_SPECIALIST_AGENT_REGISTRY,
+  getSpecialistDefinition,
+  listTeamSkillRefs,
+  resolveSpecialistAgentType
+} from "./runtime/agentRegistry";
 export {
   createControlPlaneState,
   normalizeControlPlaneState,
@@ -205,10 +214,16 @@ export type {
   RuntimeObservability,
   RunContextInput,
   RuntimeWorkerState,
+  SpecialistAgentDefinition,
+  SpecialistAgentRegistry,
+  SpecialistAgentSkillRef,
+  SpecialistAgentToolScope,
+  SpecialistAgentTypeId,
   SubmitTaskInput,
   Task,
   TaskInput,
   TaskStatus,
+  TeamSkillId,
   UserStory,
   UserStoryInput,
   ValidationGate,

@@ -4,9 +4,11 @@ import test from "node:test";
 
 import { createContextAssembler } from "../context/createContextAssembler";
 import { createAgentRuntime } from "../runtime/createAgentRuntime";
+import { createControlPlaneState } from "../runtime/controlPlane";
 import { createPersistentRuntimeService } from "../runtime/createPersistentRuntimeService";
 import { createAgentHandoff, createAgentInvocation } from "../runtime/coordinator/handoffs";
-import { planNextStep, verifyStepResult } from "../runtime/orchestration";
+import { normalizePhaseExecutionInput } from "../runtime/phaseExecution";
+import { executeOrchestrationLoop, planNextStep, verifyStepResult } from "../runtime/orchestration";
 import type {
   AgentRunRecord,
   AgentRuntimeStatus,
@@ -292,6 +294,104 @@ test("verifier can fail a task immediately when retries are exhausted", async ()
   );
 });
 
+test("live orchestration blocks execution when a delegated tool is outside the execution subagent scope", async () => {
+  const { instructionRuntime, assembler } = await createHarness();
+  let executeRunCalls = 0;
+  const phaseExecution = normalizePhaseExecutionInput({
+    retryPolicy: {
+      maxTaskRetries: 0,
+      maxReplans: 0
+    },
+    phases: [
+      {
+        id: "phase-scope",
+        name: "Scope",
+        description: "Keep execution inside delegated tool boundaries.",
+        userStories: [
+          {
+            id: "story-scope",
+            title: "Repo tools story",
+            description: "Exercise delegated tool scope enforcement.",
+            preferredSpecialistAgentTypeId: "repo_tools_dev",
+            acceptanceCriteria: ["Inspect the file without editing it"],
+            tasks: [
+              {
+                id: "task-scope",
+                instruction: "Inspect src/example.ts without mutating it.",
+                expectedOutcome: "Inspect the file without editing it",
+                toolRequest: {
+                  toolName: "edit_file_region",
+                  input: {
+                    path: "src/example.ts",
+                    anchor: "export function greet",
+                    currentText: "before",
+                    replacementText: "after"
+                  }
+                },
+                allowedToolNames: ["read_file"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+  phaseExecution.status = "in_progress";
+  phaseExecution.current = {
+    phaseId: "phase-scope",
+    storyId: "story-scope",
+    taskId: "task-scope"
+  };
+
+  const run = createRunRecord({
+    status: "running",
+    phaseExecution,
+    controlPlane: createControlPlaneState(phaseExecution)
+  });
+
+  await assert.rejects(
+    () =>
+      executeOrchestrationLoop({
+        run,
+        task: phaseExecution.phases[0]!.userStories[0]!.tasks[0]!,
+        instructionRuntime,
+        contextAssembler: assembler,
+        executeRun: async (scopedRun, context) => {
+          executeRunCalls += 1;
+
+          return {
+            mode: "repo-tool",
+            summary: scopedRun.instruction,
+            instructionEcho: scopedRun.instruction,
+            skillId: context.instructionRuntime.skill.meta.id,
+            completedAt: new Date().toISOString(),
+            toolResult: {
+              rootDir: "/tmp",
+              path: "src/example.ts",
+              updatedAt: new Date().toISOString(),
+              validation: {
+                unchangedOutsideRegion: true
+              }
+            }
+          };
+        },
+        persistRun: () => {},
+        getRuntimeStatus: createRuntimeStatus,
+        maxStepRetries: 0,
+        maxReplans: 0
+      }),
+    /not allowed to use edit_file_region/
+  );
+
+  assert.equal(executeRunCalls, 0);
+  assert.match(
+    run.orchestration?.lastExecutorResult?.error?.message ?? "",
+    /not allowed to use edit_file_region/
+  );
+});
+
 async function createHarness() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -342,6 +442,7 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
     phaseExecution: overrides.phaseExecution ?? undefined,
     rollingSummary: "rollingSummary" in overrides ? overrides.rollingSummary ?? null : null,
     events: overrides.events ?? [],
+    controlPlane: "controlPlane" in overrides ? overrides.controlPlane ?? null : null,
     error: overrides.error ?? null,
     result: "result" in overrides ? overrides.result ?? null : null
   };
@@ -357,6 +458,8 @@ function createTask(
     status: overrides.status ?? "pending",
     toolRequest: overrides.toolRequest ?? null,
     context: overrides.context ?? null,
+    requiredSpecialistAgentTypeId: overrides.requiredSpecialistAgentTypeId ?? null,
+    allowedToolNames: overrides.allowedToolNames ?? null,
     validationGates: overrides.validationGates ?? [],
     retryCount: overrides.retryCount ?? 0,
     failureReason: overrides.failureReason ?? null,

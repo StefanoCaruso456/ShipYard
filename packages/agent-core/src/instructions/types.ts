@@ -33,6 +33,13 @@ export type RoleSkillView = {
   renderedText: string;
 };
 
+export type TeamSkillDocument = {
+  id: string;
+  title: string;
+  sourcePath: string;
+  content: string;
+};
+
 export type InstructionPrecedenceLayer =
   | "runtime/system contract"
   | "task prompt"
@@ -45,5 +52,5 @@ export type AgentInstructionRuntime = {
   instructionPrecedence: readonly InstructionPrecedenceLayer[];
   skill: ParsedSkill;
   roleViews: Record<AgentRole, RoleSkillView>;
+  teamSkills: Record<string, TeamSkillDocument>;
 };
-

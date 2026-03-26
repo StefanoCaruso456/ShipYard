@@ -598,6 +598,7 @@ async function executeExecutorStep(input: {
   scopedRun.toolRequest = input.plannerStep.toolRequest ?? null;
 
   try {
+    assertPlannerStepAllowed(scopedRun, input.plannerStep);
     const result = await input.executeRun(scopedRun, {
       instructionRuntime: input.instructionRuntime,
       roleContextPrompt: input.payload?.prompt ?? null,
@@ -642,6 +643,31 @@ async function executeExecutorStep(input: {
         error: failure
       }
     };
+  }
+}
+
+function assertPlannerStepAllowed(run: AgentRunRecord, plannerStep: PlannerStep) {
+  if (!plannerStep.toolRequest || !run.controlPlane || !run.phaseExecution?.current.taskId) {
+    return;
+  }
+
+  const taskId = run.phaseExecution.current.taskId;
+  const executionAgent = run.controlPlane.agents.find(
+    (agent) =>
+      agent.role === "execution_subagent" &&
+      agent.assignedEntityIds.includes(taskId)
+  );
+
+  if (!executionAgent) {
+    return;
+  }
+
+  if (!executionAgent.allowedToolNames.includes(plannerStep.toolRequest.toolName)) {
+    throw createOrchestrationFailure(
+      "execution_failed",
+      `${executionAgent.label} is not allowed to use ${plannerStep.toolRequest.toolName}.`,
+      run
+    );
   }
 }
 
