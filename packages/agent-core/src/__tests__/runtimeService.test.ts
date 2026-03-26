@@ -387,6 +387,23 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
       (handoff) => handoff.entityKind === "task" && handoff.entityId === "task-1"
     )
   );
+  const storyHandoff = completedRun.controlPlane?.handoffs.find(
+    (handoff) => handoff.id === "handoff:story:story-runtime-shape"
+  );
+  const taskHandoff = completedRun.controlPlane?.handoffs.find(
+    (handoff) => handoff.id === "handoff:task:task-2"
+  );
+
+  assert.equal(storyHandoff?.status, "completed");
+  assert.equal(taskHandoff?.status, "completed");
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime-shape"));
+  assert.deepEqual(taskHandoff?.dependencyIds, ["task-1"]);
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) =>
+        artifact.kind === "delegation_brief" && artifact.entityKind === "story"
+    )
+  );
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
       (artifact) => artifact.kind === "task_result" && artifact.entityId === "task-1"

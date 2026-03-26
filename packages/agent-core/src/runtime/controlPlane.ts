@@ -124,7 +124,17 @@ export function normalizeControlPlaneState(
         ...handoff,
         fromAgentTypeId:
           handoff.fromAgentTypeId ?? inferAgentTypeId(handoff.fromId),
-        toAgentTypeId: handoff.toAgentTypeId ?? inferAgentTypeId(handoff.toId)
+        toAgentTypeId: handoff.toAgentTypeId ?? inferAgentTypeId(handoff.toId),
+        correlationId:
+          handoff.correlationId || correlationId(handoff.entityKind, handoff.entityId),
+        artifactIds: Array.isArray(handoff.artifactIds) ? handoff.artifactIds : [],
+        dependencyIds: Array.isArray(handoff.dependencyIds) ? handoff.dependencyIds : [],
+        acceptanceCriteria: Array.isArray(handoff.acceptanceCriteria)
+          ? handoff.acceptanceCriteria
+          : [],
+        validationTargets: Array.isArray(handoff.validationTargets)
+          ? handoff.validationTargets
+          : []
       }))
     : [];
   normalized.interventions = Array.isArray(normalized.interventions)
@@ -234,6 +244,17 @@ export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase
     return;
   }
 
+  const delegationArtifactId = `artifact:phase-delegation:${phase.id}`;
+  upsertArtifact(controlPlane, {
+    id: delegationArtifactId,
+    kind: "delegation_brief",
+    entityKind: "phase",
+    entityId: phase.id,
+    summary: renderPhaseDelegationSummary(phase),
+    createdAt: new Date().toISOString(),
+    producerRole: "orchestrator",
+    producerId: ORCHESTRATOR_ID
+  });
   upsertHandoff(controlPlane, {
     id: `handoff:phase:${phase.id}`,
     fromRole: "orchestrator",
@@ -242,9 +263,18 @@ export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase
     toId: node.ownerId,
     entityKind: "phase",
     entityId: phase.id,
+    correlationId: correlationId("phase", phase.id),
+    artifactIds: [delegationArtifactId],
+    dependencyIds: [],
+    acceptanceCriteria: phase.userStories.map((story) => story.title),
+    validationTargets: phase.userStories.flatMap((story) => story.acceptanceCriteria),
     purpose: `Coordinate phase delivery for ${phase.name}.`,
-    status: "completed"
+    status: "accepted"
   });
+
+  for (const story of phase.userStories) {
+    prepareStoryDelegation(controlPlane, story);
+  }
 }
 
 export function recordStoryStarted(controlPlane: ControlPlaneState | null, story: UserStory) {
@@ -258,6 +288,7 @@ export function recordStoryStarted(controlPlane: ControlPlaneState | null, story
     return;
   }
 
+  prepareTaskDelegations(controlPlane, story);
   upsertHandoff(controlPlane, {
     id: `handoff:story:${story.id}`,
     fromRole: "production_lead",
@@ -266,8 +297,13 @@ export function recordStoryStarted(controlPlane: ControlPlaneState | null, story
     toId: node.ownerId,
     entityKind: "story",
     entityId: story.id,
+    correlationId: correlationId("story", story.id),
+    artifactIds: [`artifact:story-delegation:${story.id}`],
+    dependencyIds: [],
+    acceptanceCriteria: [...story.acceptanceCriteria],
+    validationTargets: deriveStoryValidationTargets(story),
     purpose: `Own delivery for story ${story.title}.`,
-    status: "completed"
+    status: "accepted"
   });
 }
 
@@ -295,8 +331,13 @@ export function recordTaskStarted(
     toId: taskNode.ownerId,
     entityKind: "task",
     entityId: task.id,
+    correlationId: correlationId("task", task.id),
+    artifactIds: [`artifact:task-delegation:${task.id}`],
+    dependencyIds: findTaskDependencyIds(story, task.id),
+    acceptanceCriteria: [task.expectedOutcome],
+    validationTargets: deriveTaskValidationTargets(task),
     purpose: `Execute task ${task.id}.`,
-    status: "completed"
+    status: "accepted"
   });
 }
 
@@ -316,6 +357,7 @@ export function recordTaskCompleted(
     return;
   }
 
+  completeHandoff(controlPlane, `handoff:task:${task.id}`);
   resolveBlockers(controlPlane, "task", task.id);
   upsertArtifact(controlPlane, {
     id: `artifact:task-result:${task.id}`,
@@ -417,6 +459,7 @@ export function recordStoryCompleted(
     return;
   }
 
+  completeHandoff(controlPlane, `handoff:story:${story.id}`);
   resolveBlockers(controlPlane, "story", story.id);
   resolveInterventions(controlPlane, "story", story.id);
   upsertArtifact(controlPlane, {
@@ -538,6 +581,7 @@ export function recordPhaseCompleted(
     return;
   }
 
+  completeHandoff(controlPlane, `handoff:phase:${phase.id}`);
   resolveBlockers(controlPlane, "phase", phase.id);
   resolveInterventions(controlPlane, "phase", phase.id);
   upsertArtifact(controlPlane, {
@@ -689,6 +733,90 @@ function buildAgents(
   }
 
   return agents;
+}
+
+function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStory) {
+  const storyNode = findStoryNode(controlPlane, story.id);
+
+  if (!storyNode) {
+    return;
+  }
+
+  const delegationArtifactId = `artifact:story-delegation:${story.id}`;
+  upsertArtifact(controlPlane, {
+    id: delegationArtifactId,
+    kind: "delegation_brief",
+    entityKind: "story",
+    entityId: story.id,
+    summary: renderStoryDelegationSummary(story),
+    createdAt: new Date().toISOString(),
+    producerRole: "production_lead",
+    producerId: PRODUCTION_LEAD_ID
+  });
+
+  const existing = findHandoff(controlPlane, `handoff:story:${story.id}`);
+  upsertHandoff(controlPlane, {
+    id: `handoff:story:${story.id}`,
+    fromRole: "production_lead",
+    fromId: PRODUCTION_LEAD_ID,
+    toRole: storyNode.ownerRole,
+    toId: storyNode.ownerId,
+    entityKind: "story",
+    entityId: story.id,
+    correlationId: correlationId("story", story.id),
+    artifactIds: [delegationArtifactId],
+    dependencyIds: [],
+    acceptanceCriteria: [...story.acceptanceCriteria],
+    validationTargets: deriveStoryValidationTargets(story),
+    purpose: `Own delivery for story ${story.title}.`,
+    status: existing?.status ?? "created"
+  });
+}
+
+function prepareTaskDelegations(controlPlane: ControlPlaneState, story: UserStory) {
+  const storyNode = findStoryNode(controlPlane, story.id);
+
+  if (!storyNode) {
+    return;
+  }
+
+  for (const task of story.tasks) {
+    const taskNode = findTaskNode(controlPlane, task.id);
+
+    if (!taskNode) {
+      continue;
+    }
+
+    const delegationArtifactId = `artifact:task-delegation:${task.id}`;
+    upsertArtifact(controlPlane, {
+      id: delegationArtifactId,
+      kind: "delegation_brief",
+      entityKind: "task",
+      entityId: task.id,
+      summary: renderTaskDelegationSummary(story, task),
+      createdAt: new Date().toISOString(),
+      producerRole: storyNode.ownerRole,
+      producerId: storyNode.ownerId
+    });
+
+    const existing = findHandoff(controlPlane, `handoff:task:${task.id}`);
+    upsertHandoff(controlPlane, {
+      id: `handoff:task:${task.id}`,
+      fromRole: storyNode.ownerRole,
+      fromId: storyNode.ownerId,
+      toRole: taskNode.ownerRole,
+      toId: taskNode.ownerId,
+      entityKind: "task",
+      entityId: task.id,
+      correlationId: correlationId("task", task.id),
+      artifactIds: [delegationArtifactId],
+      dependencyIds: findTaskDependencyIds(story, task.id),
+      acceptanceCriteria: [task.expectedOutcome],
+      validationTargets: deriveTaskValidationTargets(task),
+      purpose: `Execute task ${task.id}.`,
+      status: existing?.status ?? "created"
+    });
+  }
 }
 
 function createPhaseNode(
@@ -984,6 +1112,14 @@ function upsertHandoff(
     existing.toRole = handoff.toRole;
     existing.toId = handoff.toId;
     existing.toAgentTypeId = toAgentTypeId;
+    existing.correlationId = handoff.correlationId;
+    existing.artifactIds = uniqueStrings([...existing.artifactIds, ...handoff.artifactIds]);
+    existing.dependencyIds = uniqueStrings([
+      ...existing.dependencyIds,
+      ...handoff.dependencyIds
+    ]);
+    existing.acceptanceCriteria = [...handoff.acceptanceCriteria];
+    existing.validationTargets = [...handoff.validationTargets];
     existing.purpose = handoff.purpose;
     existing.status = handoff.status;
     existing.acceptedAt = handoff.status === "created" ? null : existing.acceptedAt ?? now;
@@ -1128,6 +1264,10 @@ function findPhaseNode(controlPlane: ControlPlaneState, phaseId: string) {
   return controlPlane.phases.find((phase) => phase.id === phaseId) ?? null;
 }
 
+function findHandoff(controlPlane: ControlPlaneState, handoffId: string) {
+  return controlPlane.handoffs.find((handoff) => handoff.id === handoffId) ?? null;
+}
+
 function findStoryNode(controlPlane: ControlPlaneState, storyId: string) {
   for (const phase of controlPlane.phases) {
     const story = phase.userStories.find((candidate) => candidate.id === storyId);
@@ -1160,6 +1300,28 @@ function storyOwnerId(agentTypeId: TeamSkillId, storyId: string) {
 
 function taskOwnerId(agentTypeId: TeamSkillId, taskId: string) {
   return `agent:execution-subagent:${agentTypeId}:${taskId}`;
+}
+
+function correlationId(entityKind: ControlPlaneEntityKind, entityId: string) {
+  return `corr:${entityKind}:${entityId}`;
+}
+
+function deriveStoryValidationTargets(story: UserStory) {
+  return story.validationGates.length > 0
+    ? story.validationGates.map((gate) => gate.description)
+    : [...story.acceptanceCriteria];
+}
+
+function deriveTaskValidationTargets(task: Task) {
+  return task.validationGates.length > 0
+    ? task.validationGates.map((gate) => gate.description)
+    : [task.expectedOutcome];
+}
+
+function findTaskDependencyIds(story: UserStory, taskId: string) {
+  const taskIndex = story.tasks.findIndex((task) => task.id === taskId);
+
+  return taskIndex > 0 ? [story.tasks[taskIndex - 1]!.id] : [];
 }
 
 function resolveStoryDefinition(
@@ -1232,6 +1394,18 @@ function renderPlanSummary(phaseExecution: PhaseExecutionState) {
   return `Typed delivery plan with ${phaseExecution.progress.totalPhases} phase(s), ${phaseExecution.progress.totalStories} storie(s), and ${phaseExecution.progress.totalTasks} task(s).`;
 }
 
+function renderPhaseDelegationSummary(phase: Phase) {
+  return `Production lead owns ${phase.name} with ${phase.userStories.length} story delegation(s).`;
+}
+
+function renderStoryDelegationSummary(story: UserStory) {
+  return `Deliver ${story.title} by satisfying ${story.acceptanceCriteria.length} acceptance criteria across ${story.tasks.length} task(s).`;
+}
+
+function renderTaskDelegationSummary(story: UserStory, task: Task) {
+  return `Execute ${task.id} for story ${story.title}. Expected outcome: ${task.expectedOutcome}`;
+}
+
 function renderValidationSummary(results: ValidationGateResult[]) {
   if (results.length === 0) {
     return "No validation gates were recorded.";
@@ -1294,4 +1468,35 @@ function hasAssignedOpenWork(controlPlane: ControlPlaneState, agent: ControlPlan
 
     return entity ? entity.status === "pending" || entity.status === "in_progress" : false;
   });
+}
+
+function completeHandoff(controlPlane: ControlPlaneState, handoffId: string) {
+  const handoff = findHandoff(controlPlane, handoffId);
+
+  if (!handoff) {
+    return;
+  }
+
+  upsertHandoff(controlPlane, {
+    id: handoff.id,
+    fromRole: handoff.fromRole,
+    fromId: handoff.fromId,
+    fromAgentTypeId: handoff.fromAgentTypeId,
+    toRole: handoff.toRole,
+    toId: handoff.toId,
+    toAgentTypeId: handoff.toAgentTypeId,
+    entityKind: handoff.entityKind,
+    entityId: handoff.entityId,
+    correlationId: handoff.correlationId,
+    artifactIds: [...handoff.artifactIds],
+    dependencyIds: [...handoff.dependencyIds],
+    acceptanceCriteria: [...handoff.acceptanceCriteria],
+    validationTargets: [...handoff.validationTargets],
+    purpose: handoff.purpose,
+    status: "completed"
+  });
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)];
 }
