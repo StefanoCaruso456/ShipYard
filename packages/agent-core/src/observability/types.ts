@@ -254,6 +254,11 @@ export type TraceRunSummary = {
     completedHandoffCount: number;
     workPacketCount: number;
     workPacketOwnerAgentTypes: string[];
+    conflictCount: number;
+    openConflictCount: number;
+    conflictKinds: string[];
+    mergeDecisionCount: number;
+    mergeDecisionOutcomes: string[];
     activeApprovalGateId: string | null;
     currentEntityKind: string | null;
     currentEntityId: string | null;

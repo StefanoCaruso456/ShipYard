@@ -1,8 +1,10 @@
 import type {
   AgentRunRecord,
   ControlPlaneArtifact,
+  ControlPlaneConflict,
   ControlPlaneHandoff,
   ControlPlaneIntervention,
+  ControlPlaneMergeDecision,
   ControlPlanePhaseNode,
   ControlPlaneRole,
   ControlPlaneState,
@@ -11,9 +13,11 @@ import type {
   OperatorJournalTone,
   OperatorRunBlocker,
   OperatorRunApprovalGate,
+  OperatorRunConflict,
   OperatorRunCurrentWork,
   OperatorRunDelegationPacket,
   OperatorRunJournalEntry,
+  OperatorRunMergeDecision,
   OperatorRunOwner,
   OperatorRunPlanningArtifact,
   OperatorRunProgress,
@@ -52,8 +56,10 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   const current = deriveCurrentWork(run);
   const stageId = determineStageId(run);
   const blockers = deriveOpenBlockers(run.controlPlane);
+  const conflicts = deriveOpenConflicts(run.controlPlane);
+  const mergeDecisions = deriveMergeDecisions(run.controlPlane);
   const owner = deriveOwner(run, current, stageId);
-  const stages = buildStageSequence(run, stageId, current, blockers);
+  const stages = buildStageSequence(run, stageId, current, blockers, conflicts);
   const approval = deriveApproval(run);
   const planningArtifacts = derivePlanningArtifacts(run.controlPlane);
   const delegationPackets = deriveDelegationPackets(run.controlPlane);
@@ -65,16 +71,18 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   };
 
   return {
-    summary: deriveSummary(run, stage, blockers),
+    summary: deriveSummary(run, stage, blockers, conflicts, mergeDecisions),
     stage,
     stages,
     owner,
     current,
-    nextAction: deriveNextAction(run, stageId, current, blockers, approval),
+    nextAction: deriveNextAction(run, stageId, current, blockers, approval, conflicts, mergeDecisions),
     progress: deriveProgress(run),
     retries: deriveRetrySummary(run),
     approval,
     blockers,
+    conflicts,
+    mergeDecisions,
     planningArtifacts,
     delegationPackets,
     journal: buildJournal(run)
@@ -184,7 +192,8 @@ function buildStageSequence(
   run: AgentRunRecord,
   activeStageId: OperatorRunStageId,
   current: OperatorRunCurrentWork,
-  blockers: OperatorRunBlocker[]
+  blockers: OperatorRunBlocker[],
+  conflicts: OperatorRunConflict[]
 ): OperatorRunStage[] {
   const activeIndex = STAGE_ORDER.indexOf(activeStageId);
 
@@ -194,7 +203,7 @@ function buildStageSequence(
       id: stageId,
       label: STAGE_LABELS[stageId],
       status,
-      detail: describeStage(run, stageId, status, current, blockers)
+      detail: describeStage(run, stageId, status, current, blockers, conflicts)
     };
   });
 }
@@ -254,7 +263,8 @@ function describeStage(
   stageId: OperatorRunStageId,
   status: OperatorRunStageStatus,
   current: OperatorRunCurrentWork,
-  blockers: OperatorRunBlocker[]
+  blockers: OperatorRunBlocker[],
+  conflicts: OperatorRunConflict[]
 ) {
   switch (stageId) {
     case "queued":
@@ -264,6 +274,10 @@ function describeStage(
     case "coordination":
       if (blockers.length > 0 && status !== "completed") {
         return `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} are stopping coordination.`;
+      }
+
+      if (conflicts.length > 0 && status !== "completed") {
+        return `${conflicts.length} merge conflict${conflicts.length === 1 ? "" : "s"} need production-lead review.`;
       }
 
       if (run.orchestration?.status === "planning") {
@@ -337,7 +351,9 @@ function describeStage(
 function deriveSummary(
   run: AgentRunRecord,
   stage: OperatorRunStage,
-  blockers: OperatorRunBlocker[]
+  blockers: OperatorRunBlocker[],
+  conflicts: OperatorRunConflict[],
+  mergeDecisions: OperatorRunMergeDecision[]
 ) {
   if (run.error?.message?.trim()) {
     return run.error.message.trim();
@@ -345,6 +361,14 @@ function deriveSummary(
 
   if (blockers[0]?.summary) {
     return blockers[0].summary;
+  }
+
+  if (conflicts[0]?.summary) {
+    return conflicts[0].summary;
+  }
+
+  if (mergeDecisions[0]?.summary) {
+    return mergeDecisions[0].summary;
   }
 
   if (run.result?.summary?.trim()) {
@@ -457,6 +481,70 @@ function deriveOpenBlockers(controlPlane: ControlPlaneState | null | undefined):
       createdAt: blocker.createdAt
     }))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function deriveOpenConflicts(controlPlane: ControlPlaneState | null | undefined): OperatorRunConflict[] {
+  if (!controlPlane) {
+    return [];
+  }
+
+  return controlPlane.conflicts
+    .filter((conflict) => conflict.status === "open")
+    .map((conflict) => ({
+      id: conflict.id,
+      kind: conflict.kind,
+      entityKind: conflict.entityKind,
+      entityId: conflict.entityId,
+      summary: conflict.summary,
+      status: conflict.status,
+      detectedAt: conflict.detectedAt,
+      resolvedAt: conflict.resolvedAt,
+      ownerLabel: resolveAgentLabel(
+        controlPlane,
+        conflict.ownerId,
+        conflict.ownerRole,
+        conflict.ownerAgentTypeId
+      ),
+      routeLabel: deriveConflictRouteLabel(controlPlane, conflict),
+      conflictingPaths: [...conflict.conflictingPaths],
+      expectedPaths: [...conflict.expectedPaths],
+      conflictingAgentLabels: conflict.conflictingAgentTypeIds.map(
+        (agentTypeId) => resolveAgentTypeLabel(controlPlane, agentTypeId) ?? humanizeKey(agentTypeId)
+      ),
+      resolutionDecisionId: conflict.resolutionDecisionId
+    }))
+    .sort((left, right) => right.detectedAt.localeCompare(left.detectedAt));
+}
+
+function deriveMergeDecisions(
+  controlPlane: ControlPlaneState | null | undefined
+): OperatorRunMergeDecision[] {
+  if (!controlPlane) {
+    return [];
+  }
+
+  return [...controlPlane.mergeDecisions]
+    .sort((left, right) => right.decidedAt.localeCompare(left.decidedAt))
+    .map((decision) => ({
+      id: decision.id,
+      entityKind: decision.entityKind,
+      entityId: decision.entityId,
+      outcome: decision.outcome,
+      summary: decision.summary,
+      decidedAt: decision.decidedAt,
+      ownerLabel: resolveAgentLabel(
+        controlPlane,
+        decision.ownerId,
+        decision.ownerRole,
+        decision.ownerAgentTypeId
+      ),
+      targetHandoffLabel: deriveDecisionHandoffLabel(controlPlane, decision.targetHandoffId),
+      reassignedToLabel: decision.reassignedToAgentTypeId
+        ? resolveAgentTypeLabel(controlPlane, decision.reassignedToAgentTypeId)
+        : null,
+      conflictIds: [...decision.conflictIds],
+      notes: decision.notes
+    }));
 }
 
 function deriveCurrentWork(run: AgentRunRecord): OperatorRunCurrentWork {
@@ -614,14 +702,28 @@ function deriveNextAction(
   stageId: OperatorRunStageId,
   current: OperatorRunCurrentWork,
   blockers: OperatorRunBlocker[],
-  approval: OperatorRunView["approval"]
+  approval: OperatorRunView["approval"],
+  conflicts: OperatorRunConflict[],
+  mergeDecisions: OperatorRunMergeDecision[]
 ) {
   if (approval?.activeGate) {
     return `Review ${approval.activeGate.title.toLowerCase()} for ${approval.activeGate.phaseName}.`;
   }
 
+  const unresolvedDecision = mergeDecisions.find(
+    (decision) => decision.outcome === "reassign" || decision.outcome === "reject"
+  );
+
+  if (unresolvedDecision) {
+    return unresolvedDecision.summary;
+  }
+
   if (blockers[0]) {
     return `Resolve blocker: ${blockers[0].summary}`;
+  }
+
+  if (conflicts[0]) {
+    return `Review merge conflict: ${conflicts[0].summary}`;
   }
 
   if (run.status === "completed") {
@@ -699,6 +801,8 @@ function buildJournal(run: AgentRunRecord): OperatorRunJournalEntry[] {
   appendEventEntries(entries, run.events);
   appendArtifactEntries(entries, run.controlPlane?.artifacts ?? []);
   appendHandoffEntries(entries, run.controlPlane);
+  appendConflictEntries(entries, run.controlPlane);
+  appendMergeDecisionEntries(entries, run.controlPlane);
   appendInterventionEntries(entries, run.controlPlane?.interventions ?? []);
   appendBlockerEntries(entries, run.controlPlane);
 
@@ -711,6 +815,53 @@ function buildJournal(run: AgentRunRecord): OperatorRunJournalEntry[] {
       return right.at.localeCompare(left.at);
     })
     .slice(0, MAX_JOURNAL_ENTRIES);
+}
+
+function deriveConflictRouteLabel(
+  controlPlane: ControlPlaneState,
+  conflict: ControlPlaneConflict
+) {
+  const handoffs = conflict.relatedHandoffIds
+    .map((handoffId) => controlPlane.handoffs.find((candidate) => candidate.id === handoffId))
+    .filter((handoff): handoff is ControlPlaneHandoff => Boolean(handoff));
+
+  if (handoffs.length === 0) {
+    return null;
+  }
+
+  return handoffs
+    .map(
+      (handoff) =>
+        `${resolveAgentLabel(
+          controlPlane,
+          handoff.fromId,
+          handoff.fromRole,
+          handoff.fromAgentTypeId
+        )} -> ${resolveAgentLabel(controlPlane, handoff.toId, handoff.toRole, handoff.toAgentTypeId)}`
+    )
+    .join(" | ");
+}
+
+function deriveDecisionHandoffLabel(
+  controlPlane: ControlPlaneState,
+  handoffId: string | null
+) {
+  if (!handoffId) {
+    return null;
+  }
+
+  const handoff = controlPlane.handoffs.find((candidate) => candidate.id === handoffId);
+
+  if (!handoff) {
+    return handoffId;
+  }
+
+  return `${resolveAgentLabel(
+    controlPlane,
+    handoff.fromId,
+    handoff.fromRole,
+    handoff.fromAgentTypeId
+  )} -> ${resolveAgentLabel(controlPlane, handoff.toId, handoff.toRole, handoff.toAgentTypeId)}`;
 }
 
 function derivePlanningArtifacts(
@@ -953,6 +1104,64 @@ function appendHandoffEntries(
         meta
       });
     }
+  }
+}
+
+function appendConflictEntries(
+  entries: OperatorRunJournalEntry[],
+  controlPlane: ControlPlaneState | null | undefined
+) {
+  if (!controlPlane) {
+    return;
+  }
+
+  for (const conflict of controlPlane.conflicts) {
+    entries.push({
+      id: `${conflict.id}:opened`,
+      kind: "event",
+      at: conflict.detectedAt,
+      label: `${humanizeKey(conflict.kind)} conflict recorded`,
+      detail: conflict.summary,
+      tone: "warning",
+      meta: [
+        conflict.entityKind,
+        conflict.entityId,
+        ...conflict.conflictingPaths.slice(0, 2)
+      ]
+    });
+
+    if (conflict.resolvedAt) {
+      entries.push({
+        id: `${conflict.id}:resolved`,
+        kind: "event",
+        at: conflict.resolvedAt,
+        label: `${humanizeKey(conflict.kind)} conflict resolved`,
+        detail: conflict.summary,
+        tone: "success",
+        meta: [conflict.entityKind, conflict.entityId]
+      });
+    }
+  }
+}
+
+function appendMergeDecisionEntries(
+  entries: OperatorRunJournalEntry[],
+  controlPlane: ControlPlaneState | null | undefined
+) {
+  if (!controlPlane) {
+    return;
+  }
+
+  for (const decision of controlPlane.mergeDecisions) {
+    entries.push({
+      id: decision.id,
+      kind: "event",
+      at: decision.decidedAt,
+      label: `Merge decision: ${humanizeKey(decision.outcome)}`,
+      detail: decision.summary,
+      tone: decision.outcome === "reject" ? "danger" : decision.outcome === "accept" ? "success" : "warning",
+      meta: [decision.entityKind, decision.entityId]
+    });
   }
 }
 
