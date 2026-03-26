@@ -373,6 +373,22 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.equal(trace?.summary.phaseExecution?.maxTaskRetries, 1);
     assert.equal(trace?.summary.phaseExecution?.maxStoryRetries, 1);
     assert.equal(trace?.summary.phaseExecution?.maxReplans, 1);
+    assert.equal(trace?.summary.controlPlane?.status, "completed");
+    assert.ok((trace?.summary.controlPlane?.artifactCount ?? 0) >= 3);
+    assert.ok(trace?.summary.controlPlane?.artifactKinds.includes("requirements"));
+    assert.ok(trace?.summary.controlPlane?.artifactKinds.includes("subtask_breakdown"));
+    assert.ok((trace?.summary.controlPlane?.handoffCount ?? 0) >= 3);
+    assert.ok((trace?.summary.controlPlane?.workPacketCount ?? 0) >= 3);
+    assert.ok(
+      trace?.spans
+        .flatMap((span) => span.events)
+        .some((event) => event.name === "control_plane_artifact_recorded")
+    );
+    assert.ok(
+      trace?.spans
+        .flatMap((span) => span.events)
+        .some((event) => event.name === "control_plane_handoff_recorded")
+    );
   } finally {
     await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });

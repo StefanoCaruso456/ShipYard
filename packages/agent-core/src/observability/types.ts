@@ -243,6 +243,20 @@ export type TraceRunSummary = {
     interventionKinds: string[];
     lastFailureReason: string | null;
   } | null;
+  controlPlane: {
+    status: string | null;
+    artifactCount: number;
+    artifactKinds: string[];
+    handoffCount: number;
+    pendingHandoffCount: number;
+    acceptedHandoffCount: number;
+    completedHandoffCount: number;
+    workPacketCount: number;
+    workPacketOwnerAgentTypes: string[];
+    activeApprovalGateId: string | null;
+    currentEntityKind: string | null;
+    currentEntityId: string | null;
+  } | null;
 };
 
 export type TraceRunLog = {

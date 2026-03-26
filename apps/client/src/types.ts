@@ -390,6 +390,20 @@ export type RuntimeTraceRunLog = {
       interventionKinds: string[];
       lastFailureReason: string | null;
     } | null;
+    controlPlane: {
+      status: string | null;
+      artifactCount: number;
+      artifactKinds: string[];
+      handoffCount: number;
+      pendingHandoffCount: number;
+      acceptedHandoffCount: number;
+      completedHandoffCount: number;
+      workPacketCount: number;
+      workPacketOwnerAgentTypes: string[];
+      activeApprovalGateId: string | null;
+      currentEntityKind: string | null;
+      currentEntityId: string | null;
+    } | null;
   };
   spans: RuntimeTraceSpan[];
 };
@@ -543,6 +557,51 @@ export type RuntimeOperatorBlocker = {
   createdAt: string;
 };
 
+export type RuntimeOperatorPlanningArtifact = {
+  id: string;
+  kind: string;
+  entityKind: "phase" | "story" | "task";
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  producerLabel: string;
+  path: string | null;
+  highlights: string[];
+};
+
+export type RuntimeOperatorDelegationPacket = {
+  id: string;
+  entityKind: "phase" | "story" | "task";
+  entityId: string;
+  routeLabel: string;
+  purpose: string;
+  status: string;
+  createdAt: string;
+  acceptedAt: string | null;
+  completedAt: string | null;
+  ownerLabel: string;
+  artifactIds: string[];
+  dependencyIds: string[];
+  acceptanceCriteria: string[];
+  validationTargets: string[];
+  workPacket:
+    | {
+        version: 1;
+        sourceArtifactIds: string[];
+        scopeSummary: string;
+        constraints: string[];
+        fileTargets: string[];
+        domainTargets: string[];
+        acceptanceCriteria: string[];
+        validationTargets: string[];
+        dependencyIds: string[];
+        taskIds: string[];
+        ownerAgentTypeId: string | null;
+        ownerLabel: string | null;
+      }
+    | null;
+};
+
 export type RuntimeOperatorApprovalDecision = "approve" | "reject" | "request_retry";
 
 export type RuntimeOperatorApprovalGateStatus =
@@ -595,6 +654,8 @@ export type RuntimeOperatorView = {
     gates: RuntimeOperatorApprovalGate[];
   } | null;
   blockers: RuntimeOperatorBlocker[];
+  planningArtifacts: RuntimeOperatorPlanningArtifact[];
+  delegationPackets: RuntimeOperatorDelegationPacket[];
   journal: RuntimeOperatorJournalEntry[];
 };
 
