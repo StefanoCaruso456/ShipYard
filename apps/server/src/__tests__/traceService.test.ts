@@ -107,7 +107,10 @@ test("trace summary rolls up model tool and context insights", async () => {
         truncatedSectionIds: ["external-context:spec"],
         omittedForBudgetSectionIds: ["external-context:tests"],
         maxPromptChars: 16000,
+        maxPromptTokens: 3200,
+        maxOutputTokens: 800,
         usedPromptChars: 15000,
+        usedPromptTokens: 2900,
         promptLength: 128,
         rollingSummarySource: "result",
         externalContextKinds: ["spec", "test_result"],
@@ -189,7 +192,11 @@ test("trace summary rolls up model tool and context insights", async () => {
     assert.equal(trace?.summary.context.roles[0]?.sectionCount, 2);
     assert.equal(trace?.summary.context.roles[0]?.truncatedSectionCount, 1);
     assert.equal(trace?.summary.context.roles[0]?.omittedForBudgetSectionCount, 1);
+    assert.equal(trace?.summary.context.roles[0]?.maxPromptTokens, 3200);
+    assert.equal(trace?.summary.context.roles[0]?.maxOutputTokens, 800);
+    assert.equal(trace?.summary.context.roles[0]?.usedPromptTokens, 2900);
     assert.equal(trace?.summary.context.roles[0]?.externalContextKinds[0], "spec");
+    assert.equal(trace?.summary.context.totalPromptTokens, 2900);
     assert.equal(trace?.summary.files.selectedBySource[0]?.source, "repo_tool");
   } finally {
     await waitForTraceFlush(traceService);

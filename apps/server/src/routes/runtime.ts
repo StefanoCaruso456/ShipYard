@@ -12,6 +12,7 @@ import type {
   ValidationGate,
   ValidationGateKind
 } from "@shipyard/agent-core";
+import { safeParseRunContextInput } from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import { analyzeTaskAttachments } from "../runtime/analyzeTaskAttachments";
@@ -715,211 +716,16 @@ function parseBooleanField(value: unknown) {
 }
 
 function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context"] } | { error: string } {
-  if (value === undefined || value === null) {
+  const parsed = safeParseRunContextInput(value);
+
+  if (!parsed.success) {
     return {
-      value: null
+      error: parsed.error
     };
-  }
-
-  if (!value || typeof value !== "object") {
-    return {
-      error: "context must be an object when provided."
-    };
-  }
-
-  const candidate = value as {
-    objective?: unknown;
-    constraints?: unknown;
-    relevantFiles?: unknown;
-    externalContext?: unknown;
-    validationTargets?: unknown;
-    specialistAgentTypeId?: unknown;
-  };
-
-  if (candidate.objective !== undefined && typeof candidate.objective !== "string") {
-    return {
-      error: "context.objective must be a string when provided."
-    };
-  }
-
-  if (
-    candidate.constraints !== undefined &&
-    (!Array.isArray(candidate.constraints) ||
-      candidate.constraints.some((constraint) => typeof constraint !== "string"))
-  ) {
-    return {
-      error: "context.constraints must be an array of strings when provided."
-    };
-  }
-
-  if (
-    candidate.validationTargets !== undefined &&
-    (!Array.isArray(candidate.validationTargets) ||
-      candidate.validationTargets.some((target) => typeof target !== "string"))
-  ) {
-    return {
-      error: "context.validationTargets must be an array of strings when provided."
-    };
-  }
-
-  if (
-    candidate.specialistAgentTypeId !== undefined &&
-    parseSpecialistAgentTypeId(candidate.specialistAgentTypeId) === null
-  ) {
-    return {
-      error:
-        "context.specialistAgentTypeId must be frontend_dev, backend_dev, repo_tools_dev, observability_dev, or rebuild_dev when provided."
-    };
-  }
-
-  if (candidate.externalContext !== undefined) {
-    if (!Array.isArray(candidate.externalContext)) {
-      return {
-        error: "context.externalContext must be an array when provided."
-      };
-    }
-
-    for (const item of candidate.externalContext) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return {
-          error: "Each context.externalContext entry must be an object."
-        };
-      }
-
-      const entry = item as {
-        id?: unknown;
-        kind?: unknown;
-        title?: unknown;
-        content?: unknown;
-        source?: unknown;
-        format?: unknown;
-      };
-
-      if (typeof entry.id !== "string" || !entry.id.trim()) {
-        return {
-          error: "Each context.externalContext entry requires a non-empty string id."
-        };
-      }
-
-      if (
-        entry.kind !== "spec" &&
-        entry.kind !== "schema" &&
-        entry.kind !== "prior_output" &&
-        entry.kind !== "test_result" &&
-        entry.kind !== "diff_summary" &&
-        entry.kind !== "validation_target"
-      ) {
-        return {
-          error:
-            "context.externalContext.kind must be spec, schema, prior_output, test_result, diff_summary, or validation_target."
-        };
-      }
-
-      if (typeof entry.title !== "string" || !entry.title.trim()) {
-        return {
-          error: "Each context.externalContext entry requires a non-empty string title."
-        };
-      }
-
-      if (typeof entry.content !== "string" || !entry.content.trim()) {
-        return {
-          error: "Each context.externalContext entry requires a non-empty string content field."
-        };
-      }
-
-      if (entry.source !== undefined && typeof entry.source !== "string") {
-        return {
-          error: "context.externalContext.source must be a string when provided."
-        };
-      }
-
-      if (
-        entry.format !== undefined &&
-        entry.format !== "text" &&
-        entry.format !== "markdown" &&
-        entry.format !== "json"
-      ) {
-        return {
-          error: "context.externalContext.format must be text, markdown, or json when provided."
-        };
-      }
-    }
-  }
-
-  if (candidate.relevantFiles !== undefined) {
-    if (!Array.isArray(candidate.relevantFiles)) {
-      return {
-        error: "context.relevantFiles must be an array when provided."
-      };
-    }
-
-    for (const file of candidate.relevantFiles) {
-      if (!file || typeof file !== "object") {
-        return {
-          error: "Each context.relevantFiles entry must be an object."
-        };
-      }
-
-      const entry = file as {
-        path?: unknown;
-        excerpt?: unknown;
-        startLine?: unknown;
-        endLine?: unknown;
-        source?: unknown;
-        reason?: unknown;
-      };
-
-      if (typeof entry.path !== "string") {
-        return {
-          error: "Each context.relevantFiles entry requires a string path."
-        };
-      }
-
-      if (entry.excerpt !== undefined && typeof entry.excerpt !== "string") {
-        return {
-          error: "context.relevantFiles.excerpt must be a string when provided."
-        };
-      }
-
-      if (entry.startLine !== undefined && typeof entry.startLine !== "number") {
-        return {
-          error: "context.relevantFiles.startLine must be a number when provided."
-        };
-      }
-
-      if (entry.endLine !== undefined && typeof entry.endLine !== "number") {
-        return {
-          error: "context.relevantFiles.endLine must be a number when provided."
-        };
-      }
-
-      if (entry.source !== undefined && typeof entry.source !== "string") {
-        return {
-          error: "context.relevantFiles.source must be a string when provided."
-        };
-      }
-
-      if (entry.reason !== undefined && typeof entry.reason !== "string") {
-        return {
-          error: "context.relevantFiles.reason must be a string when provided."
-        };
-      }
-    }
   }
 
   return {
-    value: {
-      objective: candidate.objective as string | undefined,
-      constraints: (candidate.constraints as string[] | undefined) ?? [],
-      relevantFiles:
-        (candidate.relevantFiles as NonNullable<SubmitTaskInput["context"]>["relevantFiles"] | undefined) ??
-        [],
-      externalContext:
-        (candidate.externalContext as NonNullable<SubmitTaskInput["context"]>["externalContext"] | undefined) ??
-        [],
-      validationTargets: (candidate.validationTargets as string[] | undefined) ?? [],
-      specialistAgentTypeId: parseSpecialistAgentTypeId(candidate.specialistAgentTypeId)
-    }
+    value: parsed.data
   };
 }
 

@@ -1,16 +1,16 @@
 import type { AgentRole } from "../instructions/types";
 import type { ExternalContextInput } from "../runtime/types";
+import {
+  countTextTokens,
+  getRoleContextPolicy,
+  getSectionTokenLimit,
+  truncateTextToTokenLimit
+} from "./policy";
 import type {
   ContextPayloadSection,
   OmittedContextSection,
   RoleContextPayload
 } from "./types";
-
-const rolePromptBudgets: Record<AgentRole, number> = {
-  planner: 16_000,
-  executor: 20_000,
-  verifier: 18_000
-};
 
 const nonDroppableSectionIds = new Set([
   "runtime-contract",
@@ -21,22 +21,6 @@ const nonDroppableSectionIds = new Set([
   "specialist-skill-guidance",
   "current-run-state"
 ]);
-
-const sectionCharLimits: Record<string, number> = {
-  "runtime-contract": 700,
-  "task-objective": 600,
-  "task-input": 1_400,
-  "task-constraints": 1_000,
-  "project-rules": 3_000,
-  "skill-guidance": 4_500,
-  "specialist-skill-guidance": 2_400,
-  "current-run-state": 2_800,
-  "relevant-files": 2_600,
-  "recent-tool-results": 2_600,
-  "validation-targets": 1_400,
-  "known-failures": 1_400,
-  "rolling-summary": 1_600
-};
 
 const externalContextPriorities: Record<AgentRole, Record<ExternalContextInput["kind"], number>> = {
   planner: {
@@ -127,14 +111,17 @@ export function finalizeRoleContextPayload(input: {
   sections: ContextPayloadSection[];
   omittedSections: OmittedContextSection[];
 }): RoleContextPayload {
-  const maxPromptChars = rolePromptBudgets[input.role];
+  const policy = getRoleContextPolicy(input.role);
+  const maxPromptChars = policy.maxPromptChars;
+  const maxPromptTokens = policy.maxPromptTokens;
   const workingSections = input.sections.map((section) => applySectionLimit(input.role, section));
   const omittedSections = [...input.omittedSections];
 
   let prompt = renderPrompt(input.role, workingSections);
+  let usedPromptTokens = countTextTokens(prompt);
   const omittedForBudgetSectionIds: string[] = [];
 
-  while (prompt.length > maxPromptChars) {
+  while (prompt.length > maxPromptChars || usedPromptTokens > maxPromptTokens) {
     const droppableIndex = findLastDroppableSectionIndex(workingSections);
 
     if (droppableIndex < 0) {
@@ -149,9 +136,10 @@ export function finalizeRoleContextPayload(input: {
       title: removed.title,
       precedence: removed.precedence,
       source: removed.source,
-      reason: `Omitted to stay within the ${input.role} context budget of ${maxPromptChars} characters.`
+      reason: `Omitted to stay within the ${input.role} context budget of ${maxPromptTokens} tokens and ${maxPromptChars} characters.`
     });
     prompt = renderPrompt(input.role, workingSections);
+    usedPromptTokens = countTextTokens(prompt);
   }
 
   return {
@@ -170,7 +158,10 @@ export function finalizeRoleContextPayload(input: {
     omittedSections,
     budget: {
       maxPromptChars,
+      maxPromptTokens,
+      maxOutputTokens: policy.maxOutputTokens,
       usedPromptChars: prompt.length,
+      usedPromptTokens,
       truncatedSectionIds: workingSections
         .filter((section) => section.metadata?.truncated === true)
         .map((section) => section.id),
@@ -191,34 +182,30 @@ function renderPrompt(role: AgentRole, sections: ContextPayloadSection[]) {
 }
 
 function applySectionLimit(role: AgentRole, section: ContextPayloadSection): ContextPayloadSection {
-  const maxChars = getSectionCharLimit(role, section);
+  const maxTokens = getSectionTokenLimit(role, section.id);
+  const truncated = truncateTextToTokenLimit({
+    text: section.content,
+    maxTokens,
+    suffix: `\n\n[Truncated for ${role} context budget. Original length: ${section.content.length} chars.]`
+  });
 
-  if (section.content.length <= maxChars) {
+  if (!truncated.truncated) {
     return section;
   }
 
-  const suffix = `\n\n[Truncated for ${role} context budget. Original length: ${section.content.length} chars.]`;
-  const retainedLength = Math.max(0, maxChars - suffix.length);
-
   return {
     ...section,
-    content: `${section.content.slice(0, retainedLength).trimEnd()}${suffix}`,
+    content: truncated.text,
     metadata: {
       ...(section.metadata ?? {}),
       truncated: true,
       originalLength: section.content.length,
-      retainedLength,
-      budgetLimitChars: maxChars
+      retainedLength: truncated.text.length,
+      originalTokenCount: truncated.originalTokenCount,
+      retainedTokenCount: truncated.retainedTokenCount,
+      budgetLimitTokens: maxTokens
     }
   };
-}
-
-function getSectionCharLimit(role: AgentRole, section: ContextPayloadSection) {
-  if (section.id.startsWith("external-context:")) {
-    return role === "executor" ? 3_200 : role === "verifier" ? 2_600 : 2_200;
-  }
-
-  return sectionCharLimits[section.id] ?? 1_800;
 }
 
 function findLastDroppableSectionIndex(sections: ContextPayloadSection[]) {

@@ -166,6 +166,41 @@ Specialist agents exist after Phase 11, but the production lead still needs to g
 - specialist assignments are traceable and deterministic
 - merge/conflict decisions are explicit runtime state
 
+## Phase 12.5: Memory and Context Hardening
+
+Detailed phase guide:
+
+- [phase-12-5-memory-context-hardening.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/phase-12-5-memory-context-hardening.md)
+
+### Goal
+
+Harden working context and runtime memory before the Ship rebuild begins.
+
+### Build
+
+- add token-aware context budgeting
+- add explicit output token caps for model-backed roles
+- add runtime schemas for context, artifacts, and handoffs
+- define richer episodic-memory and retrieval contracts
+- add artifact compression and summarization rules
+- keep prompt context, durable runtime state, and memory retrieval as separate layers
+
+### Why this comes next
+
+Shipyard has structured context assembly, but its current memory model is still too shallow for a
+long-running rebuild workflow. This phase closes the highest-risk context and memory gaps before Phase 13.
+
+### Exit Criteria
+
+- role payload budgets are token-aware and observable
+- model-backed execution uses explicit output caps
+- runtime boundary objects are validated at runtime
+- retrieval and memory layers are defined clearly enough to build Phase 13 safely
+
+### Status
+
+In progress
+
 ## Phase 13: Ship Rebuild Framework
 
 ### Goal
