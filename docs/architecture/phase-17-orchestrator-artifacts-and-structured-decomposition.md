@@ -15,6 +15,8 @@ not on loosely interpreted text.
 - typed subtask breakdown artifacts
 - explicit acceptance criteria and validation targets per delegated work packet
 - a deterministic decomposition contract for specialist routing
+- LangSmith-visible artifact and work-packet metadata
+- operator panels for planned artifacts and delegation packets
 
 ## Why It Matters
 
@@ -48,6 +50,9 @@ Each handoff also carries a structured work packet that includes:
 The production lead and specialist agents now delegate from those typed packets instead of relying
 on summary prose alone.
 
+Those artifacts and packets are also surfaced in the operator view and runtime traces so they can
+be inspected without reading raw control-plane state.
+
 ## Outcome
 
 After this phase:
@@ -55,6 +60,7 @@ After this phase:
 - orchestrator output becomes inspectable runtime data
 - specialist delegation can reference concrete artifacts
 - decomposition becomes more deterministic and easier to audit
+- planning artifacts and delegation packets are visible in LangSmith metadata and the operator UI
 
 ## What This Phase Does Not Do
 
