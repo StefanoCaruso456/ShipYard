@@ -380,6 +380,35 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
 
   assert.equal(completedRun.result?.mode, "phase-execution");
   assert.equal(completedRun.phaseExecution?.status, "completed");
+  assert.equal(completedRun.controlPlane?.status, "completed");
+  assert.equal(completedRun.controlPlane?.progress.completedTasks, 3);
+  assert.ok(
+    completedRun.controlPlane?.handoffs.some(
+      (handoff) => handoff.entityKind === "task" && handoff.entityId === "task-1"
+    )
+  );
+  const storyHandoff = completedRun.controlPlane?.handoffs.find(
+    (handoff) => handoff.id === "handoff:story:story-runtime-shape"
+  );
+  const taskHandoff = completedRun.controlPlane?.handoffs.find(
+    (handoff) => handoff.id === "handoff:task:task-2"
+  );
+
+  assert.equal(storyHandoff?.status, "completed");
+  assert.equal(taskHandoff?.status, "completed");
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime-shape"));
+  assert.deepEqual(taskHandoff?.dependencyIds, ["task-1"]);
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) =>
+        artifact.kind === "delegation_brief" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "task_result" && artifact.entityId === "task-1"
+    )
+  );
   assert.deepEqual(startedInstructions, [
     "Define runtime shape.",
     "Expose runtime contracts.",
@@ -449,6 +478,18 @@ test("persistent runtime retries task validation gates before failing the full r
 
   assert.equal(task?.retryCount, 1);
   assert.equal(task?.status, "completed");
+  assert.ok(
+    completedRun.controlPlane?.interventions.some(
+      (intervention) =>
+        intervention.kind === "retry" && intervention.entityKind === "task"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.phases[0]?.userStories[0]?.tasks[0]?.transitionLog.some(
+      (transition) =>
+        transition.fromStatus === "in_progress" && transition.toStatus === "completed"
+    )
+  );
   assert.ok(completedRun.events.some((event) => event.type === "validation_gate_failed"));
   assert.ok(completedRun.events.some((event) => event.type === "retry_scheduled"));
   assert.ok(completedRun.events.some((event) => event.type === "coordination_conflict_detected"));

@@ -364,6 +364,7 @@ export type ControlPlaneEntityStatus = "pending" | "in_progress" | "blocked" | "
 
 export type ControlPlaneArtifactKind =
   | "plan"
+  | "delegation_brief"
   | "task_result"
   | "validation_report"
   | "delivery_summary"
@@ -416,6 +417,11 @@ export type ControlPlaneHandoff = {
   toId: string;
   entityKind: ControlPlaneEntityKind;
   entityId: string;
+  correlationId: string;
+  artifactIds: string[];
+  dependencyIds: string[];
+  acceptanceCriteria: string[];
+  validationTargets: string[];
   purpose: string;
   status: ControlPlaneHandoffStatus;
   createdAt: string;
