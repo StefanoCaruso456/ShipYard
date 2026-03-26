@@ -132,15 +132,28 @@ test("normalizeRunContextInputValue salvages valid entries from partially invali
 test("control plane artifact and handoff schemas preserve typed runtime records", () => {
   const artifact = controlPlaneArtifactSchema.parse({
     id: "artifact-1",
-    kind: "delegation_brief",
-    entityKind: "task",
-    entityId: "task-1",
-    summary: "Delegate the backend patch.",
+    kind: "architecture_decision",
+    entityKind: "story",
+    entityId: "story-1",
+    summary: "Route the story to the backend specialist.",
     createdAt: "2026-03-26T05:00:00.000Z",
-    producerRole: "production_lead",
-    producerId: "prod-lead-1",
-    producerAgentTypeId: "production_lead",
-    path: " docs/briefs/backend.md "
+    producerRole: "orchestrator",
+    producerId: "orch-1",
+    producerAgentTypeId: null,
+    path: " docs/briefs/backend.md ",
+    payload: {
+      kind: "architecture_decision",
+      version: 1,
+      storyId: "story-1",
+      selectedSpecialistAgentTypeId: "backend_dev",
+      decisionSource: "registry_default",
+      rationale: "Default the story to backend_dev.",
+      domainTargets: ["api", "runtime"],
+      fileTargets: ["packages/agent-core/src/runtime/controlPlane.ts"],
+      allowedToolNames: ["read_file", "edit_file_region"],
+      validationTargets: ["pnpm typecheck"],
+      taskIds: ["task-1"]
+    }
   });
   const handoff = controlPlaneHandoffSchema.parse({
     id: "handoff-1",
@@ -150,14 +163,27 @@ test("control plane artifact and handoff schemas preserve typed runtime records"
     toRole: "specialist_dev",
     toId: "backend-dev-1",
     toAgentTypeId: "backend_dev",
-    entityKind: "task",
-    entityId: "task-1",
+    entityKind: "story",
+    entityId: "story-1",
     correlationId: "corr-1",
     artifactIds: [" artifact-1 "],
     dependencyIds: [" dep-1 "],
     acceptanceCriteria: [" patch compiles "],
     validationTargets: [" pnpm typecheck "],
     purpose: " Deliver the backend patch ",
+    workPacket: {
+      version: 1,
+      sourceArtifactIds: [" artifact-1 "],
+      scopeSummary: " Ship the backend patch ",
+      constraints: [" keep scope tight "],
+      fileTargets: [" packages/agent-core/src/runtime/controlPlane.ts "],
+      domainTargets: [" api "],
+      acceptanceCriteria: [" patch compiles "],
+      validationTargets: [" pnpm typecheck "],
+      dependencyIds: [" dep-1 "],
+      taskIds: [" task-1 "],
+      ownerAgentTypeId: "backend_dev"
+    },
     status: "created",
     createdAt: "2026-03-26T05:00:00.000Z",
     acceptedAt: null,
@@ -165,7 +191,9 @@ test("control plane artifact and handoff schemas preserve typed runtime records"
   });
 
   assert.equal(artifact.path, "docs/briefs/backend.md");
+  assert.equal(artifact.payload?.kind, "architecture_decision");
   assert.deepEqual(handoff.artifactIds, ["artifact-1"]);
   assert.deepEqual(handoff.validationTargets, ["pnpm typecheck"]);
   assert.equal(handoff.purpose, "Deliver the backend patch");
+  assert.equal(handoff.workPacket?.ownerAgentTypeId, "backend_dev");
 });

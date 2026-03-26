@@ -45,6 +45,9 @@ const controlPlaneEntityKinds = [
 
 const controlPlaneArtifactKinds = [
   "plan",
+  "requirements",
+  "architecture_decision",
+  "subtask_breakdown",
   "delegation_brief",
   "task_result",
   "validation_report",
@@ -160,7 +163,8 @@ export const controlPlaneArtifactSchema = z
     producerRole: controlPlaneRoleSchema,
     producerId: nonEmptyTrimmedStringSchema,
     producerAgentTypeId: z.union([teamSkillIdSchema, z.null()]),
-    path: z.union([z.string(), z.null()]).optional()
+    path: z.union([z.string(), z.null()]).optional(),
+    payload: z.unknown().optional()
   })
   .transform(
     (value): ControlPlaneArtifact => ({
@@ -173,7 +177,8 @@ export const controlPlaneArtifactSchema = z
       producerRole: value.producerRole,
       producerId: value.producerId,
       producerAgentTypeId: value.producerAgentTypeId,
-      path: normalizeOptionalTrimmedString(value.path)
+      path: normalizeOptionalTrimmedString(value.path),
+      payload: (value.payload as ControlPlaneArtifact["payload"] | undefined) ?? null
     })
   );
 
@@ -194,6 +199,7 @@ export const controlPlaneHandoffSchema = z
     acceptanceCriteria: z.array(z.string()).optional().default([]),
     validationTargets: z.array(z.string()).optional().default([]),
     purpose: nonEmptyTrimmedStringSchema,
+    workPacket: z.unknown().optional(),
     status: controlPlaneHandoffStatusSchema,
     createdAt: nonEmptyTrimmedStringSchema,
     acceptedAt: z.union([z.string(), z.null()]),
@@ -216,6 +222,7 @@ export const controlPlaneHandoffSchema = z
       acceptanceCriteria: normalizeStringArray(value.acceptanceCriteria),
       validationTargets: normalizeStringArray(value.validationTargets),
       purpose: value.purpose,
+      workPacket: (value.workPacket as ControlPlaneHandoff["workPacket"] | undefined) ?? null,
       status: value.status,
       createdAt: value.createdAt,
       acceptedAt: normalizeOptionalTrimmedString(value.acceptedAt),
