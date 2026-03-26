@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { createAgentRuntime } from "../runtime/createAgentRuntime";
 import { createContextAssembler, runtimeContextPrecedence } from "../context/createContextAssembler";
+import { createControlPlaneState } from "../runtime/controlPlane";
+import { normalizePhaseExecutionInput } from "../runtime/phaseExecution";
 import type { AgentRunRecord, AgentRuntimeStatus } from "../runtime/types";
 
 test("planner payload assembly stays role-scoped and omits raw tool results", async () => {
@@ -272,6 +274,7 @@ test("executor payload reflects the active phase execution task", async () => {
                 title: "Story A",
                 description: "Story A description",
                 acceptanceCriteria: ["Ship the scoped task"],
+                preferredSpecialistAgentTypeId: null,
                 validationGates: [],
                 status: "in_progress",
                 retryCount: 0,
@@ -285,6 +288,8 @@ test("executor payload reflects the active phase execution task", async () => {
                     status: "running",
                     toolRequest: null,
                     context: null,
+                    requiredSpecialistAgentTypeId: null,
+                    allowedToolNames: null,
                     validationGates: [],
                     retryCount: 0,
                     failureReason: null,
@@ -307,6 +312,61 @@ test("executor payload reflects the active phase execution task", async () => {
   assert.equal(objectiveSection?.content, "Ship the scoped task");
   assert.match(stateSection?.content ?? "", /"phaseExecution"/);
   assert.match(stateSection?.content ?? "", /"taskId": "task-a"/);
+});
+
+test("executor payload includes assigned specialist guidance for the active execution subagent", async () => {
+  const assembler = await createAssemblerForTests();
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-specialist",
+        name: "Specialist",
+        description: "Exercise specialist assignment.",
+        userStories: [
+          {
+            id: "story-specialist",
+            title: "Backend delivery",
+            description: "Route the work to backend specialists.",
+            preferredSpecialistAgentTypeId: "backend_dev",
+            acceptanceCriteria: ["Deliver the backend change"],
+            tasks: [
+              {
+                id: "task-specialist",
+                instruction: "Apply the backend change.",
+                expectedOutcome: "Deliver the backend change"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+  phaseExecution.status = "in_progress";
+  phaseExecution.current = {
+    phaseId: "phase-specialist",
+    storyId: "story-specialist",
+    taskId: "task-specialist"
+  };
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+  const payload = assembler.buildRolePayload("executor", {
+    run: createRunRecord({
+      phaseExecution,
+      controlPlane,
+      status: "running"
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  const specialistSection = payload.sections.find(
+    (section) => section.id === "specialist-skill-guidance"
+  );
+
+  assert.ok(specialistSection);
+  assert.match(specialistSection?.title ?? "", /Execution Subagent/);
+  assert.match(specialistSection?.content ?? "", /Backend Dev/);
 });
 
 async function createAssemblerForTests() {
@@ -401,6 +461,7 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
       source: "result"
     },
     events: overrides.events ?? [],
+    controlPlane: "controlPlane" in overrides ? overrides.controlPlane ?? null : null,
     error: overrides.error ?? null,
     result: "result" in overrides ? overrides.result ?? null : baseResult
   };

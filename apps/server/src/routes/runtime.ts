@@ -201,6 +201,15 @@ export function registerRuntimeRoutes(
             renderedText: view.renderedText
           }
         ])
+      ),
+      teamSkills: Object.fromEntries(
+        Object.entries(agentRuntime.teamSkills).map(([id, document]) => [
+          id,
+          {
+            title: document.title,
+            sourcePath: document.sourcePath
+          }
+        ])
       )
     });
   });
@@ -724,6 +733,7 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
     relevantFiles?: unknown;
     externalContext?: unknown;
     validationTargets?: unknown;
+    specialistAgentTypeId?: unknown;
   };
 
   if (candidate.objective !== undefined && typeof candidate.objective !== "string") {
@@ -749,6 +759,16 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
   ) {
     return {
       error: "context.validationTargets must be an array of strings when provided."
+    };
+  }
+
+  if (
+    candidate.specialistAgentTypeId !== undefined &&
+    parseSpecialistAgentTypeId(candidate.specialistAgentTypeId) === null
+  ) {
+    return {
+      error:
+        "context.specialistAgentTypeId must be frontend_dev, backend_dev, repo_tools_dev, observability_dev, or rebuild_dev when provided."
     };
   }
 
@@ -897,7 +917,8 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
       externalContext:
         (candidate.externalContext as NonNullable<SubmitTaskInput["context"]>["externalContext"] | undefined) ??
         [],
-      validationTargets: (candidate.validationTargets as string[] | undefined) ?? []
+      validationTargets: (candidate.validationTargets as string[] | undefined) ?? [],
+      specialistAgentTypeId: parseSpecialistAgentTypeId(candidate.specialistAgentTypeId)
     }
   };
 }
@@ -1198,6 +1219,7 @@ function parsePhaseExecutionInput(
         tasks?: unknown;
         acceptanceCriteria?: unknown;
         validationGates?: unknown;
+        preferredSpecialistAgentTypeId?: unknown;
       };
 
       if (
@@ -1231,6 +1253,20 @@ function parsePhaseExecutionInput(
         return validationGates;
       }
 
+      const preferredSpecialistAgentTypeId = parseSpecialistAgentTypeId(
+        story.preferredSpecialistAgentTypeId
+      );
+
+      if (
+        story.preferredSpecialistAgentTypeId !== undefined &&
+        preferredSpecialistAgentTypeId === null
+      ) {
+        return {
+          error:
+            "preferredSpecialistAgentTypeId must be frontend_dev, backend_dev, repo_tools_dev, observability_dev, or rebuild_dev when provided."
+        };
+      }
+
       const tasks: NonNullable<
         SubmitTaskInput["phaseExecution"]
       >["phases"][number]["userStories"][number]["tasks"] = [];
@@ -1249,6 +1285,8 @@ function parsePhaseExecutionInput(
           toolRequest?: unknown;
           context?: unknown;
           validationGates?: unknown;
+          requiredSpecialistAgentTypeId?: unknown;
+          allowedToolNames?: unknown;
         };
 
         if (
@@ -1279,13 +1317,35 @@ function parsePhaseExecutionInput(
           return taskValidationGates;
         }
 
+        const requiredSpecialistAgentTypeId = parseSpecialistAgentTypeId(
+          task.requiredSpecialistAgentTypeId
+        );
+
+        if (
+          task.requiredSpecialistAgentTypeId !== undefined &&
+          requiredSpecialistAgentTypeId === null
+        ) {
+          return {
+            error:
+              "requiredSpecialistAgentTypeId must be frontend_dev, backend_dev, repo_tools_dev, observability_dev, or rebuild_dev when provided."
+          };
+        }
+
+        const allowedToolNames = parseAllowedToolNames(task.allowedToolNames);
+
+        if ("error" in allowedToolNames) {
+          return allowedToolNames;
+        }
+
         tasks.push({
           id: task.id,
           instruction: task.instruction,
           expectedOutcome: task.expectedOutcome,
           toolRequest: taskToolRequest.value,
           context: taskContext.value,
-          validationGates: taskValidationGates.value
+          validationGates: taskValidationGates.value,
+          requiredSpecialistAgentTypeId,
+          allowedToolNames: allowedToolNames.value
         });
       }
 
@@ -1295,7 +1355,8 @@ function parsePhaseExecutionInput(
         description: story.description,
         tasks,
         acceptanceCriteria: story.acceptanceCriteria as string[],
-        validationGates: validationGates.value
+        validationGates: validationGates.value,
+        preferredSpecialistAgentTypeId
       });
     }
 
@@ -1319,6 +1380,55 @@ function parsePhaseExecutionInput(
       retryPolicy: retryPolicy.value
     }
   };
+}
+
+function parseSpecialistAgentTypeId(value: unknown) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return value === "frontend_dev" ||
+    value === "backend_dev" ||
+    value === "repo_tools_dev" ||
+    value === "observability_dev" ||
+    value === "rebuild_dev"
+    ? value
+    : null;
+}
+
+function parseAllowedToolNames(
+  value: unknown
+):
+  | { value: NonNullable<SubmitTaskInput["phaseExecution"]>["phases"][number]["userStories"][number]["tasks"][number]["allowedToolNames"] }
+  | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!Array.isArray(value) || value.some((toolName) => !isRepoToolName(toolName))) {
+    return {
+      error:
+        "allowedToolNames must be an array containing only list_files, read_file, read_file_range, search_repo, edit_file_region, create_file, or delete_file."
+    };
+  }
+
+  return {
+    value
+  };
+}
+
+function isRepoToolName(value: unknown): value is RepoToolRequest["toolName"] {
+  return (
+    value === "list_files" ||
+    value === "read_file" ||
+    value === "read_file_range" ||
+    value === "search_repo" ||
+    value === "edit_file_region" ||
+    value === "create_file" ||
+    value === "delete_file"
+  );
 }
 
 function parseValidationGates(

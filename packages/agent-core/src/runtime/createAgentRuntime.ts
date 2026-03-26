@@ -1,4 +1,7 @@
+import path from "node:path";
+
 import { selectSkillSections } from "../context/selectSkillSections";
+import { loadSpecialistSkills } from "../instructions/loadSpecialistSkills";
 import { loadSkill } from "../instructions/loadSkill";
 import type {
   AgentInstructionRuntime,
@@ -6,6 +9,7 @@ import type {
   InstructionPrecedenceLayer,
   RoleSkillView
 } from "../instructions/types";
+import { createSpecialistAgentRegistry, listTeamSkillRefs } from "./agentRegistry";
 
 export const instructionPrecedence: readonly InstructionPrecedenceLayer[] = [
   "runtime/system contract",
@@ -23,7 +27,14 @@ type CreateAgentRuntimeOptions = {
 export async function createAgentRuntime(
   options: CreateAgentRuntimeOptions = {}
 ): Promise<AgentInstructionRuntime> {
-  const skill = await loadSkill(options.skillPath, options.rootDir);
+  const workspaceRoot =
+    options.rootDir ??
+    (options.skillPath && path.isAbsolute(options.skillPath)
+      ? path.dirname(options.skillPath)
+      : process.cwd());
+  const skill = await loadSkill(options.skillPath, workspaceRoot);
+  const specialistAgentRegistry = createSpecialistAgentRegistry();
+  const teamSkills = await loadSpecialistSkills(listTeamSkillRefs(specialistAgentRegistry), workspaceRoot);
   const roles: AgentRole[] = ["planner", "executor", "verifier"];
 
   const roleViews = Object.fromEntries(
@@ -34,7 +45,7 @@ export async function createAgentRuntime(
     loadedAt: new Date().toISOString(),
     instructionPrecedence,
     skill,
-    roleViews
+    roleViews,
+    teamSkills
   };
 }
-

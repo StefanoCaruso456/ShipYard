@@ -251,6 +251,46 @@ export type RunContextInput = {
   relevantFiles: RelevantFileContext[];
   externalContext?: ExternalContextInput[];
   validationTargets: string[];
+  specialistAgentTypeId?: SpecialistAgentTypeId | null;
+};
+
+export type SpecialistAgentTypeId =
+  | "frontend_dev"
+  | "backend_dev"
+  | "repo_tools_dev"
+  | "observability_dev"
+  | "rebuild_dev";
+
+export type TeamSkillId =
+  | "production_lead"
+  | "execution_subagent"
+  | SpecialistAgentTypeId;
+
+export type SpecialistAgentSkillRef = {
+  id: TeamSkillId;
+  title: string;
+  relativePath: string;
+};
+
+export type SpecialistAgentToolScope = {
+  allowedToolNames: RepoToolName[];
+};
+
+export type SpecialistAgentDefinition = {
+  agentTypeId: SpecialistAgentTypeId;
+  label: string;
+  description: string;
+  domainTags: string[];
+  skillRefs: SpecialistAgentSkillRef[];
+  toolScope: SpecialistAgentToolScope;
+  allowedHandoffTargets: ControlPlaneRole[];
+  canSpawnExecutionSubagents: boolean;
+  defaultValidationFocus: string[];
+};
+
+export type SpecialistAgentRegistry = {
+  version: 1;
+  definitions: SpecialistAgentDefinition[];
 };
 
 export type TaskInput = {
@@ -260,6 +300,8 @@ export type TaskInput = {
   toolRequest?: RepoToolRequest | null;
   context?: RunContextInput | null;
   validationGates?: ValidationGate[];
+  requiredSpecialistAgentTypeId?: SpecialistAgentTypeId | null;
+  allowedToolNames?: RepoToolName[] | null;
 };
 
 export type UserStoryInput = {
@@ -269,6 +311,7 @@ export type UserStoryInput = {
   tasks: TaskInput[];
   acceptanceCriteria: string[];
   validationGates?: ValidationGate[];
+  preferredSpecialistAgentTypeId?: SpecialistAgentTypeId | null;
 };
 
 export type PhaseInput = {
@@ -297,6 +340,8 @@ export type Task = {
   toolRequest: RepoToolRequest | null;
   context: RunContextInput | null;
   validationGates: ValidationGate[];
+  requiredSpecialistAgentTypeId: SpecialistAgentTypeId | null;
+  allowedToolNames: RepoToolName[] | null;
   retryCount: number;
   failureReason: string | null;
   lastValidationResults: ValidationGateResult[] | null;
@@ -310,6 +355,7 @@ export type UserStory = {
   tasks: Task[];
   acceptanceCriteria: string[];
   validationGates: ValidationGate[];
+  preferredSpecialistAgentTypeId: SpecialistAgentTypeId | null;
   status: PhaseStatus;
   retryCount: number;
   failureReason: string | null;
@@ -394,6 +440,12 @@ export type ControlPlaneAgent = {
   label: string;
   status: ControlPlaneAgentStatus;
   assignedEntityIds: string[];
+  agentTypeId: TeamSkillId | null;
+  skillIds: TeamSkillId[];
+  allowedToolNames: RepoToolName[];
+  allowedHandoffTargets: ControlPlaneRole[];
+  specialtyTags: string[];
+  parentAgentId: string | null;
 };
 
 export type ControlPlaneArtifact = {
@@ -405,6 +457,7 @@ export type ControlPlaneArtifact = {
   createdAt: string;
   producerRole: ControlPlaneRole;
   producerId: string;
+  producerAgentTypeId: TeamSkillId | null;
   path?: string | null;
 };
 
@@ -412,8 +465,10 @@ export type ControlPlaneHandoff = {
   id: string;
   fromRole: ControlPlaneRole;
   fromId: string;
+  fromAgentTypeId: TeamSkillId | null;
   toRole: ControlPlaneRole;
   toId: string;
+  toAgentTypeId: TeamSkillId | null;
   entityKind: ControlPlaneEntityKind;
   entityId: string;
   purpose: string;
@@ -433,6 +488,7 @@ export type ControlPlaneIntervention = {
   resolvedAt: string | null;
   ownerRole: ControlPlaneRole;
   ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
 };
 
 export type ControlPlaneBlocker = {
@@ -445,12 +501,14 @@ export type ControlPlaneBlocker = {
   resolvedAt: string | null;
   ownerRole: ControlPlaneRole;
   ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
 };
 
 type ControlPlaneNodeBase = {
   status: ControlPlaneEntityStatus;
   ownerRole: ControlPlaneRole;
   ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
   failureReason: string | null;
   validation: ControlPlaneValidationState;
   blockerIds: string[];
@@ -489,6 +547,7 @@ export type ControlPlaneState = {
   status: ControlPlaneEntityStatus;
   runOwnerId: string;
   agents: ControlPlaneAgent[];
+  specialistAgentRegistry: SpecialistAgentRegistry;
   current: PhaseExecutionPointer;
   progress: PhaseExecutionProgress;
   retryPolicy: PhaseExecutionRetryPolicy;

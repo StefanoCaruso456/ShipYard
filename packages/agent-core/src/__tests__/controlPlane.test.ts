@@ -43,14 +43,39 @@ test("control plane initializes typed ownership for phases, stories, and tasks",
 
   assert.equal(controlPlane.runOwnerId, "agent:orchestrator");
   assert.equal(phase?.ownerRole, "production_lead");
+  assert.equal(phase?.ownerAgentTypeId, "production_lead");
   assert.equal(story?.ownerRole, "specialist_dev");
+  assert.equal(story?.ownerAgentTypeId, "backend_dev");
   assert.equal(task?.ownerRole, "execution_subagent");
+  assert.equal(task?.ownerAgentTypeId, "execution_subagent");
   assert.ok(controlPlane.agents.some((agent) => agent.role === "orchestrator"));
-  assert.ok(controlPlane.agents.some((agent) => agent.id === "agent:specialist-dev:story-runtime"));
   assert.ok(
-    controlPlane.agents.some((agent) => agent.id === "agent:execution-subagent:task-runtime")
+    controlPlane.agents.some(
+      (agent) => agent.id === "agent:specialist-dev:backend_dev:story-runtime"
+    )
+  );
+  assert.ok(
+    controlPlane.agents.some(
+      (agent) => agent.id === "agent:execution-subagent:backend_dev:task-runtime"
+    )
+  );
+  assert.ok(
+    controlPlane.agents.some(
+      (agent) =>
+        agent.id === "agent:specialist-dev:backend_dev:story-runtime" &&
+        agent.skillIds.includes("backend_dev")
+    )
+  );
+  assert.ok(
+    controlPlane.agents.some(
+      (agent) =>
+        agent.id === "agent:execution-subagent:backend_dev:task-runtime" &&
+        agent.skillIds.includes("execution_subagent") &&
+        agent.skillIds.includes("backend_dev")
+    )
   );
   assert.equal(controlPlane.artifacts[0]?.kind, "plan");
+  assert.ok(controlPlane.specialistAgentRegistry.definitions.length > 0);
 });
 
 test("control plane sync records status transitions and retry interventions", () => {

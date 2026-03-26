@@ -23,18 +23,30 @@ The runtime should not rely on natural-language memory to decide workflow truth.
 
 The runtime should rely on typed state objects and explicit transitions.
 
-## Primary Roles
+## Runtime Roles vs Specialist Identity
+
+The control plane should keep coarse runtime roles explicit:
 
 - `orchestrator`
 - `production_lead`
+- `specialist_dev`
+- `execution_subagent`
+
+Specialist identity should be attached as typed data, not mixed into the workflow role itself.
+
+Current specialist agent types:
+
 - `frontend_dev`
 - `backend_dev`
 - `repo_tools_dev`
 - `observability_dev`
 - `rebuild_dev`
-- `execution_subagent`
 
-These roles may expand later, but they should remain explicit runtime values rather than freeform strings.
+This keeps workflow authority clear:
+
+- runtime role says what part of the workflow the agent occupies
+- specialist type says what domain it owns
+- skill ids say which guidance documents shape its behavior
 
 ## Core Entities
 
@@ -75,12 +87,15 @@ An intervention records where a human had to correct, unblock, or redirect the s
 type WorkflowRole =
   | "orchestrator"
   | "production_lead"
+  | "specialist_dev"
+  | "execution_subagent";
+
+type SpecialistAgentTypeId =
   | "frontend_dev"
   | "backend_dev"
   | "repo_tools_dev"
   | "observability_dev"
-  | "rebuild_dev"
-  | "execution_subagent";
+  | "rebuild_dev";
 
 type WorkStatus =
   | "pending"
@@ -108,6 +123,7 @@ type WorkTask = {
   title: string;
   description: string;
   ownerRole: WorkflowRole | null;
+  ownerAgentTypeId: SpecialistAgentTypeId | null;
   status: WorkStatus;
   dependencies: string[];
   acceptanceCriteria: string[];
@@ -137,6 +153,8 @@ type Handoff = {
   id: string;
   from: WorkflowRole;
   to: WorkflowRole;
+  fromAgentTypeId: SpecialistAgentTypeId | null;
+  toAgentTypeId: SpecialistAgentTypeId | null;
   reason: string;
   taskIds: string[];
   artifactIds: string[];
@@ -175,6 +193,7 @@ type RuntimeControlPlan = {
 - A story cannot move to `completed` unless all of its tasks are validated or explicitly waived.
 - A phase cannot move to `completed` unless all of its stories are completed.
 - A handoff must record both the source role and target role.
+- A handoff should also record specialist identity when specialist work is involved.
 - An intervention must be recorded when a human changes plan, ownership, or execution outcome.
 
 ## Validation Gates

@@ -14,7 +14,7 @@ It exists so implementation follows one sequence and does not drift across sessi
 | Basic tool calls | Complete | `read_file`, `read_file_range`, `search_repo`, and surgical edit tools are all routed through the live runtime task path. |
 | Surgical file editing | Complete | Anchor-based editing is implemented with validation and rollback. |
 | Context injection | Complete | External context is accepted at task submission, assembled per role, bounded by deterministic budgets, and exposed through traces/debug payloads. |
-| Multi-agent coordination | Partial | Planner/executor/verifier orchestration is real, but the broader orchestrator -> production lead -> specialist dev model is not yet implemented. |
+| Multi-agent coordination | Partial | Planner/executor/verifier orchestration is real and specialist registry/skills now exist, but the broader orchestrator artifact and production-lead delegation flow is not fully implemented yet. |
 | Observability | Complete for core tracing | LangSmith plus local logs exist, but richer operator-facing query and evaluation flows can improve. |
 | Ship rebuild | Missing | No first-class rebuild execution or intervention logging exists yet. |
 | Comparative analysis | Missing | No report generation pipeline exists yet. |
@@ -109,31 +109,64 @@ This is the foundation for objective coordination. Without it, the broader agent
 - ownership and handoffs are explicit state, not inferred from prompts
 - validation gates block progression objectively
 
-## Phase 11: Agent Team Model
+## Phase 11: Specialist Agent Registry + Skills
+
+Detailed phase guide:
+
+- [phase-11-specialist-agent-registry.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/phase-11-specialist-agent-registry.md)
 
 ### Goal
 
-Implement the broader agent-team workflow on top of the control plane.
+Make specialist developers and their skills first-class runtime entities.
 
 ### Build
 
-- orchestrator role that turns user intent into a requirements artifact, stories, and tasks
-- production lead role that assigns stories and tasks to specialist devs
-- specialist dev agent registry with role-specific skills and allowed tool scopes
-- execution subagent creation for narrow implementation work
-- explicit merge and conflict resolution rules for cross-agent output
+- add a typed specialist dev registry
+- load specialist skill documents at runtime
+- attach specialist identity, tool scope, and skill ids to control-plane agents
+- inject assigned specialist guidance into planner/executor/verifier payloads
+- enforce delegated tool scope during execution
 
 ### Why this comes fourth
 
-The control plane must exist before the team model can be implemented safely.
+The control plane must exist before specialist identity and tool permissions can be implemented safely.
 
 ### Exit Criteria
 
-- at least two specialist agents can be delegated work through the production lead
-- handoffs, ownership, merge decisions, and conflicts are traceable
-- specialist roles are defined by typed runtime contracts plus skills
+- a typed specialist registry exists
+- runtime loads specialist skill documents
+- control-plane ownership resolves specialist identity for stories and tasks
+- delegated tool scope is enforced objectively
 
-## Phase 12: Ship Rebuild Framework
+### Status
+
+Complete
+
+## Phase 12: Production Lead Delegation Flow
+
+### Goal
+
+Implement the production-lead workflow that turns orchestrator artifacts into delegated specialist work.
+
+### Build
+
+- orchestrator artifact handoff into the production lead
+- production-lead routing rules for stories and tasks
+- bounded specialist delegation artifacts
+- explicit merge and conflict resolution rules
+- validation gating at specialist delivery boundaries
+
+### Why this comes fifth
+
+Specialist agents exist after Phase 11, but the production lead still needs to govern how their work is assigned and merged.
+
+### Exit Criteria
+
+- orchestrator output can be handed to the production lead as a typed artifact
+- specialist assignments are traceable and deterministic
+- merge/conflict decisions are explicit runtime state
+
+## Phase 13: Ship Rebuild Framework
 
 ### Goal
 
@@ -147,7 +180,7 @@ Turn the Ship rebuild into the real system integration test.
 - rebuild artifact log schema
 - rebuild-specific tracing and summaries
 
-### Why this comes fifth
+### Why this comes sixth
 
 The rebuild only becomes valuable when the runtime can capture intervention data and execution evidence cleanly.
 
@@ -157,7 +190,7 @@ The rebuild only becomes valuable when the runtime can capture intervention data
 - every intervention is recorded
 - rebuild outputs and validation results are preserved as evidence
 
-## Phase 13: Comparative Analysis
+## Phase 14: Comparative Analysis
 
 ### Goal
 

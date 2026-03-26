@@ -8,6 +8,7 @@ import type {
   ControlPlaneHandoff,
   ControlPlaneIntervention,
   ControlPlanePhaseNode,
+  ControlPlaneRole,
   ControlPlaneState,
   ControlPlaneStoryNode,
   ControlPlaneTaskNode,
@@ -15,10 +16,17 @@ import type {
   ControlPlaneValidationState,
   Phase,
   PhaseExecutionState,
+  SpecialistAgentDefinition,
   Task,
+  TeamSkillId,
   UserStory,
   ValidationGateResult
 } from "./types";
+import {
+  createSpecialistAgentRegistry,
+  getSpecialistDefinition,
+  resolveSpecialistAgentType
+} from "./agentRegistry";
 
 const ORCHESTRATOR_ID = "agent:orchestrator";
 const PRODUCTION_LEAD_ID = "agent:production-lead";
@@ -36,11 +44,13 @@ const ALLOWED_STATUS_TRANSITIONS: Record<
 
 export function createControlPlaneState(phaseExecution: PhaseExecutionState): ControlPlaneState {
   const updatedAt = new Date().toISOString();
+  const specialistAgentRegistry = createSpecialistAgentRegistry();
   const controlPlane: ControlPlaneState = {
     version: 1,
     status: mapStatus(phaseExecution.status),
     runOwnerId: ORCHESTRATOR_ID,
-    agents: buildAgents(phaseExecution),
+    agents: buildAgents(phaseExecution, specialistAgentRegistry),
+    specialistAgentRegistry,
     current: {
       ...phaseExecution.current
     },
@@ -50,7 +60,9 @@ export function createControlPlaneState(phaseExecution: PhaseExecutionState): Co
     retryPolicy: {
       ...phaseExecution.retryPolicy
     },
-    phases: phaseExecution.phases.map((phase) => createPhaseNode(phase, updatedAt)),
+    phases: phaseExecution.phases.map((phase) =>
+      createPhaseNode(phase, updatedAt, specialistAgentRegistry)
+    ),
     artifacts: [],
     handoffs: [],
     interventions: [],
@@ -86,9 +98,35 @@ export function normalizeControlPlaneState(
 
   normalized.version = 1;
   normalized.runOwnerId = normalized.runOwnerId || ORCHESTRATOR_ID;
-  normalized.agents = Array.isArray(normalized.agents) ? normalized.agents : [];
-  normalized.artifacts = Array.isArray(normalized.artifacts) ? normalized.artifacts : [];
-  normalized.handoffs = Array.isArray(normalized.handoffs) ? normalized.handoffs : [];
+  normalized.specialistAgentRegistry =
+    normalized.specialistAgentRegistry ?? createSpecialistAgentRegistry();
+  normalized.agents = Array.isArray(normalized.agents)
+    ? normalized.agents.map((agent) => ({
+        ...agent,
+        agentTypeId: agent.agentTypeId ?? inferAgentTypeId(agent.id),
+        skillIds: Array.isArray(agent.skillIds) ? uniqueSkillIds(agent.skillIds) : [],
+        allowedToolNames: Array.isArray(agent.allowedToolNames) ? agent.allowedToolNames : [],
+        allowedHandoffTargets: Array.isArray(agent.allowedHandoffTargets)
+          ? agent.allowedHandoffTargets
+          : [],
+        specialtyTags: Array.isArray(agent.specialtyTags) ? agent.specialtyTags : [],
+        parentAgentId: agent.parentAgentId ?? null
+      }))
+    : [];
+  normalized.artifacts = Array.isArray(normalized.artifacts)
+    ? normalized.artifacts.map((artifact) => ({
+        ...artifact,
+        path: artifact.path ?? null
+      }))
+    : [];
+  normalized.handoffs = Array.isArray(normalized.handoffs)
+    ? normalized.handoffs.map((handoff) => ({
+        ...handoff,
+        fromAgentTypeId:
+          handoff.fromAgentTypeId ?? inferAgentTypeId(handoff.fromId),
+        toAgentTypeId: handoff.toAgentTypeId ?? inferAgentTypeId(handoff.toId)
+      }))
+    : [];
   normalized.interventions = Array.isArray(normalized.interventions)
     ? normalized.interventions
     : [];
@@ -579,41 +617,72 @@ export function recordPhaseFailed(
   });
 }
 
-function buildAgents(phaseExecution: PhaseExecutionState): ControlPlaneAgent[] {
+function buildAgents(
+  phaseExecution: PhaseExecutionState,
+  specialistAgentRegistry = createSpecialistAgentRegistry()
+): ControlPlaneAgent[] {
   const agents: ControlPlaneAgent[] = [
     {
       id: ORCHESTRATOR_ID,
       role: "orchestrator",
       label: "Orchestrator",
       status: "active",
-      assignedEntityIds: ["run"]
+      assignedEntityIds: ["run"],
+      agentTypeId: null,
+      skillIds: [],
+      allowedToolNames: [],
+      allowedHandoffTargets: ["production_lead"],
+      specialtyTags: ["coordination", "planning"],
+      parentAgentId: null
     },
     {
       id: PRODUCTION_LEAD_ID,
       role: "production_lead",
       label: "Production Lead",
       status: "assigned",
-      assignedEntityIds: phaseExecution.phases.map((phase) => phase.id)
+      assignedEntityIds: phaseExecution.phases.map((phase) => phase.id),
+      agentTypeId: "production_lead",
+      skillIds: ["production_lead"],
+      allowedToolNames: [],
+      allowedHandoffTargets: ["specialist_dev"],
+      specialtyTags: ["routing", "delivery", "validation"],
+      parentAgentId: null
     }
   ];
 
   for (const phase of phaseExecution.phases) {
     for (const story of phase.userStories) {
+      const specialistDefinition = resolveStoryDefinition(story, null, specialistAgentRegistry);
       agents.push({
-        id: storyOwnerId(story.id),
+        id: storyOwnerId(specialistDefinition.agentTypeId, story.id),
         role: "specialist_dev",
-        label: `Specialist Dev (${story.title})`,
+        label: `${specialistDefinition.label} (${story.title})`,
         status: "assigned",
-        assignedEntityIds: [story.id]
+        assignedEntityIds: [story.id],
+        agentTypeId: specialistDefinition.agentTypeId,
+        skillIds: specialistDefinition.skillRefs.map((skillRef) => skillRef.id),
+        allowedToolNames: [...specialistDefinition.toolScope.allowedToolNames],
+        allowedHandoffTargets: [...specialistDefinition.allowedHandoffTargets],
+        specialtyTags: [...specialistDefinition.domainTags],
+        parentAgentId: PRODUCTION_LEAD_ID
       });
 
       for (const task of story.tasks) {
+        const taskDefinition = resolveStoryDefinition(story, task, specialistAgentRegistry);
         agents.push({
-          id: taskOwnerId(task.id),
+          id: taskOwnerId(taskDefinition.agentTypeId, task.id),
           role: "execution_subagent",
           label: `Execution Subagent (${task.id})`,
           status: "available",
-          assignedEntityIds: [task.id]
+          assignedEntityIds: [task.id],
+          agentTypeId: "execution_subagent",
+          skillIds: uniqueSkillIds(["execution_subagent", ...taskDefinition.skillRefs.map((skillRef) => skillRef.id)]),
+          allowedToolNames: task.allowedToolNames
+            ? [...task.allowedToolNames]
+            : [...taskDefinition.toolScope.allowedToolNames],
+          allowedHandoffTargets: ["specialist_dev"],
+          specialtyTags: [...taskDefinition.domainTags],
+          parentAgentId: storyOwnerId(taskDefinition.agentTypeId, story.id)
         });
       }
     }
@@ -622,7 +691,11 @@ function buildAgents(phaseExecution: PhaseExecutionState): ControlPlaneAgent[] {
   return agents;
 }
 
-function createPhaseNode(phase: Phase, updatedAt: string): ControlPlanePhaseNode {
+function createPhaseNode(
+  phase: Phase,
+  updatedAt: string,
+  specialistAgentRegistry = createSpecialistAgentRegistry()
+): ControlPlanePhaseNode {
   return {
     id: phase.id,
     name: phase.name,
@@ -630,6 +703,7 @@ function createPhaseNode(phase: Phase, updatedAt: string): ControlPlanePhaseNode
     status: mapStatus(phase.status),
     ownerRole: "production_lead",
     ownerId: PRODUCTION_LEAD_ID,
+    ownerAgentTypeId: "production_lead",
     failureReason: phase.failureReason,
     validation: createValidationState(phase.lastValidationResults, updatedAt),
     blockerIds: [],
@@ -637,11 +711,18 @@ function createPhaseNode(phase: Phase, updatedAt: string): ControlPlanePhaseNode
     handoffIds: [],
     interventionIds: [],
     transitionLog: [],
-    userStories: phase.userStories.map((story) => createStoryNode(story, updatedAt))
+    userStories: phase.userStories.map((story) =>
+      createStoryNode(story, updatedAt, specialistAgentRegistry)
+    )
   };
 }
 
-function createStoryNode(story: UserStory, updatedAt: string): ControlPlaneStoryNode {
+function createStoryNode(
+  story: UserStory,
+  updatedAt: string,
+  specialistAgentRegistry = createSpecialistAgentRegistry()
+): ControlPlaneStoryNode {
+  const specialistDefinition = resolveStoryDefinition(story, null, specialistAgentRegistry);
   return {
     id: story.id,
     title: story.title,
@@ -649,7 +730,8 @@ function createStoryNode(story: UserStory, updatedAt: string): ControlPlaneStory
     acceptanceCriteria: [...story.acceptanceCriteria],
     status: mapStatus(story.status),
     ownerRole: "specialist_dev",
-    ownerId: storyOwnerId(story.id),
+    ownerId: storyOwnerId(specialistDefinition.agentTypeId, story.id),
+    ownerAgentTypeId: specialistDefinition.agentTypeId,
     retryCount: story.retryCount,
     failureReason: story.failureReason,
     validation: createValidationState(story.lastValidationResults, updatedAt),
@@ -658,11 +740,17 @@ function createStoryNode(story: UserStory, updatedAt: string): ControlPlaneStory
     handoffIds: [],
     interventionIds: [],
     transitionLog: [],
-    tasks: story.tasks.map((task) => createTaskNode(task, updatedAt))
+    tasks: story.tasks.map((task) => createTaskNode(story, task, updatedAt, specialistAgentRegistry))
   };
 }
 
-function createTaskNode(task: Task, updatedAt: string): ControlPlaneTaskNode {
+function createTaskNode(
+  story: UserStory,
+  task: Task,
+  updatedAt: string,
+  specialistAgentRegistry = createSpecialistAgentRegistry()
+): ControlPlaneTaskNode {
+  const specialistDefinition = resolveStoryDefinition(story, task, specialistAgentRegistry);
   return {
     id: task.id,
     title: task.id,
@@ -670,7 +758,8 @@ function createTaskNode(task: Task, updatedAt: string): ControlPlaneTaskNode {
     expectedOutcome: task.expectedOutcome,
     status: mapStatus(task.status),
     ownerRole: "execution_subagent",
-    ownerId: taskOwnerId(task.id),
+    ownerId: taskOwnerId(specialistDefinition.agentTypeId, task.id),
+    ownerAgentTypeId: "execution_subagent",
     retryCount: task.retryCount,
     failureReason: task.failureReason,
     validation: createValidationState(task.lastValidationResults, updatedAt),
@@ -689,7 +778,9 @@ function ensureNodes(
 ) {
   for (const phase of phaseExecution.phases) {
     if (!findPhaseNode(controlPlane, phase.id)) {
-      controlPlane.phases.push(createPhaseNode(phase, updatedAt));
+      controlPlane.phases.push(
+        createPhaseNode(phase, updatedAt, controlPlane.specialistAgentRegistry)
+      );
     }
 
     const phaseNode = findPhaseNode(controlPlane, phase.id);
@@ -700,7 +791,9 @@ function ensureNodes(
 
     for (const story of phase.userStories) {
       if (!phaseNode.userStories.some((candidate) => candidate.id === story.id)) {
-        phaseNode.userStories.push(createStoryNode(story, updatedAt));
+        phaseNode.userStories.push(
+          createStoryNode(story, updatedAt, controlPlane.specialistAgentRegistry)
+        );
       }
 
       const storyNode = phaseNode.userStories.find((candidate) => candidate.id === story.id);
@@ -711,7 +804,9 @@ function ensureNodes(
 
       for (const task of story.tasks) {
         if (!storyNode.tasks.some((candidate) => candidate.id === task.id)) {
-          storyNode.tasks.push(createTaskNode(task, updatedAt));
+          storyNode.tasks.push(
+            createTaskNode(story, task, updatedAt, controlPlane.specialistAgentRegistry)
+          );
         }
       }
     }
@@ -837,16 +932,25 @@ function mapStatus(
     : "pending";
 }
 
-function upsertArtifact(controlPlane: ControlPlaneState, artifact: ControlPlaneArtifact) {
+function upsertArtifact(
+  controlPlane: ControlPlaneState,
+  artifact: Omit<ControlPlaneArtifact, "producerAgentTypeId"> & {
+    producerAgentTypeId?: TeamSkillId | null;
+  }
+) {
   const existing = controlPlane.artifacts.find((candidate) => candidate.id === artifact.id);
+  const producerAgentTypeId =
+    artifact.producerAgentTypeId ?? resolveAgentTypeId(controlPlane, artifact.producerId);
 
   if (existing) {
     existing.summary = artifact.summary;
     existing.createdAt = artifact.createdAt;
+    existing.producerAgentTypeId = producerAgentTypeId;
     existing.path = artifact.path ?? null;
   } else {
     controlPlane.artifacts.push({
       ...artifact,
+      producerAgentTypeId,
       path: artifact.path ?? null
     });
   }
@@ -856,20 +960,39 @@ function upsertArtifact(controlPlane: ControlPlaneState, artifact: ControlPlaneA
 
 function upsertHandoff(
   controlPlane: ControlPlaneState,
-  handoff: Omit<ControlPlaneHandoff, "createdAt" | "acceptedAt" | "completedAt"> & {
+  handoff: Omit<
+    ControlPlaneHandoff,
+    "createdAt" | "acceptedAt" | "completedAt" | "fromAgentTypeId" | "toAgentTypeId"
+  > & {
+    fromAgentTypeId?: TeamSkillId | null;
+    toAgentTypeId?: TeamSkillId | null;
     status: ControlPlaneHandoff["status"];
   }
 ) {
   const now = new Date().toISOString();
   const existing = controlPlane.handoffs.find((candidate) => candidate.id === handoff.id);
+  const fromAgentTypeId =
+    handoff.fromAgentTypeId ?? resolveAgentTypeId(controlPlane, handoff.fromId);
+  const toAgentTypeId = handoff.toAgentTypeId ?? resolveAgentTypeId(controlPlane, handoff.toId);
+
+  assertAllowedHandoff(controlPlane, handoff.fromId, handoff.toRole);
 
   if (existing) {
+    existing.fromRole = handoff.fromRole;
+    existing.fromId = handoff.fromId;
+    existing.fromAgentTypeId = fromAgentTypeId;
+    existing.toRole = handoff.toRole;
+    existing.toId = handoff.toId;
+    existing.toAgentTypeId = toAgentTypeId;
+    existing.purpose = handoff.purpose;
     existing.status = handoff.status;
     existing.acceptedAt = handoff.status === "created" ? null : existing.acceptedAt ?? now;
     existing.completedAt = handoff.status === "completed" ? now : existing.completedAt;
   } else {
     controlPlane.handoffs.push({
       ...handoff,
+      fromAgentTypeId,
+      toAgentTypeId,
       createdAt: now,
       acceptedAt: handoff.status === "created" ? null : now,
       completedAt: handoff.status === "completed" ? now : null
@@ -881,7 +1004,9 @@ function upsertHandoff(
 
 function upsertIntervention(
   controlPlane: ControlPlaneState,
-  intervention: Omit<ControlPlaneIntervention, "createdAt" | "resolvedAt">
+  intervention: Omit<ControlPlaneIntervention, "createdAt" | "resolvedAt" | "ownerAgentTypeId"> & {
+    ownerAgentTypeId?: TeamSkillId | null;
+  }
 ) {
   if (controlPlane.interventions.some((candidate) => candidate.id === intervention.id)) {
     return;
@@ -889,6 +1014,8 @@ function upsertIntervention(
 
   controlPlane.interventions.push({
     ...intervention,
+    ownerAgentTypeId:
+      intervention.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, intervention.ownerId),
     createdAt: new Date().toISOString(),
     resolvedAt: null
   });
@@ -903,7 +1030,12 @@ function upsertIntervention(
 
 function upsertBlocker(
   controlPlane: ControlPlaneState,
-  blocker: Omit<ControlPlaneBlocker, "createdAt" | "resolvedAt" | "status">
+  blocker: Omit<
+    ControlPlaneBlocker,
+    "createdAt" | "resolvedAt" | "status" | "ownerAgentTypeId"
+  > & {
+    ownerAgentTypeId?: TeamSkillId | null;
+  }
 ) {
   const existing = controlPlane.blockers.find((candidate) => candidate.id === blocker.id);
 
@@ -911,11 +1043,14 @@ function upsertBlocker(
     existing.summary = blocker.summary;
     existing.status = "open";
     existing.resolvedAt = null;
+    existing.ownerAgentTypeId =
+      blocker.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, blocker.ownerId);
     return;
   }
 
   controlPlane.blockers.push({
     ...blocker,
+    ownerAgentTypeId: blocker.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, blocker.ownerId),
     status: "open",
     createdAt: new Date().toISOString(),
     resolvedAt: null
@@ -1019,12 +1154,78 @@ function findTaskNode(controlPlane: ControlPlaneState, taskId: string) {
   return null;
 }
 
-function storyOwnerId(storyId: string) {
-  return `agent:specialist-dev:${storyId}`;
+function storyOwnerId(agentTypeId: TeamSkillId, storyId: string) {
+  return `agent:specialist-dev:${agentTypeId}:${storyId}`;
 }
 
-function taskOwnerId(taskId: string) {
-  return `agent:execution-subagent:${taskId}`;
+function taskOwnerId(agentTypeId: TeamSkillId, taskId: string) {
+  return `agent:execution-subagent:${agentTypeId}:${taskId}`;
+}
+
+function resolveStoryDefinition(
+  story: UserStory,
+  task: Task | null,
+  registry = createSpecialistAgentRegistry()
+): SpecialistAgentDefinition {
+  return getSpecialistDefinition(resolveSpecialistAgentType({ story, task }), registry);
+}
+
+function uniqueSkillIds(skillIds: TeamSkillId[]) {
+  return [...new Set(skillIds)];
+}
+
+function resolveAgentTypeId(controlPlane: ControlPlaneState, agentId: string) {
+  return controlPlane.agents.find((agent) => agent.id === agentId)?.agentTypeId ?? inferAgentTypeId(agentId);
+}
+
+function inferAgentTypeId(agentId: string): TeamSkillId | null {
+  if (agentId === PRODUCTION_LEAD_ID) {
+    return "production_lead";
+  }
+
+  if (agentId.startsWith("agent:execution-subagent:")) {
+    return "execution_subagent";
+  }
+
+  if (agentId.startsWith("agent:specialist-dev:frontend_dev:")) {
+    return "frontend_dev";
+  }
+
+  if (agentId.startsWith("agent:specialist-dev:backend_dev:")) {
+    return "backend_dev";
+  }
+
+  if (agentId.startsWith("agent:specialist-dev:repo_tools_dev:")) {
+    return "repo_tools_dev";
+  }
+
+  if (agentId.startsWith("agent:specialist-dev:observability_dev:")) {
+    return "observability_dev";
+  }
+
+  if (agentId.startsWith("agent:specialist-dev:rebuild_dev:")) {
+    return "rebuild_dev";
+  }
+
+  return null;
+}
+
+function assertAllowedHandoff(
+  controlPlane: ControlPlaneState,
+  fromId: string,
+  toRole: ControlPlaneRole
+) {
+  const agent = controlPlane.agents.find((candidate) => candidate.id === fromId);
+
+  if (!agent) {
+    return;
+  }
+
+  if (!agent.allowedHandoffTargets.includes(toRole)) {
+    throw new Error(
+      `Control-plane handoff not allowed for ${agent.id}: ${agent.role} -> ${toRole}`
+    );
+  }
 }
 
 function renderPlanSummary(phaseExecution: PhaseExecutionState) {
