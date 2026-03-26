@@ -303,11 +303,11 @@ export function buildRuntimeThread(
       followUp.attachments.map((attachment) => toLocalAttachmentCard(attachment))
     )
   ];
-  const focusedLocalEffect = localFileEffectsByTaskId[focusedRun.id] ?? null;
-  const activity = buildRuntimeActivity(
+  const activity = buildThreadActivity(
+    orderedRuns,
     focusedRun,
-    runtimeTracesByTaskId[focusedRun.id] ?? null,
-    focusedLocalEffect
+    runtimeTracesByTaskId,
+    localFileEffectsByTaskId
   );
   const queuedFollowUps = buildQueuedFollowUpItems(queuedRuns, optimisticFollowUps);
 
@@ -906,6 +906,27 @@ function buildRuntimeActivity(
   }
 
   return condenseActivityItems(activity);
+}
+
+function buildThreadActivity(
+  runs: RuntimeTask[],
+  focusedRun: RuntimeTask,
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
+) {
+  const displayRuns = [...runs]
+    .filter((candidate) => candidate.status !== "pending" || candidate.id === focusedRun.id)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return condenseActivityItems(
+    displayRuns.flatMap((candidate) =>
+      buildRuntimeActivity(
+        candidate,
+        runtimeTracesByTaskId[candidate.id] ?? null,
+        localFileEffectsByTaskId[candidate.id] ?? null
+      )
+    )
+  );
 }
 
 function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | null): AgentActivityItem | null {

@@ -11,6 +11,7 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
   const liveRuntime = thread.liveRuntime;
   const focusedRun = liveRuntime?.focusedRun;
   const operatorView = liveRuntime?.operatorView;
+  const hasActivity = (thread.activity?.length ?? 0) > 0;
 
   if (!liveRuntime || !focusedRun) {
     return null;
@@ -87,7 +88,7 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
         </div>
       </article>
 
-      {operatorView ? <OperatorRunOverview operatorView={operatorView} /> : null}
+      {operatorView && !hasActivity ? <OperatorRunOverview operatorView={operatorView} /> : null}
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 

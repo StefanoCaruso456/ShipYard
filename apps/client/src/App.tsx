@@ -289,15 +289,27 @@ function App() {
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
-  const activeRuntimeTask =
-    activeThread?.source === "live"
-      ? runtimeTasks.find(
-          (candidate) => candidate.id === activeThread.liveRuntime?.focusedRunId
-        ) ??
-        (activeThreadId
-          ? runtimeTasks.find((candidate) => candidate.id === activeThreadId) ?? null
-          : null)
-      : null;
+  const activeLiveRunIds =
+    activeThread?.source === "live" ? activeThread.liveRuntime?.runIds ?? [] : [];
+  const activeLiveRunIdsKey = activeLiveRunIds.join("|");
+  const activeLiveRuns = useMemo(() => {
+    if (activeLiveRunIds.length === 0) {
+      return [];
+    }
+
+    const runtimeTasksById = new Map(runtimeTasks.map((candidate) => [candidate.id, candidate]));
+
+    return activeLiveRunIds.flatMap((runId) => {
+      const run = runtimeTasksById.get(runId);
+      return run ? [run] : [];
+    });
+  }, [activeLiveRunIds, activeLiveRunIdsKey, runtimeTasks]);
+  const activeLiveRunStatusKey = activeLiveRuns
+    .map((candidate) => `${candidate.id}:${candidate.status}`)
+    .join("|");
+  const activeLiveTraceAvailabilityKey = activeLiveRuns
+    .map((candidate) => `${candidate.id}:${runtimeTracesByTaskId[candidate.id] ? "1" : "0"}`)
+    .join("|");
 
   useEffect(() => {
     if (!activeProject || !activeThreadId) {
@@ -317,60 +329,88 @@ function App() {
   }, [activeGroup, activeProject, activeThreadId]);
 
   useEffect(() => {
-    if (!activeRuntimeTask) {
+    if (activeLiveRuns.length === 0) {
       return;
     }
 
     const cancelled = { value: false };
-    const activeTaskId = activeRuntimeTask.id;
-    const activeTaskStatus = activeRuntimeTask.status;
 
-    async function loadTraceSnapshot() {
-      try {
-        const payload = await fetchRuntimeTrace(activeTaskId);
+    async function loadTraceSnapshots() {
+      const runsToHydrate = activeLiveRuns.filter(
+        (candidate) =>
+          candidate.status === "pending" ||
+          candidate.status === "running" ||
+          !runtimeTracesByTaskId[candidate.id]
+      );
 
-        if (cancelled.value) {
-          return;
-        }
+      if (runsToHydrate.length === 0) {
+        return;
+      }
 
-        setRuntimeTracesByTaskId((current) => ({
-          ...current,
-          [activeTaskId]: payload.trace
-        }));
-      } catch {
-        if (cancelled.value) {
-          return;
-        }
+      const results = await Promise.allSettled(
+        runsToHydrate.map(async (candidate) => ({
+          id: candidate.id,
+          trace: (await fetchRuntimeTrace(candidate.id)).trace
+        }))
+      );
 
-        setRuntimeTracesByTaskId((current) => {
-          if (!(activeTaskId in current)) {
-            return current;
+      if (cancelled.value) {
+        return;
+      }
+
+      setRuntimeTracesByTaskId((current) => {
+        let changed = false;
+        const next = { ...current };
+
+        results.forEach((result, index) => {
+          const candidate = runsToHydrate[index];
+
+          if (!candidate) {
+            return;
           }
 
-          const next = { ...current };
-          delete next[activeTaskId];
-          return next;
+          if (result.status === "fulfilled") {
+            next[candidate.id] = result.value.trace;
+            changed = true;
+          } else if (
+            candidate.status !== "running" &&
+            candidate.status !== "pending" &&
+            candidate.id in next
+          ) {
+            delete next[candidate.id];
+            changed = true;
+          }
         });
-      }
+
+        return changed ? next : current;
+      });
     }
 
-    void loadTraceSnapshot();
+    void loadTraceSnapshots();
 
-    if (activeTaskStatus !== "pending" && activeTaskStatus !== "running") {
+    const hasActiveTracePollingTarget = activeLiveRuns.some(
+      (candidate) => candidate.status === "pending" || candidate.status === "running"
+    );
+
+    if (!hasActiveTracePollingTarget) {
       return () => {
         cancelled.value = true;
       };
     }
 
     const interval = window.setInterval(() => {
-      void loadTraceSnapshot();
-    }, activeTaskStatus === "running" ? 900 : 1500);
+      void loadTraceSnapshots();
+    }, activeLiveRuns.some((candidate) => candidate.status === "running") ? 900 : 1500);
 
     return () => {
       cancelled.value = true;
       window.clearInterval(interval);
     };
-  }, [activeRuntimeTask?.id, activeRuntimeTask?.status]);
+  }, [
+    activeThread?.id,
+    activeLiveRunStatusKey,
+    activeLiveTraceAvailabilityKey
+  ]);
 
   useEffect(() => {
     const localProjectsById = new Map(
