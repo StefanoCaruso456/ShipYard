@@ -336,7 +336,8 @@ function summarizeRunTrace(
     },
     context: contextSummary,
     orchestration: readOrchestrationSummary(rootSpan?.metadata),
-    phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata)
+    phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata),
+    rebuild: readRebuildSummary(rootSpan?.metadata)
   };
 }
 
@@ -892,5 +893,29 @@ function readPhaseExecutionSummary(metadata: TraceMetadata | undefined) {
     maxTaskRetries: readMetadataNumber(metadata.phaseExecutionMaxTaskRetries),
     maxStoryRetries: readMetadataNumber(metadata.phaseExecutionMaxStoryRetries),
     maxReplans: readMetadataNumber(metadata.phaseExecutionMaxReplans)
+  };
+}
+
+function readRebuildSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.rebuildStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.rebuildStatus),
+    scope: readMetadataString(metadata.rebuildScope),
+    shipId: readMetadataString(metadata.rebuildShipId),
+    label: readMetadataString(metadata.rebuildLabel),
+    objective: readMetadataString(metadata.rebuildObjective),
+    projectId: readMetadataString(metadata.rebuildProjectId),
+    rootPath: readMetadataString(metadata.rebuildRootPath),
+    baseBranch: readMetadataString(metadata.rebuildBaseBranch),
+    entryPaths: collectMetadataStringArray(metadata.rebuildEntryPaths),
+    validationStatus: readMetadataString(metadata.rebuildValidationStatus),
+    artifactCount: readMetadataNumber(metadata.rebuildArtifactCount) ?? 0,
+    artifactKinds: collectMetadataStringArray(metadata.rebuildArtifactKinds),
+    interventionCount: readMetadataNumber(metadata.rebuildInterventionCount) ?? 0,
+    interventionKinds: collectMetadataStringArray(metadata.rebuildInterventionKinds),
+    lastFailureReason: readMetadataString(metadata.rebuildLastFailureReason)
   };
 }

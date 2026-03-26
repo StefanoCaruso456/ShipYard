@@ -477,6 +477,95 @@ test("persistent runtime retries task validation gates before failing the full r
   assert.ok(completedRun.events.some((event) => event.type === "coordination_conflict_detected"));
 });
 
+test("persistent runtime tracks rebuild targets artifacts and interventions for ship rebuild runs", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const attempts = new Map<string, number>();
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      const currentAttempt = (attempts.get(run.instruction) ?? 0) + 1;
+      attempts.set(run.instruction, currentAttempt);
+
+      return {
+        mode: "placeholder-execution",
+        summary:
+          currentAttempt === 1
+            ? "Incomplete rebuild evidence"
+            : run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Rebuild the Scopex ship workflow.",
+    rebuild: {
+      target: {
+        shipId: "ship-scopex",
+        label: "Scopex rebuild",
+        objective: "Restore the ship rebuild workflow.",
+        projectId: "project-scopex",
+        rootPath: "1st project",
+        baseBranch: "main",
+        entryPaths: ["client/src/App.tsx", "server/src/index.ts"],
+        acceptanceSummary: "Preserve rebuild evidence and intervention history."
+      }
+    },
+    phaseExecution: {
+      retryPolicy: {
+        maxTaskRetries: 1
+      },
+      phases: [
+        {
+          id: "phase-rebuild",
+          name: "Rebuild",
+          description: "Restore the ship rebuild path.",
+          userStories: [
+            {
+              id: "story-rebuild",
+              title: "Rebuild the ship",
+              description: "Rebuild the ship with tracked evidence.",
+              acceptanceCriteria: ["Restore the ship rebuild workflow."],
+              tasks: [
+                {
+                  id: "task-rebuild",
+                  instruction: "Restore the ship rebuild workflow.",
+                  expectedOutcome: "Restore the ship rebuild workflow."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.equal(completedRun.result?.mode, "ship-rebuild");
+  assert.equal(completedRun.rebuild?.status, "completed");
+  assert.equal(completedRun.rebuild?.target.shipId, "ship-scopex");
+  assert.equal(completedRun.rebuild?.target.scope, "ship");
+  assert.deepEqual(completedRun.rebuild?.target.entryPaths, [
+    "client/src/App.tsx",
+    "server/src/index.ts"
+  ]);
+  assert.equal(completedRun.rebuild?.progress?.completedTasks, 1);
+  assert.equal(completedRun.rebuild?.retryPolicy?.maxTaskRetries, 1);
+  assert.equal(completedRun.rebuild?.validationStatus, "passed");
+  assert.ok(
+    completedRun.rebuild?.artifactLog.some((artifact) => artifact.kind === "task_result")
+  );
+  assert.ok(
+    completedRun.rebuild?.artifactLog.some((artifact) => artifact.kind === "validation_report")
+  );
+  assert.ok(
+    completedRun.rebuild?.interventionLog.some((intervention) => intervention.kind === "retry")
+  );
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
