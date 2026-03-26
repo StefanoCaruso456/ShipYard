@@ -16,6 +16,9 @@ This phase exists to harden the boundaries first:
 - role-based retrieval policy
 - artifact compression rules
 
+In this phase, Shipyard completes the hardening layer and defines the next memory contracts. It does
+not require a full semantic-memory or vector-retrieval system yet.
+
 ## What This Phase Builds
 
 ### Working Context
@@ -76,3 +79,6 @@ After this phase:
 - runtime boundary objects are validated at runtime
 - memory architecture is clearer and safer
 - Ship rebuild work can start on top of a stronger context/memory foundation instead of prompt luck
+
+The remaining future memory work is deeper retrieval and semantic-memory behavior, not the boundary
+hardening delivered here.

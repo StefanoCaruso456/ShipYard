@@ -30,6 +30,10 @@ It exists so implementation follows one sequence and does not drift across sessi
 
 The next phases should be implemented in this order.
 
+Separate additive product-facing work lives in
+[roadmap-enhancements.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/roadmap-enhancements.md).
+That enhancement track builds on the core runtime phases below instead of replacing them.
+
 ## Phase 8: End-to-End Tooling
 
 ### Goal
@@ -211,10 +215,17 @@ long-running rebuild workflow. This phase closes the highest-risk context and me
 
 ### Status
 
-In progress
+Complete
 
-Core context budgeting, output caps, runtime schemas, and budget observability are already implemented.
-Episodic memory and role-based retrieval policy remain the open portion of this phase.
+This phase completed the hardening scope:
+
+- token-aware context budgeting is implemented
+- model-backed roles use explicit output caps
+- runtime boundary objects are validated with schemas
+- budget and omission signals are observable in traces
+
+Deeper semantic or episodic retrieval remains future additive work, but it is no longer the open
+work for this hardening phase.
 
 ## Phase 13: Ship Rebuild Framework
 

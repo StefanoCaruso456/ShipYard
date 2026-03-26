@@ -510,7 +510,7 @@ Make current runtime context safer and more observable before the memory model g
 
 ### Outcome
 
-The runtime now has stronger context boundaries and better observability, while episodic memory and role-based retrieval policy remain the still-open portion of this phase.
+The runtime now has stronger context boundaries, runtime schemas, explicit output caps, and better observability. The next deeper memory work is future retrieval/semantic-memory behavior, not unfinished boundary hardening inside this phase.
 
 ### Architecture
 
@@ -522,12 +522,12 @@ The runtime now has stronger context boundaries and better observability, while 
 
 ### Status
 
-In progress
+Complete
 
-Core budgeting, caps, schemas, and budget observability are complete. Episodic memory and role-based retrieval policy remain open.
+This phase completed the hardening layer. Future semantic-memory and retrieval work remains additive work beyond this boundary-hardening scope.
 
 ## What Comes Next
 
-The current active work is still `Phase 12.5: Memory and Context Hardening`.
+The next major core phase is `Phase 13: Ship Rebuild Framework`, which turns the Ship rebuild into the first-class integration test for the runtime.
 
-After that, the next major phase is `Phase 13: Ship Rebuild Framework`, which turns the Ship rebuild into the first-class integration test for the runtime.
+Separate additive product-facing work is tracked in [roadmap-enhancements.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/roadmap-enhancements.md).
