@@ -2073,6 +2073,11 @@ a {
   flex-wrap: wrap;
 }
 
+.composer__workflow-buttons--toolbar {
+  align-items: center;
+  gap: 0.42rem;
+}
+
 .composer__workflow-button {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
@@ -2081,6 +2086,15 @@ a {
   padding: 0.45rem 0.82rem;
   font-size: 0.82rem;
   font-weight: 620;
+}
+
+.composer__workflow-buttons--toolbar .composer__workflow-button {
+  padding: 0.58rem 0.9rem;
+  background: #202020;
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 12px 24px rgba(0, 0, 0, 0.14);
 }
 
 .composer__workflow-button.is-active {

@@ -283,33 +283,6 @@ export function Composer({
       ) : null}
 
       <div className={`composer__field ${steerMode ? "composer__field--steer" : ""}`}>
-        {!steerMode ? (
-          <div className="composer__workflow-switcher">
-            <div className="composer__workflow-buttons">
-              <button
-                type="button"
-                className={`composer__workflow-button ${workflowMode === "standard" ? "is-active" : ""}`}
-                onClick={() => onWorkflowModeChange("standard")}
-              >
-                Task mode
-              </button>
-              <button
-                type="button"
-                className={`composer__workflow-button ${workflowMode === "factory" ? "is-active" : ""}`}
-                disabled={!factoryModeSupported && workflowMode !== "factory"}
-                onClick={() => onWorkflowModeChange("factory")}
-              >
-                Factory mode
-              </button>
-            </div>
-            <p className="composer__workflow-copy">
-              {workflowMode === "factory"
-                ? "Factory Mode creates an isolated greenfield workspace for a new app."
-                : "Task mode keeps working in the current project or thread."}
-            </p>
-          </div>
-        ) : null}
-
         {steerMode ? (
           <div className="composer__steer-window">
             <div className="composer__steer-window-copy">
@@ -561,14 +534,31 @@ export function Composer({
                   disabled={transcribingAudio}
                 >
                   <MicIcon />
-                  <span>
-                    {recordingState === "recording"
-                      ? "Stop"
-                      : transcribingAudio
-                        ? "Transcribing"
-                        : "Mic"}
-                  </span>
+                    <span>
+                      {recordingState === "recording"
+                        ? "Stop"
+                        : transcribingAudio
+                          ? "Transcribing"
+                          : "Mic"}
+                    </span>
                 </button>
+                <div className="composer__workflow-buttons composer__workflow-buttons--toolbar">
+                  <button
+                    type="button"
+                    className={`composer__workflow-button ${workflowMode === "standard" ? "is-active" : ""}`}
+                    onClick={() => onWorkflowModeChange("standard")}
+                  >
+                    Task mode
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer__workflow-button ${workflowMode === "factory" ? "is-active" : ""}`}
+                    disabled={!factoryModeSupported && workflowMode !== "factory"}
+                    onClick={() => onWorkflowModeChange("factory")}
+                  >
+                    Factory mode
+                  </button>
+                </div>
               </div>
 
               <div className="composer__actions">
