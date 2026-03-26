@@ -17,6 +17,7 @@ import {
 } from "./runtime/bootRuntimeService";
 import type { AudioTranscriptionConfig } from "./runtime/createAudioTranscriber";
 import type { OpenAIExecutorConfig } from "./runtime/createOpenAIExecutor";
+import type { createRepoBranchService } from "./runtime/createRepoBranchService";
 
 type RuntimeBootState = {
   status: "booting" | "ready" | "failed";
@@ -28,6 +29,7 @@ type RuntimeBootState = {
   audioTranscription: AudioTranscriptionConfig | null;
   traceService: TraceService | null;
   runtimeStore: RuntimeStoreDescriptor | null;
+  repoBranchService: ReturnType<typeof createRepoBranchService> | null;
 };
 
 const host = process.env.HOST?.trim() || "0.0.0.0";
@@ -44,7 +46,8 @@ async function startServer() {
     openAI: null,
     audioTranscription: null,
     traceService: null,
-    runtimeStore: null
+    runtimeStore: null,
+    repoBranchService: null
   };
   const app = express();
 
@@ -118,6 +121,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       audioTranscriber,
       runtimeStatePath,
       runtimeStore,
+      repoBranchService,
       traceService,
       traceLogPath
     } =
@@ -131,6 +135,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
     bootState.audioTranscription = audioTranscriber.config;
     bootState.traceService = traceService;
     bootState.runtimeStore = runtimeStore;
+    bootState.repoBranchService = repoBranchService;
 
     registerRuntimeRoutes(
       app,
@@ -138,7 +143,8 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       openAI,
       audioTranscriber,
       contextAssembler,
-      traceService
+      traceService,
+      repoBranchService
     );
 
     console.log("Shipyard runtime boot complete.", {

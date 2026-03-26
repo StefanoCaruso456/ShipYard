@@ -3,11 +3,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchProjectBrief,
+  fetchRuntimeBranches,
   fetchRuntimeHealth,
   fetchRuntimeInstructions,
   fetchRuntimeStatus,
   fetchRuntimeTrace,
   fetchRuntimeTasks,
+  switchRuntimeBranch,
   submitRuntimeTask,
   transcribeRuntimeAudio
 } from "./api";
@@ -43,6 +45,7 @@ import type {
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeRepoBranchSnapshot,
   RuntimeStatusResponse,
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
@@ -67,6 +70,14 @@ function App() {
   const [projectBrief, setProjectBrief] = useState<ProjectPayload>(emptyProjectBrief);
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealthResponse | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
+  const [runtimeRepoSnapshot, setRuntimeRepoSnapshot] = useState<RuntimeRepoBranchSnapshot | null>(
+    null
+  );
+  const [runtimeRepoLoading, setRuntimeRepoLoading] = useState(false);
+  const [runtimeRepoError, setRuntimeRepoError] = useState<string | null>(null);
+  const [runtimeRepoSwitchingBranchName, setRuntimeRepoSwitchingBranchName] = useState<
+    string | null
+  >(null);
   const [instructions, setInstructions] = useState<RuntimeInstructionResponse | null>(null);
   const [runtimeTasks, setRuntimeTasks] = useState<RuntimeTask[]>([]);
   const [runtimeTracesByTaskId, setRuntimeTracesByTaskId] = useState<
@@ -105,6 +116,8 @@ function App() {
   const hasActiveRuntimeRuns = runtimeTasks.some(
     (candidate) => candidate.status === "pending" || candidate.status === "running"
   );
+  const backendConnected =
+    runtimeStatus !== null || runtimeHealth?.status === "ok";
 
   async function loadProjectData(cancelled?: { value: boolean }) {
     try {
@@ -239,10 +252,66 @@ function App() {
   }, [hasActiveRuntimeRuns]);
 
   useEffect(() => {
+    if (!backendConnected) {
+      setRuntimeRepoSnapshot(null);
+      setRuntimeRepoError(null);
+      return;
+    }
+
+    const cancelled = { value: false };
+
+    async function loadBranches() {
+      try {
+        const snapshot = await fetchRuntimeBranches();
+
+        if (cancelled.value) {
+          return;
+        }
+
+        setRuntimeRepoSnapshot(snapshot);
+        setRuntimeRepoError(null);
+      } catch {
+        if (cancelled.value) {
+          return;
+        }
+
+        setRuntimeRepoSnapshot(null);
+      }
+    }
+
+    void loadBranches();
+
+    const interval = window.setInterval(() => {
+      void loadBranches();
+    }, 10000);
+
+    return () => {
+      cancelled.value = true;
+      window.clearInterval(interval);
+    };
+  }, [backendConnected]);
+
+  useEffect(() => {
     saveStoredLocalProjects(localProjects);
   }, [localProjects]);
 
-  const visibleProjects = useMemo(() => [workspaceProjects[0], ...localProjects], [localProjects]);
+  const runtimeProject = useMemo(() => {
+    const base = workspaceProjects[0];
+
+    if (!base) {
+      return null;
+    }
+
+    return {
+      ...base,
+      branchLabel: runtimeRepoSnapshot?.currentBranch ?? null
+    };
+  }, [runtimeRepoSnapshot?.currentBranch]);
+
+  const visibleProjects = useMemo(
+    () => (runtimeProject ? [runtimeProject, ...localProjects] : [...localProjects]),
+    [localProjects, runtimeProject]
+  );
 
   useEffect(() => {
     if (!visibleProjects.length) {
@@ -287,8 +356,6 @@ function App() {
     : null;
   const activeThread =
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
-  const backendConnected =
-    runtimeStatus !== null || runtimeHealth?.status === "ok";
   const activeRuntimeTask =
     activeThread?.source === "live"
       ? runtimeTasks.find(
@@ -897,6 +964,51 @@ function App() {
     }
   }
 
+  async function handleRefreshRuntimeBranches() {
+    setRuntimeRepoLoading(true);
+
+    try {
+      const snapshot = await fetchRuntimeBranches();
+      setRuntimeRepoSnapshot(snapshot);
+      setRuntimeRepoError(null);
+    } catch (error) {
+      setRuntimeRepoError(
+        error instanceof Error ? error.message : "Runtime repo branches are unavailable."
+      );
+    } finally {
+      setRuntimeRepoLoading(false);
+    }
+  }
+
+  async function handleSwitchRuntimeBranch(branchName: string) {
+    setRuntimeRepoSwitchingBranchName(branchName);
+
+    try {
+      const snapshot = await switchRuntimeBranch(branchName);
+
+      setRuntimeRepoSnapshot(snapshot);
+      setRuntimeRepoError(null);
+      setSubmissionFeedback({
+        tone: "success",
+        text: `Runtime workspace switched to ${branchName}.`
+      });
+      void loadRuntimeSnapshot();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not switch the runtime workspace branch.";
+
+      setRuntimeRepoError(message);
+      setSubmissionFeedback({
+        tone: "danger",
+        text: message
+      });
+    } finally {
+      setRuntimeRepoSwitchingBranchName(null);
+    }
+  }
+
   async function handleDeleteProject(projectId: string) {
     const projectToDelete = visibleProjects.find((candidate) => candidate.id === projectId);
 
@@ -980,6 +1092,10 @@ function App() {
           projectBrief={projectBrief}
           thread={activeThread}
           runtimeStatus={runtimeStatus}
+          runtimeRepoSnapshot={runtimeRepoSnapshot}
+          runtimeRepoLoading={runtimeRepoLoading}
+          runtimeRepoSwitchingBranchName={runtimeRepoSwitchingBranchName}
+          runtimeRepoError={runtimeRepoError}
           instructions={instructions}
           composerMode={composerMode}
           composerValue={composerValue}
@@ -1005,6 +1121,8 @@ function App() {
             setComposerValue(prompt);
           }}
           onReconnectProjectFolder={handleReconnectProjectFolder}
+          onRefreshRuntimeBranches={handleRefreshRuntimeBranches}
+          onSwitchRuntimeBranch={handleSwitchRuntimeBranch}
           onRequestSteer={handleRequestSteer}
           onSubmit={handleSubmitTask}
         />

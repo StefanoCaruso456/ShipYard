@@ -1,6 +1,7 @@
-import type { WorkspaceProject, WorkspaceThread } from "../types";
+import type { RuntimeRepoBranchSnapshot, WorkspaceProject, WorkspaceThread } from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
+import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
 import { ThreadMessageCard } from "./ThreadMessageCard";
 
 type SuggestionCard = {
@@ -13,9 +14,17 @@ type ThreadViewProps = {
   project: WorkspaceProject | null;
   thread: WorkspaceThread | null;
   runtimeState: "running" | "idle" | "error";
+  runtimeRepo: {
+    snapshot: RuntimeRepoBranchSnapshot | null;
+    loading: boolean;
+    switchingBranchName: string | null;
+    error: string | null;
+  };
   suggestions: SuggestionCard[];
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshRuntimeBranches: () => Promise<void>;
+  onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
 };
 
@@ -23,9 +32,12 @@ export function ThreadView({
   project,
   thread,
   runtimeState,
+  runtimeRepo,
   suggestions,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshRuntimeBranches,
+  onSwitchRuntimeBranch,
   onRequestSteer
 }: ThreadViewProps) {
   const isEmpty = !thread || thread.messages.length === 0;
@@ -72,6 +84,19 @@ export function ThreadView({
               <span>{project.environment}</span>
               <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
               <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
+            </div>
+          ) : null}
+
+          {project?.kind === "live" && runtimeState !== "error" ? (
+            <div className="thread-view__empty-runtime-actions">
+              <RuntimeBranchSwitcher
+                snapshot={runtimeRepo.snapshot}
+                loading={runtimeRepo.loading}
+                switchingBranchName={runtimeRepo.switchingBranchName}
+                error={runtimeRepo.error}
+                onRefresh={onRefreshRuntimeBranches}
+                onSwitchBranch={onSwitchRuntimeBranch}
+              />
             </div>
           ) : null}
 
@@ -127,10 +152,23 @@ export function ThreadView({
   return (
     <section className="thread-view">
       <div className="thread-view__status">
-        <span className={`thread-view__status-pill thread-view__status-pill--${threadStatusTone}`}>
-          <span className="thread-view__status-dot" aria-hidden="true" />
-          {statusLabel}
-        </span>
+        <div className="thread-view__status-main">
+          <span className={`thread-view__status-pill thread-view__status-pill--${threadStatusTone}`}>
+            <span className="thread-view__status-dot" aria-hidden="true" />
+            {statusLabel}
+          </span>
+
+          {project?.kind === "live" && runtimeState !== "error" ? (
+            <RuntimeBranchSwitcher
+              snapshot={runtimeRepo.snapshot}
+              loading={runtimeRepo.loading}
+              switchingBranchName={runtimeRepo.switchingBranchName}
+              error={runtimeRepo.error}
+              onRefresh={onRefreshRuntimeBranches}
+              onSwitchBranch={onSwitchRuntimeBranch}
+            />
+          ) : null}
+        </div>
         <span>{thread.updatedLabel}</span>
       </div>
 

@@ -5,6 +5,7 @@ import type {
   ComposerMode,
   ProjectPayload,
   RuntimeInstructionResponse,
+  RuntimeRepoBranchSnapshot,
   RuntimeStatusResponse,
   SidebarNavItemId,
   WorkspaceProject,
@@ -19,6 +20,10 @@ type TaskWorkspaceProps = {
   projectBrief: ProjectPayload;
   thread: WorkspaceThread | null;
   runtimeStatus: RuntimeStatusResponse | null;
+  runtimeRepoSnapshot: RuntimeRepoBranchSnapshot | null;
+  runtimeRepoLoading: boolean;
+  runtimeRepoSwitchingBranchName: string | null;
+  runtimeRepoError: string | null;
   instructions: RuntimeInstructionResponse | null;
   composerMode: ComposerMode;
   composerValue: string;
@@ -35,6 +40,8 @@ type TaskWorkspaceProps = {
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshRuntimeBranches: () => Promise<void>;
+  onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
@@ -45,6 +52,10 @@ export function TaskWorkspace({
   projectBrief,
   thread,
   runtimeStatus,
+  runtimeRepoSnapshot,
+  runtimeRepoLoading,
+  runtimeRepoSwitchingBranchName,
+  runtimeRepoError,
   instructions,
   composerMode,
   composerValue,
@@ -61,6 +72,8 @@ export function TaskWorkspace({
   onVoiceCaptureError,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshRuntimeBranches,
+  onSwitchRuntimeBranch,
   onRequestSteer,
   onSubmit
 }: TaskWorkspaceProps) {
@@ -120,9 +133,17 @@ export function TaskWorkspace({
             project={project}
             thread={thread}
             runtimeState={runtimeState}
+            runtimeRepo={{
+              snapshot: runtimeRepoSnapshot,
+              loading: runtimeRepoLoading,
+              switchingBranchName: runtimeRepoSwitchingBranchName,
+              error: runtimeRepoError
+            }}
             suggestions={suggestionCards}
             onSelectSuggestion={onSelectSuggestion}
             onReconnectProjectFolder={onReconnectProjectFolder}
+            onRefreshRuntimeBranches={onRefreshRuntimeBranches}
+            onSwitchRuntimeBranch={onSwitchRuntimeBranch}
             onRequestSteer={onRequestSteer}
           />
         )}

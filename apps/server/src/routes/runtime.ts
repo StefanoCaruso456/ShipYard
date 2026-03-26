@@ -15,6 +15,11 @@ import type {
 import { safeParseRunContextInput } from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
+import {
+  RepoBranchServiceError,
+  type RuntimeRepoBranchSnapshot,
+  type createRepoBranchService
+} from "../runtime/createRepoBranchService";
 import { analyzeTaskAttachments } from "../runtime/analyzeTaskAttachments";
 import {
   AudioTranscriptionError,
@@ -48,7 +53,8 @@ export function registerRuntimeRoutes(
   openAI: OpenAIExecutorConfig,
   audioTranscriber: ReturnType<typeof createAudioTranscriber>,
   contextAssembler?: ContextAssembler,
-  traceService?: TraceService
+  traceService?: TraceService,
+  repoBranchService?: ReturnType<typeof createRepoBranchService>
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
@@ -274,6 +280,59 @@ export function registerRuntimeRoutes(
       trace
     });
   });
+
+  app.get("/api/runtime/repo/branches", async (_request, response) => {
+    if (!repoBranchService) {
+      response.status(503).json({
+        error: "Runtime repo branch service is not available."
+      });
+      return;
+    }
+
+    try {
+      const snapshot = await repoBranchService.getSnapshot();
+
+      response.json(serializeRepoSnapshot(snapshot, runtimeService.getStatus()));
+    } catch (error) {
+      handleRepoBranchError(response, error);
+    }
+  });
+
+  app.post("/api/runtime/repo/checkout", async (request, response) => {
+    if (!repoBranchService) {
+      response.status(503).json({
+        error: "Runtime repo branch service is not available."
+      });
+      return;
+    }
+
+    const branchName =
+      typeof request.body?.branchName === "string" ? request.body.branchName.trim() : "";
+
+    if (!branchName) {
+      response.status(400).json({
+        error: "branchName is required."
+      });
+      return;
+    }
+
+    const runtimeStatus = runtimeService.getStatus();
+
+    if (runtimeStatus.activeRunId || runtimeStatus.queuedRuns > 0) {
+      response.status(409).json({
+        error: "Wait for the active runtime queue to clear before switching branches."
+      });
+      return;
+    }
+
+    try {
+      const snapshot = await repoBranchService.switchBranch(branchName);
+
+      response.json(serializeRepoSnapshot(snapshot, runtimeStatus));
+    } catch (error) {
+      handleRepoBranchError(response, error);
+    }
+  });
 }
 
 function serializeOpenAIConfig(openAI: OpenAIExecutorConfig) {
@@ -292,6 +351,41 @@ function serializeAudioTranscriptionConfig(config: AudioTranscriptionConfig) {
     modelId: config.modelId,
     apiKeySource: config.apiKeySource
   };
+}
+
+function serializeRepoSnapshot(
+  snapshot: RuntimeRepoBranchSnapshot,
+  runtimeStatus: ReturnType<PersistentAgentRuntimeService["getStatus"]>
+) {
+  const runtimeBlockingReason =
+    runtimeStatus.activeRunId || runtimeStatus.queuedRuns > 0
+      ? "Wait for the active runtime queue to clear before switching branches."
+      : null;
+  const blockingReason =
+    runtimeBlockingReason ??
+    (snapshot.dirty ? "Commit or stash local changes before switching branches." : null);
+
+  return {
+    repoRoot: snapshot.repoRoot,
+    currentBranch: snapshot.currentBranch,
+    dirty: snapshot.dirty,
+    branches: snapshot.branches,
+    canSwitch: blockingReason === null,
+    blockingReason
+  };
+}
+
+function handleRepoBranchError(response: Response, error: unknown) {
+  if (error instanceof RepoBranchServiceError) {
+    response.status(error.statusCode).json({
+      error: error.message
+    });
+    return;
+  }
+
+  response.status(500).json({
+    error: error instanceof Error ? error.message : "Runtime repo branch action failed."
+  });
 }
 
 function parseMultipartAttachments(request: Request, response: Response, next: NextFunction) {

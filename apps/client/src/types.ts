@@ -72,6 +72,22 @@ export type RuntimeStatusResponse = {
   };
 };
 
+export type RuntimeRepoBranch = {
+  name: string;
+  current: boolean;
+};
+
+export type RuntimeRepoBranchSnapshot = {
+  repoRoot: string;
+  currentBranch: string | null;
+  dirty: boolean;
+  branches: RuntimeRepoBranch[];
+  canSwitch: boolean;
+  blockingReason: string | null;
+};
+
+export type RuntimeRepoBranchResponse = RuntimeRepoBranchSnapshot;
+
 export type RuntimeTaskStatus = "pending" | "running" | "completed" | "failed";
 
 export type AttachmentKind =

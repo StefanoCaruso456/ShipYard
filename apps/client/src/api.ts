@@ -4,6 +4,7 @@ import type {
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeRepoBranchResponse,
   RuntimeStatusResponse,
   RuntimeTaskSubmitContext,
   RuntimeTraceResponse,
@@ -28,7 +29,21 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request to ${path} failed with ${response.status}.`);
+    let message = `Request to ${path} failed with ${response.status}.`;
+
+    try {
+      const payload = (await response.clone().json()) as {
+        error?: unknown;
+      };
+
+      if (typeof payload.error === "string" && payload.error.trim()) {
+        message = payload.error.trim();
+      }
+    } catch {
+      // Fall back to the generic error message when the response body is not JSON.
+    }
+
+    throw new Error(message);
   }
 
   return (await response.json()) as T;
@@ -56,6 +71,19 @@ export function fetchRuntimeTasks() {
 
 export function fetchRuntimeTrace(taskId: string) {
   return requestJson<RuntimeTraceResponse>(`/api/runtime/traces/${taskId}`);
+}
+
+export function fetchRuntimeBranches() {
+  return requestJson<RuntimeRepoBranchResponse>("/api/runtime/repo/branches");
+}
+
+export function switchRuntimeBranch(branchName: string) {
+  return requestJson<RuntimeRepoBranchResponse>("/api/runtime/repo/checkout", {
+    method: "POST",
+    body: JSON.stringify({
+      branchName
+    })
+  });
 }
 
 export function submitRuntimeTask(input: {

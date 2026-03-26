@@ -16,6 +16,7 @@ import {
   createAudioTranscriber,
   resolveAudioTranscriptionConfig
 } from "./createAudioTranscriber";
+import { createRepoBranchService } from "./createRepoBranchService";
 import { createTraceService } from "../observability/createTraceService";
 import {
   resolveOpenAIExecutorConfig,
@@ -32,6 +33,7 @@ export type BootedRuntimeService = {
   audioTranscriber: ReturnType<typeof createAudioTranscriber>;
   runtimeStatePath: string | null;
   runtimeStore: RuntimeStoreDescriptor;
+  repoBranchService: ReturnType<typeof createRepoBranchService>;
   traceService: ReturnType<typeof createTraceService>;
   traceLogPath: string;
 };
@@ -52,6 +54,9 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const traceLogPath = resolveTraceLogPath(rootDir);
   const traceService = createTraceService({
     logPath: traceLogPath
+  });
+  const repoBranchService = createRepoBranchService({
+    rootDir
   });
   const repoToolset = createRepoToolset({
     rootDir
@@ -78,6 +83,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     audioTranscriber,
     runtimeStatePath,
     runtimeStore,
+    repoBranchService,
     traceService,
     traceLogPath
   };

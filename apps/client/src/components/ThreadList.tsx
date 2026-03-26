@@ -86,7 +86,7 @@ export function ThreadList({
               <FolderIcon />
               <span className="thread-group__project-copy">
                 <strong>{project.name}</strong>
-                <small>{project.folder?.displayPath ?? project.description}</small>
+                <small>{project.branchLabel ?? project.folder?.displayPath ?? project.description}</small>
               </span>
             </button>
 
