@@ -728,6 +728,9 @@ function appendArtifactEntries(entries: OperatorRunJournalEntry[], artifacts: Co
   for (const artifact of artifacts) {
     if (
       artifact.kind !== "plan" &&
+      artifact.kind !== "requirements" &&
+      artifact.kind !== "architecture_decision" &&
+      artifact.kind !== "subtask_breakdown" &&
       artifact.kind !== "delivery_summary" &&
       artifact.kind !== "failure_report"
     ) {
@@ -1045,6 +1048,12 @@ function describeArtifactLabel(kind: ControlPlaneArtifact["kind"]) {
   switch (kind) {
     case "plan":
       return "Plan recorded";
+    case "requirements":
+      return "Requirements recorded";
+    case "architecture_decision":
+      return "Architecture decision recorded";
+    case "subtask_breakdown":
+      return "Subtask breakdown recorded";
     case "delivery_summary":
       return "Delivery summary recorded";
     case "failure_report":
