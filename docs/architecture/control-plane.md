@@ -4,6 +4,8 @@
 
 This document defines the TypeScript control plane that should govern runtime execution.
 
+For the phase-level build summary, see [phase-10-typed-control-plane.md](/Users/stefanocaruso/Desktop/Gauntlet/shipyard/docs/architecture/phase-10-typed-control-plane.md).
+
 The control plane is the source of truth for:
 
 - who owns work
