@@ -4,7 +4,6 @@ import type {
   WorkspaceProject,
   WorkspaceThread
 } from "../types";
-import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
 import { ThreadMessageCard } from "./ThreadMessageCard";
@@ -187,7 +186,9 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
-        <AttachmentPreviewList attachments={thread.attachments} />
+        {userMessages.map((message) => (
+          <ThreadMessageCard key={message.id} message={message} />
+        ))}
 
         {showLiveRuntimeStage ? (
           <LiveRuntimeStage
@@ -196,10 +197,6 @@ export function ThreadView({
             onApprovalDecision={onApprovalDecision}
           />
         ) : null}
-
-        {userMessages.map((message) => (
-          <ThreadMessageCard key={message.id} message={message} />
-        ))}
 
         {!hasActivity && !showLiveRuntimeStage
           ? thread.progress.map((event) => (

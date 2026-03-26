@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 
 import type { ThreadMessage } from "../types";
+import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type ThreadMessageCardProps = {
   message: ThreadMessage;
@@ -69,6 +70,12 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
           >
             {expanded ? "Collapse" : deriveToggleLabel(message)}
           </button>
+        ) : null}
+
+        {message.attachments && message.attachments.length > 0 ? (
+          <div className="message__attachments">
+            <AttachmentPreviewList attachments={message.attachments} variant="inline" />
+          </div>
         ) : null}
       </div>
     </article>

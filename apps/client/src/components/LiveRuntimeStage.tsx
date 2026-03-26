@@ -3,6 +3,7 @@ import type {
   RuntimeThreadFocusedRun,
   WorkspaceThread
 } from "../types";
+import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { AgentActivityFeed } from "./AgentActivityFeed";
 import { OperatorRunOverview } from "./OperatorRunOverview";
 
@@ -36,6 +37,8 @@ export function LiveRuntimeStage({
   const queuedFollowUps = liveRuntime.queuedFollowUps;
   const canSteer = thread.status === "running" || thread.status === "pending";
   const factory = focusedRun.factory;
+  const isActiveRunVisible =
+    thread.status === "running" || thread.status === "pending" || thread.status === "paused";
   const runtimeMetaLabel =
     focusedRun.status === "running"
       ? "Reasoning live"
@@ -48,12 +51,10 @@ export function LiveRuntimeStage({
           : "Completed in runtime";
   const activeHeading =
     thread.status === "running"
-      ? "Reasoning through the current request"
+      ? "Working on the current request"
       : thread.status === "pending"
-        ? "Current request is queued"
-        : thread.status === "paused"
-          ? "Current request is paused for approval"
-        : "Latest request";
+        ? "Request queued in runtime"
+        : "Waiting for approval";
   const activeDetail =
     thread.status === "running"
       ? queuedFollowUps.length > 0
@@ -67,68 +68,73 @@ export function LiveRuntimeStage({
           ? operatorView?.approval?.activeGate
             ? `${operatorView.approval.activeGate.title} is waiting for a human decision before the run can continue.`
             : "The run is paused until the next approval decision is recorded."
-        : liveRuntime.completedRunCount > 1
-          ? `${liveRuntime.completedRunCount} requests have completed on this thread.`
-          : "The latest runtime request has finished.";
+        : "The run is paused until the next approval decision is recorded.";
 
   return (
     <section className="live-runtime-stage">
-      <article className="live-runtime-stage__active">
-        <div className="live-runtime-stage__eyebrow">
-          <span className="live-runtime-stage__badge">Current prompt</span>
-          <span>{focusedRun.startedAt ?? focusedRun.createdAt}</span>
-        </div>
-
-        <div className="live-runtime-stage__title-row">
-          <div className="live-runtime-stage__title-copy">
-            <strong>{activeHeading}</strong>
-            <p>{activeDetail}</p>
+      {isActiveRunVisible ? (
+        <article className="live-runtime-stage__active">
+          <div className="live-runtime-stage__eyebrow">
+            <span className="live-runtime-stage__badge">{runtimeMetaLabel}</span>
+            <span>{focusedRun.startedAt ?? focusedRun.createdAt}</span>
           </div>
 
-          {canSteer ? (
-            <button
-              type="button"
-              className="live-runtime-stage__steer-button"
-              onClick={onRequestSteer}
-            >
-              Steer
-            </button>
-          ) : null}
-        </div>
-
-        <p className="live-runtime-stage__prompt">{focusedRun.instruction}</p>
-
-        {factory ? (
-          <div className="live-runtime-stage__factory-card">
-            <div className="live-runtime-stage__factory-head">
-              <strong>Factory Mode</strong>
-              <span>{humanizeFactoryStage(factory.currentStage)}</span>
+          <div className="live-runtime-stage__title-row">
+            <div className="live-runtime-stage__title-copy">
+              <strong>{activeHeading}</strong>
+              <p>{activeDetail}</p>
             </div>
-            <p>
-              {factory.appName} · {factory.stackLabel}
-            </p>
-            <div className="live-runtime-stage__meta">
-              <span>{factory.repositoryName}</span>
-              <span>{factory.deploymentProvider}</span>
-              {factory.workspacePath ? <span>{factory.workspacePath}</span> : null}
-            </div>
+
+            {canSteer ? (
+              <button
+                type="button"
+                className="live-runtime-stage__steer-button"
+                onClick={onRequestSteer}
+              >
+                Steer
+              </button>
+            ) : null}
           </div>
-        ) : null}
 
-        <div className="live-runtime-stage__meta">
-          <span>{runtimeMetaLabel}</span>
-          {focusedRun.attachmentsCount > 0 ? (
-            <span>
-              {focusedRun.attachmentsCount} attachment{focusedRun.attachmentsCount === 1 ? "" : "s"}
-            </span>
+          <p className="live-runtime-stage__prompt">{focusedRun.instruction}</p>
+
+          {focusedRun.attachments.length > 0 ? (
+            <div className="live-runtime-stage__attachments">
+              <AttachmentPreviewList attachments={focusedRun.attachments} variant="inline" />
+            </div>
           ) : null}
-          {queuedFollowUps.length > 0 ? (
-            <span>
-              {queuedFollowUps.length} queued next
-            </span>
+
+          {factory ? (
+            <div className="live-runtime-stage__factory-card">
+              <div className="live-runtime-stage__factory-head">
+                <strong>Factory Mode</strong>
+                <span>{humanizeFactoryStage(factory.currentStage)}</span>
+              </div>
+              <p>
+                {factory.appName} · {factory.stackLabel}
+              </p>
+              <div className="live-runtime-stage__meta">
+                <span>{factory.repositoryName}</span>
+                <span>{factory.deploymentProvider}</span>
+                {factory.workspacePath ? <span>{factory.workspacePath}</span> : null}
+              </div>
+            </div>
           ) : null}
-        </div>
-      </article>
+
+          <div className="live-runtime-stage__meta">
+            {focusedRun.attachmentsCount > 0 ? (
+              <span>
+                {focusedRun.attachmentsCount} attachment{focusedRun.attachmentsCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            {queuedFollowUps.length > 0 ? (
+              <span>
+                {queuedFollowUps.length} queued next
+              </span>
+            ) : null}
+          </div>
+        </article>
+      ) : null}
 
       {shouldShowOperatorOverview && operatorView ? (
         <OperatorRunOverview
@@ -140,7 +146,7 @@ export function LiveRuntimeStage({
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 
-      {canSteer || queuedFollowUps.length > 0 ? (
+      {isActiveRunVisible && (canSteer || queuedFollowUps.length > 0) ? (
         <section className="live-runtime-stage__follow-up-strip">
           <div className="live-runtime-stage__follow-up-copy">
             <strong>Steer drawer</strong>
