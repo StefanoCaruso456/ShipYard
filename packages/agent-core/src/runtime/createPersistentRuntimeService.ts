@@ -1077,6 +1077,7 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     projectFolderPath: run.project?.folder?.displayPath ?? null,
     ...buildOrchestrationTraceMetadata(run.orchestration),
     ...buildPhaseExecutionTraceMetadata(run.phaseExecution),
+    ...buildControlPlaneTraceMetadata(run.controlPlane),
     ...buildRebuildTraceMetadata(run.rebuild)
   };
 }
@@ -1182,6 +1183,55 @@ function buildRebuildTraceMetadata(runRebuild: AgentRunRecord["rebuild"]): Trace
       runRebuild.interventionLog.map((intervention) => intervention.kind)
     ),
     rebuildLastFailureReason: runRebuild.lastFailureReason
+  };
+}
+
+function buildControlPlaneTraceMetadata(controlPlane: AgentRunRecord["controlPlane"]): TraceMetadata {
+  if (!controlPlane) {
+    return {
+      controlPlaneStatus: null,
+      controlPlaneArtifactCount: null,
+      controlPlaneArtifactKinds: [],
+      controlPlaneHandoffCount: null,
+      controlPlanePendingHandoffCount: null,
+      controlPlaneAcceptedHandoffCount: null,
+      controlPlaneCompletedHandoffCount: null,
+      controlPlaneWorkPacketCount: null,
+      controlPlaneWorkPacketOwnerAgentTypes: [],
+      controlPlaneActiveApprovalGateId: null,
+      controlPlaneCurrentEntityKind: null,
+      controlPlaneCurrentEntityId: null
+    };
+  }
+
+  return {
+    controlPlaneStatus: controlPlane.status,
+    controlPlaneArtifactCount: controlPlane.artifacts.length,
+    controlPlaneArtifactKinds: uniqueStrings(controlPlane.artifacts.map((artifact) => artifact.kind)),
+    controlPlaneHandoffCount: controlPlane.handoffs.length,
+    controlPlanePendingHandoffCount: controlPlane.handoffs.filter((handoff) => handoff.status === "created")
+      .length,
+    controlPlaneAcceptedHandoffCount: controlPlane.handoffs.filter((handoff) => handoff.status === "accepted")
+      .length,
+    controlPlaneCompletedHandoffCount: controlPlane.handoffs.filter((handoff) => handoff.status === "completed")
+      .length,
+    controlPlaneWorkPacketCount: controlPlane.handoffs.filter((handoff) => handoff.workPacket !== null).length,
+    controlPlaneWorkPacketOwnerAgentTypes: uniqueStrings(
+      controlPlane.handoffs.flatMap((handoff) =>
+        handoff.workPacket?.ownerAgentTypeId ? [handoff.workPacket.ownerAgentTypeId] : []
+      )
+    ),
+    controlPlaneActiveApprovalGateId: controlPlane.activeApprovalGateId,
+    controlPlaneCurrentEntityKind:
+      controlPlane.current.taskId != null
+        ? "task"
+        : controlPlane.current.storyId != null
+          ? "story"
+          : controlPlane.current.phaseId != null
+            ? "phase"
+            : null,
+    controlPlaneCurrentEntityId:
+      controlPlane.current.taskId ?? controlPlane.current.storyId ?? controlPlane.current.phaseId ?? null
   };
 }
 

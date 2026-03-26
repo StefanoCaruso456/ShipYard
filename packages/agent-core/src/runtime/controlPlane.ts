@@ -39,9 +39,12 @@ import {
   getSpecialistDefinition,
   resolveSpecialistAgentType
 } from "./agentRegistry";
+import type { TraceValue } from "../observability/types";
+import { getActiveTraceScope } from "../observability/traceScope";
 
 const ORCHESTRATOR_ID = "agent:orchestrator";
 const PRODUCTION_LEAD_ID = "agent:production-lead";
+const TRACE_ARRAY_PREVIEW_LIMIT = 6;
 
 const ALLOWED_STATUS_TRANSITIONS: Record<
   ControlPlaneEntityStatus,
@@ -1471,23 +1474,25 @@ function upsertArtifact(
   const existing = controlPlane.artifacts.find((candidate) => candidate.id === artifact.id);
   const producerAgentTypeId =
     artifact.producerAgentTypeId ?? resolveAgentTypeId(controlPlane, artifact.producerId);
+  const normalizedArtifact: ControlPlaneArtifact = {
+    ...artifact,
+    producerAgentTypeId,
+    path: artifact.path ?? null,
+    payload: artifact.payload ?? null
+  };
 
   if (existing) {
-    existing.summary = artifact.summary;
-    existing.createdAt = artifact.createdAt;
+    existing.summary = normalizedArtifact.summary;
+    existing.createdAt = normalizedArtifact.createdAt;
     existing.producerAgentTypeId = producerAgentTypeId;
-    existing.path = artifact.path ?? null;
-    existing.payload = artifact.payload ?? null;
+    existing.path = normalizedArtifact.path;
+    existing.payload = normalizedArtifact.payload;
   } else {
-    controlPlane.artifacts.push({
-      ...artifact,
-      producerAgentTypeId,
-      path: artifact.path ?? null,
-      payload: artifact.payload ?? null
-    });
+    controlPlane.artifacts.push(normalizedArtifact);
   }
 
   attachEntityId(controlPlane, artifact.entityKind, artifact.entityId, "artifactIds", artifact.id);
+  traceControlPlaneArtifact(controlPlane, normalizedArtifact);
 }
 
 function upsertHandoff(
@@ -1512,42 +1517,216 @@ function upsertHandoff(
   const fromAgentTypeId =
     handoff.fromAgentTypeId ?? resolveAgentTypeId(controlPlane, handoff.fromId);
   const toAgentTypeId = handoff.toAgentTypeId ?? resolveAgentTypeId(controlPlane, handoff.toId);
+  const normalizedHandoff: ControlPlaneHandoff = {
+    ...handoff,
+    fromAgentTypeId,
+    toAgentTypeId,
+    workPacket: handoff.workPacket ?? null,
+    createdAt: existing?.createdAt ?? now,
+    acceptedAt:
+      handoff.status === "created"
+        ? null
+        : existing?.acceptedAt ?? now,
+    completedAt: handoff.status === "completed" ? existing?.completedAt ?? now : existing?.completedAt ?? null
+  };
 
   assertAllowedHandoff(controlPlane, handoff.fromId, handoff.toRole);
 
   if (existing) {
-    existing.fromRole = handoff.fromRole;
-    existing.fromId = handoff.fromId;
+    existing.fromRole = normalizedHandoff.fromRole;
+    existing.fromId = normalizedHandoff.fromId;
     existing.fromAgentTypeId = fromAgentTypeId;
-    existing.toRole = handoff.toRole;
-    existing.toId = handoff.toId;
+    existing.toRole = normalizedHandoff.toRole;
+    existing.toId = normalizedHandoff.toId;
     existing.toAgentTypeId = toAgentTypeId;
-    existing.correlationId = handoff.correlationId;
-    existing.artifactIds = uniqueStrings([...existing.artifactIds, ...handoff.artifactIds]);
+    existing.correlationId = normalizedHandoff.correlationId;
+    existing.artifactIds = uniqueStrings([...existing.artifactIds, ...normalizedHandoff.artifactIds]);
     existing.dependencyIds = uniqueStrings([
       ...existing.dependencyIds,
-      ...handoff.dependencyIds
+      ...normalizedHandoff.dependencyIds
     ]);
-    existing.acceptanceCriteria = [...handoff.acceptanceCriteria];
-    existing.validationTargets = [...handoff.validationTargets];
-    existing.purpose = handoff.purpose;
-    existing.workPacket = handoff.workPacket ?? null;
-    existing.status = handoff.status;
-    existing.acceptedAt = handoff.status === "created" ? null : existing.acceptedAt ?? now;
-    existing.completedAt = handoff.status === "completed" ? now : existing.completedAt;
+    existing.acceptanceCriteria = [...normalizedHandoff.acceptanceCriteria];
+    existing.validationTargets = [...normalizedHandoff.validationTargets];
+    existing.purpose = normalizedHandoff.purpose;
+    existing.workPacket = normalizedHandoff.workPacket;
+    existing.status = normalizedHandoff.status;
+    existing.acceptedAt = normalizedHandoff.acceptedAt;
+    existing.completedAt = normalizedHandoff.completedAt;
   } else {
-    controlPlane.handoffs.push({
-      ...handoff,
-      fromAgentTypeId,
-      toAgentTypeId,
-      workPacket: handoff.workPacket ?? null,
-      createdAt: now,
-      acceptedAt: handoff.status === "created" ? null : now,
-      completedAt: handoff.status === "completed" ? now : null
-    });
+    controlPlane.handoffs.push(normalizedHandoff);
   }
 
   attachEntityId(controlPlane, handoff.entityKind, handoff.entityId, "handoffIds", handoff.id);
+  traceControlPlaneHandoff(controlPlane, normalizedHandoff);
+}
+
+function traceControlPlaneArtifact(controlPlane: ControlPlaneState, artifact: ControlPlaneArtifact) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  traceScope.activeSpan.addEvent("control_plane_artifact_recorded", {
+    message: `${artifact.kind} artifact recorded for ${artifact.entityKind} ${artifact.entityId}.`,
+    metadata: {
+      artifactId: artifact.id,
+      artifactKind: artifact.kind,
+      entityKind: artifact.entityKind,
+      entityId: artifact.entityId,
+      producerRole: artifact.producerRole,
+      producerId: artifact.producerId,
+      producerAgentTypeId: artifact.producerAgentTypeId,
+      artifactPath: artifact.path ?? null,
+      artifactSummary: artifact.summary,
+      artifactPayload: summarizeArtifactPayloadForTrace(artifact.payload),
+      controlPlaneStatus: controlPlane.status
+    }
+  });
+}
+
+function traceControlPlaneHandoff(controlPlane: ControlPlaneState, handoff: ControlPlaneHandoff) {
+  const traceScope = getActiveTraceScope();
+
+  if (!traceScope) {
+    return;
+  }
+
+  traceScope.activeSpan.addEvent("control_plane_handoff_recorded", {
+    message: `${handoff.entityKind} handoff ${handoff.fromRole} -> ${handoff.toRole} recorded.`,
+    metadata: {
+      handoffId: handoff.id,
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      handoffStatus: handoff.status,
+      fromRole: handoff.fromRole,
+      fromId: handoff.fromId,
+      fromAgentTypeId: handoff.fromAgentTypeId,
+      toRole: handoff.toRole,
+      toId: handoff.toId,
+      toAgentTypeId: handoff.toAgentTypeId,
+      correlationId: handoff.correlationId,
+      purpose: handoff.purpose,
+      artifactIds: previewStrings(handoff.artifactIds),
+      artifactCount: handoff.artifactIds.length,
+      dependencyIds: previewStrings(handoff.dependencyIds),
+      dependencyCount: handoff.dependencyIds.length,
+      acceptanceCriteria: previewStrings(handoff.acceptanceCriteria),
+      acceptanceCriteriaCount: handoff.acceptanceCriteria.length,
+      validationTargets: previewStrings(handoff.validationTargets),
+      validationTargetCount: handoff.validationTargets.length,
+      workPacketOwnerAgentTypeId: handoff.workPacket?.ownerAgentTypeId ?? null,
+      workPacket: summarizeWorkPacketForTrace(handoff.workPacket),
+      controlPlaneStatus: controlPlane.status
+    }
+  });
+}
+
+function summarizeArtifactPayloadForTrace(payload: ControlPlaneArtifact["payload"]): TraceValue {
+  if (!payload) {
+    return null;
+  }
+
+  switch (payload.kind) {
+    case "plan":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        phaseIds: previewStrings(payload.phaseIds),
+        phaseCount: payload.phaseIds.length,
+        storyIds: previewStrings(payload.storyIds),
+        storyCount: payload.storyIds.length,
+        taskIds: previewStrings(payload.taskIds),
+        taskCount: payload.taskIds.length,
+        validationTargets: previewStrings(payload.validationTargets),
+        validationTargetCount: payload.validationTargets.length
+      } as TraceValue;
+    case "requirements":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        scopeSummary: payload.scopeSummary,
+        constraints: previewStrings(payload.constraints),
+        constraintCount: payload.constraints.length,
+        fileTargets: previewStrings(payload.fileTargets),
+        fileTargetCount: payload.fileTargets.length,
+        domainTargets: previewStrings(payload.domainTargets),
+        domainTargetCount: payload.domainTargets.length,
+        validationTargets: previewStrings(payload.validationTargets),
+        validationTargetCount: payload.validationTargets.length,
+        storyIds: previewStrings(payload.storyIds),
+        taskIds: previewStrings(payload.taskIds),
+        approvalGateKind: payload.approvalGateKind
+      } as TraceValue;
+    case "architecture_decision":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        storyId: payload.storyId,
+        selectedSpecialistAgentTypeId: payload.selectedSpecialistAgentTypeId,
+        decisionSource: payload.decisionSource,
+        rationale: payload.rationale,
+        domainTargets: previewStrings(payload.domainTargets),
+        fileTargets: previewStrings(payload.fileTargets),
+        allowedToolNames: previewStrings(payload.allowedToolNames),
+        validationTargets: previewStrings(payload.validationTargets),
+        taskIds: previewStrings(payload.taskIds)
+      } as TraceValue;
+    case "subtask_breakdown":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        storyId: payload.storyId,
+        dependencyStrategy: payload.dependencyStrategy,
+        taskCount: payload.tasks.length,
+        tasks: payload.tasks.slice(0, TRACE_ARRAY_PREVIEW_LIMIT).map((task) => ({
+          taskId: task.taskId,
+          specialistAgentTypeId: task.specialistAgentTypeId,
+          dependencyIds: previewStrings(task.dependencyIds),
+          allowedToolNames: previewStrings(task.allowedToolNames),
+          validationTargets: previewStrings(task.validationTargets),
+          relevantFiles: previewStrings(task.relevantFiles),
+          constraints: previewStrings(task.constraints)
+        }))
+      } as TraceValue;
+    case "delegation_brief":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        scopeSummary: payload.scopeSummary,
+        acceptanceCriteria: previewStrings(payload.acceptanceCriteria),
+        validationTargets: previewStrings(payload.validationTargets),
+        dependencyIds: previewStrings(payload.dependencyIds)
+      } as TraceValue;
+  }
+}
+
+function summarizeWorkPacketForTrace(workPacket: ControlPlaneWorkPacket | null): TraceValue {
+  if (!workPacket) {
+    return null;
+  }
+
+  return {
+    version: workPacket.version,
+    scopeSummary: workPacket.scopeSummary,
+    sourceArtifactIds: previewStrings(workPacket.sourceArtifactIds),
+    sourceArtifactCount: workPacket.sourceArtifactIds.length,
+    constraints: previewStrings(workPacket.constraints),
+    constraintCount: workPacket.constraints.length,
+    fileTargets: previewStrings(workPacket.fileTargets),
+    fileTargetCount: workPacket.fileTargets.length,
+    domainTargets: previewStrings(workPacket.domainTargets),
+    domainTargetCount: workPacket.domainTargets.length,
+    acceptanceCriteria: previewStrings(workPacket.acceptanceCriteria),
+    acceptanceCriteriaCount: workPacket.acceptanceCriteria.length,
+    validationTargets: previewStrings(workPacket.validationTargets),
+    validationTargetCount: workPacket.validationTargets.length,
+    dependencyIds: previewStrings(workPacket.dependencyIds),
+    dependencyCount: workPacket.dependencyIds.length,
+    taskIds: previewStrings(workPacket.taskIds),
+    taskCount: workPacket.taskIds.length,
+    ownerAgentTypeId: workPacket.ownerAgentTypeId
+  } as TraceValue;
 }
 
 function upsertIntervention(
@@ -2119,4 +2298,8 @@ function completeHandoff(controlPlane: ControlPlaneState, handoffId: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function previewStrings(values: string[]) {
+  return uniqueStrings(values).slice(0, TRACE_ARRAY_PREVIEW_LIMIT);
 }

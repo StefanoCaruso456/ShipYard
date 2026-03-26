@@ -1,6 +1,7 @@
 import type {
   AgentRunRecord,
   ControlPlaneArtifact,
+  ControlPlaneHandoff,
   ControlPlaneIntervention,
   ControlPlanePhaseNode,
   ControlPlaneRole,
@@ -11,8 +12,10 @@ import type {
   OperatorRunBlocker,
   OperatorRunApprovalGate,
   OperatorRunCurrentWork,
+  OperatorRunDelegationPacket,
   OperatorRunJournalEntry,
   OperatorRunOwner,
+  OperatorRunPlanningArtifact,
   OperatorRunProgress,
   OperatorRunRetrySummary,
   OperatorRunStage,
@@ -52,6 +55,8 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   const owner = deriveOwner(run, current, stageId);
   const stages = buildStageSequence(run, stageId, current, blockers);
   const approval = deriveApproval(run);
+  const planningArtifacts = derivePlanningArtifacts(run.controlPlane);
+  const delegationPackets = deriveDelegationPackets(run.controlPlane);
   const stage = stages.find((candidate) => candidate.id === stageId) ?? stages[0] ?? {
     id: "queued",
     label: STAGE_LABELS.queued,
@@ -70,6 +75,8 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
     retries: deriveRetrySummary(run),
     approval,
     blockers,
+    planningArtifacts,
+    delegationPackets,
     journal: buildJournal(run)
   };
 }
@@ -706,6 +713,153 @@ function buildJournal(run: AgentRunRecord): OperatorRunJournalEntry[] {
     .slice(0, MAX_JOURNAL_ENTRIES);
 }
 
+function derivePlanningArtifacts(
+  controlPlane: ControlPlaneState | null | undefined
+): OperatorRunPlanningArtifact[] {
+  if (!controlPlane) {
+    return [];
+  }
+
+  return controlPlane.artifacts
+    .filter((artifact) =>
+      [
+        "plan",
+        "requirements",
+        "architecture_decision",
+        "subtask_breakdown",
+        "delegation_brief"
+      ].includes(artifact.kind)
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((artifact) => ({
+      id: artifact.id,
+      kind: artifact.kind,
+      entityKind: artifact.entityKind,
+      entityId: artifact.entityId,
+      summary: artifact.summary,
+      createdAt: artifact.createdAt,
+      producerLabel: resolveAgentLabel(
+        controlPlane,
+        artifact.producerId,
+        artifact.producerRole,
+        artifact.producerAgentTypeId
+      ),
+      path: artifact.path ?? null,
+      highlights: describeArtifactHighlights(artifact)
+    }));
+}
+
+function deriveDelegationPackets(
+  controlPlane: ControlPlaneState | null | undefined
+): OperatorRunDelegationPacket[] {
+  if (!controlPlane) {
+    return [];
+  }
+
+  return controlPlane.handoffs
+    .filter((handoff) => handoff.workPacket !== null || handoff.artifactIds.length > 0)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((handoff) => ({
+      id: handoff.id,
+      entityKind: handoff.entityKind,
+      entityId: handoff.entityId,
+      routeLabel: `${resolveAgentLabel(
+        controlPlane,
+        handoff.fromId,
+        handoff.fromRole,
+        handoff.fromAgentTypeId
+      )} -> ${resolveAgentLabel(controlPlane, handoff.toId, handoff.toRole, handoff.toAgentTypeId)}`,
+      purpose: handoff.purpose,
+      status: handoff.status,
+      createdAt: handoff.createdAt,
+      acceptedAt: handoff.acceptedAt,
+      completedAt: handoff.completedAt,
+      ownerLabel: resolveAgentLabel(controlPlane, handoff.toId, handoff.toRole, handoff.toAgentTypeId),
+      artifactIds: [...handoff.artifactIds],
+      dependencyIds: [...handoff.dependencyIds],
+      acceptanceCriteria: [...handoff.acceptanceCriteria],
+      validationTargets: [...handoff.validationTargets],
+      workPacket: handoff.workPacket
+        ? {
+            ...handoff.workPacket,
+            sourceArtifactIds: [...handoff.workPacket.sourceArtifactIds],
+            constraints: [...handoff.workPacket.constraints],
+            fileTargets: [...handoff.workPacket.fileTargets],
+            domainTargets: [...handoff.workPacket.domainTargets],
+            acceptanceCriteria: [...handoff.workPacket.acceptanceCriteria],
+            validationTargets: [...handoff.workPacket.validationTargets],
+            dependencyIds: [...handoff.workPacket.dependencyIds],
+            taskIds: [...handoff.workPacket.taskIds],
+            ownerLabel: resolveAgentTypeLabel(controlPlane, handoff.workPacket.ownerAgentTypeId)
+          }
+        : null
+    }));
+}
+
+function describeArtifactHighlights(artifact: ControlPlaneArtifact) {
+  if (!artifact.payload) {
+    return [];
+  }
+
+  switch (artifact.payload.kind) {
+    case "plan":
+      return compactHighlights([
+        `${artifact.payload.phaseIds.length} phase${artifact.payload.phaseIds.length === 1 ? "" : "s"}`,
+        `${artifact.payload.storyIds.length} stor${artifact.payload.storyIds.length === 1 ? "y" : "ies"}`,
+        `${artifact.payload.taskIds.length} task${artifact.payload.taskIds.length === 1 ? "" : "s"}`,
+        artifact.payload.validationTargets.length
+          ? `${artifact.payload.validationTargets.length} validation target${artifact.payload.validationTargets.length === 1 ? "" : "s"}`
+          : null
+      ]);
+    case "requirements":
+      return compactHighlights([
+        summarizeText(artifact.payload.scopeSummary, 72),
+        artifact.payload.constraints.length
+          ? `${artifact.payload.constraints.length} constraint${artifact.payload.constraints.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.fileTargets.length
+          ? `${artifact.payload.fileTargets.length} file target${artifact.payload.fileTargets.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.domainTargets.length
+          ? `${artifact.payload.domainTargets.length} domain target${artifact.payload.domainTargets.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.approvalGateKind
+          ? `${capitalize(artifact.payload.approvalGateKind)} approval gate`
+          : null
+      ]);
+    case "architecture_decision":
+      return compactHighlights([
+        humanizeKey(artifact.payload.selectedSpecialistAgentTypeId),
+        humanizeKey(artifact.payload.decisionSource),
+        artifact.payload.fileTargets.length
+          ? `${artifact.payload.fileTargets.length} file target${artifact.payload.fileTargets.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.allowedToolNames.length
+          ? `${artifact.payload.allowedToolNames.length} allowed tool${artifact.payload.allowedToolNames.length === 1 ? "" : "s"}`
+          : null
+      ]);
+    case "subtask_breakdown":
+      return compactHighlights([
+        `${artifact.payload.tasks.length} task${artifact.payload.tasks.length === 1 ? "" : "s"}`,
+        humanizeKey(artifact.payload.dependencyStrategy),
+        ...artifact.payload.tasks.slice(0, 2).map((task) => humanizeKey(task.specialistAgentTypeId))
+      ]);
+    case "delegation_brief":
+      return compactHighlights([
+        summarizeText(artifact.payload.scopeSummary, 72),
+        artifact.payload.acceptanceCriteria.length
+          ? `${artifact.payload.acceptanceCriteria.length} acceptance check${artifact.payload.acceptanceCriteria.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.validationTargets.length
+          ? `${artifact.payload.validationTargets.length} validation target${artifact.payload.validationTargets.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.dependencyIds.length
+          ? `${artifact.payload.dependencyIds.length} dependenc${artifact.payload.dependencyIds.length === 1 ? "y" : "ies"}`
+          : null
+      ]);
+  }
+}
+
 function appendEventEntries(entries: OperatorRunJournalEntry[], events: RunEvent[]) {
   for (const [index, event] of events.entries()) {
     const meta = [event.phaseId, event.storyId, event.taskId, event.toolName, event.path]
@@ -942,6 +1096,17 @@ function resolveAgentLabel(
   );
 }
 
+function resolveAgentTypeLabel(controlPlane: ControlPlaneState, agentTypeId: TeamSkillId | null) {
+  if (!agentTypeId) {
+    return null;
+  }
+
+  return (
+    controlPlane.agents.find((agent) => agent.agentTypeId === agentTypeId)?.label ??
+    humanizeKey(agentTypeId)
+  );
+}
+
 function toOwner(
   controlPlane: ControlPlaneState,
   id: string,
@@ -1013,6 +1178,12 @@ function summarizeText(value: string, maxLength: number) {
   }
 
   return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function compactHighlights(values: Array<string | null | undefined>) {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .slice(0, 4);
 }
 
 function describeEventLabel(type: RunEventType) {

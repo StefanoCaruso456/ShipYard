@@ -993,6 +993,22 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
     );
   }
 
+  if (traceSummary?.controlPlane?.artifactCount) {
+    meta.push(
+      `${traceSummary.controlPlane.artifactCount} artifact${
+        traceSummary.controlPlane.artifactCount === 1 ? "" : "s"
+      }`
+    );
+  }
+
+  if (traceSummary?.controlPlane?.handoffCount) {
+    meta.push(
+      `${traceSummary.controlPlane.handoffCount} handoff${
+        traceSummary.controlPlane.handoffCount === 1 ? "" : "s"
+      }`
+    );
+  }
+
   return {
     id: `${task.id}-run-overview`,
     kind: "summary",
@@ -1312,6 +1328,10 @@ function deriveEventBadge(eventName: string) {
     return "Handoff";
   }
 
+  if (eventName.includes("artifact")) {
+    return "Artifact";
+  }
+
   if (eventName.includes("merge")) {
     return "State";
   }
@@ -1365,6 +1385,10 @@ function deriveEventLabel(eventName: string) {
       return "Retry scheduled";
     case "handoff_created":
       return "Role handoff";
+    case "control_plane_artifact_recorded":
+      return "Planning artifact recorded";
+    case "control_plane_handoff_recorded":
+      return "Delegation packet recorded";
     case "state_merged":
       return "State updated";
     case "state_merge_failed":
@@ -1494,6 +1518,11 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const path = readString(event.metadata?.path);
   const toolName = readString(event.metadata?.toolName);
   const gateId = readString(event.metadata?.gateId);
+  const artifactKind = readString(event.metadata?.artifactKind);
+  const handoffStatus = readString(event.metadata?.handoffStatus);
+  const ownerAgentTypeId = readString(event.metadata?.workPacketOwnerAgentTypeId);
+  const entityKind = readString(event.metadata?.entityKind);
+  const entityId = readString(event.metadata?.entityId);
 
   if (toolName) {
     meta.push(toolName);
@@ -1505,6 +1534,22 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
 
   if (gateId) {
     meta.push(gateId);
+  }
+
+  if (artifactKind) {
+    meta.push(artifactKind);
+  }
+
+  if (handoffStatus) {
+    meta.push(handoffStatus);
+  }
+
+  if (ownerAgentTypeId) {
+    meta.push(ownerAgentTypeId);
+  }
+
+  if (entityKind && entityId) {
+    meta.push(`${entityKind}:${entityId}`);
   }
 
   return meta;
