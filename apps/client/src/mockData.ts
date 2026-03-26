@@ -454,7 +454,8 @@ function buildRuntimeThreadMessages(
         run.instruction,
         formatDateTime(run.createdAt),
         "default",
-        run.id === focusedRun.id
+        run.id === focusedRun.id &&
+          (focusedRun.status === "running" || focusedRun.status === "pending" || focusedRun.status === "paused")
           ? []
           : run.attachments.map((attachment) =>
               toAttachmentCard(attachment, buildAttachmentPreviewLookup(runtimeAttachmentPreviewsByTaskId[run.id]))

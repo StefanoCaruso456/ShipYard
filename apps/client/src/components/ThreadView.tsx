@@ -186,6 +186,10 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
+        {userMessages.map((message) => (
+          <ThreadMessageCard key={message.id} message={message} />
+        ))}
+
         {showLiveRuntimeStage ? (
           <LiveRuntimeStage
             thread={thread}
@@ -193,10 +197,6 @@ export function ThreadView({
             onApprovalDecision={onApprovalDecision}
           />
         ) : null}
-
-        {userMessages.map((message) => (
-          <ThreadMessageCard key={message.id} message={message} />
-        ))}
 
         {!hasActivity && !showLiveRuntimeStage
           ? thread.progress.map((event) => (

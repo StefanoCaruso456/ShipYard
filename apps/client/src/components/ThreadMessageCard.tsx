@@ -74,7 +74,7 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
 
         {message.attachments && message.attachments.length > 0 ? (
           <div className="message__attachments">
-            <AttachmentPreviewList attachments={message.attachments} variant="compact" />
+            <AttachmentPreviewList attachments={message.attachments} variant="inline" />
           </div>
         ) : null}
       </div>
