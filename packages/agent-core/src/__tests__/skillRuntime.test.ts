@@ -110,6 +110,10 @@ test("createAgentRuntime loads the current skill and builds role views", async (
   assert.ok(
     runtime.roleViews.verifier.renderedText.includes("Final Response Format")
   );
+  assert.ok(runtime.teamSkills.production_lead);
+  assert.ok(runtime.teamSkills.execution_subagent);
+  assert.ok(runtime.teamSkills.backend_dev);
+  assert.match(runtime.teamSkills.production_lead.content, /Production Lead/i);
 });
 
 test("selectSkillSections throws when a role-relevant section is missing", () => {
@@ -148,4 +152,3 @@ Validation.`);
     /Missing skill section/
   );
 });
-

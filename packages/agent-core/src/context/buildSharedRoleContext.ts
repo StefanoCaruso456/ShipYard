@@ -1,9 +1,15 @@
 import type {
   AgentInstructionRuntime,
   AgentRole,
-  RoleSkillView
+  RoleSkillView,
+  TeamSkillDocument
 } from "../instructions/types";
-import type { AgentRunRecord, AgentRuntimeStatus, RepoToolResult } from "../runtime/types";
+import type {
+  AgentRunRecord,
+  AgentRuntimeStatus,
+  ControlPlaneAgent,
+  RepoToolResult
+} from "../runtime/types";
 import type { ProjectRulesDocument, SharedRoleContext } from "./types";
 
 export function buildSharedRoleContext(input: {
@@ -17,6 +23,7 @@ export function buildSharedRoleContext(input: {
     runtimeContract: buildRuntimeContract(input.role),
     projectRules: input.projectRules,
     roleSkillView: selectRoleSkillView(input.instructionRuntime.roleViews[input.role]),
+    assignedAgent: deriveAssignedAgent(input.run, input.instructionRuntime.teamSkills),
     run: input.run,
     runtimeStatus: input.runtimeStatus,
     taskObjective: deriveTaskObjective(input.run),
@@ -49,6 +56,51 @@ function buildRuntimeContract(role: AgentRole) {
 
 function selectRoleSkillView(roleSkillView: RoleSkillView) {
   return roleSkillView;
+}
+
+function deriveAssignedAgent(
+  run: AgentRunRecord,
+  teamSkills: Record<string, TeamSkillDocument>
+): (ControlPlaneAgent & { skillDocuments: TeamSkillDocument[] }) | null {
+  const controlPlane = run.controlPlane;
+
+  if (!controlPlane) {
+    return null;
+  }
+
+  const currentTaskId = run.phaseExecution?.current.taskId ?? null;
+  const currentStoryId = run.phaseExecution?.current.storyId ?? null;
+  const taskNode =
+    currentTaskId
+      ? controlPlane.phases
+          .flatMap((phase) => phase.userStories)
+          .flatMap((story) => story.tasks)
+          .find((task) => task.id === currentTaskId) ?? null
+      : null;
+  const storyNode =
+    currentStoryId
+      ? controlPlane.phases
+          .flatMap((phase) => phase.userStories)
+          .find((story) => story.id === currentStoryId) ?? null
+      : null;
+  const ownerId = taskNode?.ownerId ?? storyNode?.ownerId ?? null;
+
+  if (!ownerId) {
+    return null;
+  }
+
+  const assignedAgent = controlPlane.agents.find((agent) => agent.id === ownerId);
+
+  if (!assignedAgent) {
+    return null;
+  }
+
+  return {
+    ...assignedAgent,
+    skillDocuments: assignedAgent.skillIds
+      .map((skillId) => teamSkills[skillId])
+      .filter((skill): skill is TeamSkillDocument => Boolean(skill))
+  };
 }
 
 function deriveTaskObjective(run: AgentRunRecord) {

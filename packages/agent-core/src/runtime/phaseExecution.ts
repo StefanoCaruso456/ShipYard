@@ -88,6 +88,8 @@ export function normalizePhaseExecutionInput(
               toolRequest: task.toolRequest ?? null,
               context: normalizeOptionalContext(task.context),
               validationGates: normalizeValidationGates(task.validationGates),
+              requiredSpecialistAgentTypeId: task.requiredSpecialistAgentTypeId ?? null,
+              allowedToolNames: task.allowedToolNames ?? null,
               retryCount: 0,
               failureReason: null,
               lastValidationResults: null,
@@ -97,6 +99,7 @@ export function normalizePhaseExecutionInput(
             .map((criterion) => criterion.trim())
             .filter(Boolean),
           validationGates: normalizeValidationGates(story.validationGates),
+          preferredSpecialistAgentTypeId: story.preferredSpecialistAgentTypeId ?? null,
           status: "pending" as const,
           retryCount: 0,
           failureReason: null,
@@ -149,6 +152,8 @@ export function normalizePhaseExecutionState(
         toolRequest: task.toolRequest ?? null,
         context: normalizeOptionalContext(task.context),
         validationGates: normalizeValidationGates(task.validationGates),
+        requiredSpecialistAgentTypeId: task.requiredSpecialistAgentTypeId ?? null,
+        allowedToolNames: task.allowedToolNames ?? null,
         retryCount: typeof task.retryCount === "number" ? task.retryCount : 0,
         failureReason: task.failureReason?.trim() ? task.failureReason.trim() : null,
         lastValidationResults: normalizeGateResults(task.lastValidationResults),
@@ -156,6 +161,7 @@ export function normalizePhaseExecutionState(
       })),
       acceptanceCriteria: story.acceptanceCriteria.map((criterion) => criterion.trim()).filter(Boolean),
       validationGates: normalizeValidationGates(story.validationGates),
+      preferredSpecialistAgentTypeId: story.preferredSpecialistAgentTypeId ?? null,
       status: normalizePhaseStatus(story.status),
       retryCount: typeof story.retryCount === "number" ? story.retryCount : 0,
       failureReason: story.failureReason?.trim() ? story.failureReason.trim() : null,
@@ -903,7 +909,13 @@ function createTaskScopedRun(
   scopedRun.toolRequest = task.toolRequest;
   scopedRun.context = mergeContexts(run.context, task.context, {
     objective: task.expectedOutcome || story.title || phase.name,
-    constraints: story.acceptanceCriteria.map((criterion) => `Acceptance criterion: ${criterion}`)
+    constraints: story.acceptanceCriteria.map((criterion) => `Acceptance criterion: ${criterion}`),
+    specialistAgentTypeId:
+      task.requiredSpecialistAgentTypeId ??
+      task.context?.specialistAgentTypeId ??
+      story.preferredSpecialistAgentTypeId ??
+      run.context.specialistAgentTypeId ??
+      null
   });
   scopedRun.orchestration = null;
   scopedRun.phaseExecution = phaseExecution;
@@ -917,6 +929,7 @@ function mergeContexts(
   additions: {
     objective: string;
     constraints: string[];
+    specialistAgentTypeId: RunContextInput["specialistAgentTypeId"];
   }
 ): RunContextInput {
   return {
@@ -936,7 +949,12 @@ function mergeContexts(
     validationTargets: uniqueStrings([
       ...base.validationTargets,
       ...(override?.validationTargets ?? [])
-    ])
+    ]),
+    specialistAgentTypeId:
+      override?.specialistAgentTypeId ??
+      additions.specialistAgentTypeId ??
+      base.specialistAgentTypeId ??
+      null
   };
 }
 
@@ -1141,7 +1159,8 @@ function normalizeOptionalContext(value: RunContextInput | null | undefined) {
     constraints: uniqueStrings(value.constraints ?? []),
     relevantFiles: Array.isArray(value.relevantFiles) ? value.relevantFiles : [],
     externalContext: Array.isArray(value.externalContext) ? value.externalContext : [],
-    validationTargets: uniqueStrings(value.validationTargets ?? [])
+    validationTargets: uniqueStrings(value.validationTargets ?? []),
+    specialistAgentTypeId: value.specialistAgentTypeId ?? null
   };
 }
 

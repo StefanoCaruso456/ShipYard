@@ -74,6 +74,7 @@ Examples:
 Each specialist dev should have:
 
 - a clear ownership boundary
+- a typed specialist identity in the runtime registry
 - a role-specific skill
 - a defined tool scope
 - allowed handoff targets
@@ -140,6 +141,24 @@ Resolution strategies:
 
 ## Skills and Runtime State
 
+The runtime separates three concerns:
+
+- workflow role
+- specialist identity
+- skill guidance
+
+Example:
+
+- workflow role: `specialist_dev`
+- specialist identity: `backend_dev`
+- skill ids: `["backend_dev"]`
+
+For execution workers:
+
+- workflow role: `execution_subagent`
+- specialist identity: `execution_subagent`
+- inherited specialist skills: `["execution_subagent", "backend_dev"]`
+
 Skills should shape how a role behaves.
 
 The runtime control plane should determine:
@@ -153,6 +172,20 @@ In other words:
 
 - skills define behavior
 - the typed runtime control plan defines truth
+
+## Registry Model
+
+The specialist registry should be the canonical place for:
+
+- specialist label
+- description
+- domain tags
+- skill references
+- allowed tool names
+- allowed handoff targets
+- default validation focus
+
+That lets the production lead and runtime assign work objectively instead of relying on prompt-time naming conventions.
 
 ## Required Observability
 

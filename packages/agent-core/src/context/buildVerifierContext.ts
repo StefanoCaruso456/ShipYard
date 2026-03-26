@@ -70,6 +70,27 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
     content: shared.roleSkillView.renderedText
   });
 
+  if (shared.assignedAgent && shared.assignedAgent.skillDocuments.length > 0) {
+    sections.push({
+      id: "specialist-skill-guidance",
+      title: `${shared.assignedAgent.label} guidance`,
+      precedence: "skill/runtime behavior guidance",
+      source: shared.assignedAgent.skillDocuments.map((doc) => doc.sourcePath).join(", "),
+      format: "markdown",
+      content: shared.assignedAgent.skillDocuments
+        .map((doc) => `## ${doc.title}\n\n${doc.content}`)
+        .join("\n\n")
+    });
+  } else {
+    omittedSections.push({
+      id: "specialist-skill-guidance",
+      title: "Assigned specialist guidance",
+      precedence: "skill/runtime behavior guidance",
+      source: "controlPlane.currentOwner",
+      reason: "No assigned specialist guidance exists for this verifier payload."
+    });
+  }
+
   const externalContext = buildExternalContextSections({
     role: "verifier",
     externalContext: shared.externalContext
