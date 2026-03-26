@@ -288,21 +288,6 @@ export function buildRuntimeThread(
     (run) => run.status === "pending" && run.id !== focusedRun.id
   );
   const threadStatus = deriveThreadStatus(orderedRuns);
-  const attachmentCards = [
-    ...orderedRuns.flatMap((run) =>
-      run.attachments.map((attachment) =>
-        toAttachmentCard(
-          attachment,
-          Object.fromEntries(
-            (runtimeAttachmentPreviewsByTaskId[run.id] ?? []).map((preview) => [preview.name, preview])
-          )
-        )
-      )
-    ),
-    ...optimisticFollowUps.flatMap((followUp) =>
-      followUp.attachments.map((attachment) => toLocalAttachmentCard(attachment))
-    )
-  ];
   const activity = buildThreadActivity(
     orderedRuns,
     focusedRun,
@@ -320,8 +305,12 @@ export function buildRuntimeThread(
     createdLabel: formatShortDate(firstRun.createdAt),
     updatedLabel: deriveRuntimeThreadUpdatedLabel(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
     tags: buildRuntimeThreadTags(threadStatus, latestRun, queuedRuns.length + optimisticFollowUps.length),
-    attachments: attachmentCards,
-    messages: buildRuntimeThreadMessages(orderedRuns, focusedRun),
+    attachments: [],
+    messages: buildRuntimeThreadMessages(
+      orderedRuns,
+      focusedRun,
+      runtimeAttachmentPreviewsByTaskId
+    ),
     progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps, localFileEffectsByTaskId),
     activity,
     liveRuntime: {
@@ -330,7 +319,7 @@ export function buildRuntimeThread(
       latestRunId: latestRun.id,
       queuedRunIds: queuedRuns.map((run) => run.id),
       runIds: orderedRuns.map((run) => run.id),
-      focusedRun: buildFocusedRunSummary(focusedRun),
+      focusedRun: buildFocusedRunSummary(focusedRun, runtimeAttachmentPreviewsByTaskId),
       operatorView: focusedRun.operatorView ?? null,
       queuedFollowUps,
       completedRunCount: orderedRuns.filter((run) => run.status === "completed").length
@@ -436,7 +425,8 @@ function buildRuntimeThreadTags(
 
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
-  focusedRun: RuntimeTask
+  focusedRun: RuntimeTask,
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
@@ -463,7 +453,13 @@ function buildRuntimeThreadMessages(
         queueLabel,
         run.instruction,
         formatDateTime(run.createdAt),
-        "default"
+        "default",
+        run.id === focusedRun.id &&
+          (focusedRun.status === "running" || focusedRun.status === "pending" || focusedRun.status === "paused")
+          ? []
+          : run.attachments.map((attachment) =>
+              toAttachmentCard(attachment, buildAttachmentPreviewLookup(runtimeAttachmentPreviewsByTaskId[run.id]))
+            )
       )
     );
 
@@ -691,14 +687,20 @@ function buildQueuedFollowUpItems(
   ];
 }
 
-function buildFocusedRunSummary(run: RuntimeTask) {
+function buildFocusedRunSummary(
+  run: RuntimeTask,
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
+) {
   return {
     id: run.id,
     instruction: run.instruction,
     status: run.status,
     createdAt: formatDateTime(run.createdAt),
     startedAt: run.startedAt ? formatDateTime(run.startedAt) : null,
-    attachmentsCount: run.attachments.length
+    attachmentsCount: run.attachments.length,
+    attachments: run.attachments.map((attachment) =>
+      toAttachmentCard(attachment, buildAttachmentPreviewLookup(runtimeAttachmentPreviewsByTaskId[run.id]))
+    )
   };
 }
 
@@ -846,7 +848,8 @@ function createMessage(
   label: string,
   body: string,
   timestamp: string,
-  tone: ThreadMessage["tone"]
+  tone: ThreadMessage["tone"],
+  attachments: ThreadMessage["attachments"] = []
 ): ThreadMessage {
   return {
     id,
@@ -854,8 +857,13 @@ function createMessage(
     label,
     body,
     timestamp,
-    tone
+    tone,
+    attachments
   };
+}
+
+function buildAttachmentPreviewLookup(previews: ComposerAttachment[] | undefined) {
+  return Object.fromEntries((previews ?? []).map((preview) => [preview.name, preview]));
 }
 
 function createProgress(

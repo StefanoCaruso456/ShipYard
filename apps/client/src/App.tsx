@@ -1372,7 +1372,8 @@ function buildDraftSubmissionThread({
         label: "You",
         body: instruction,
         timestamp,
-        tone: "default"
+        tone: "default",
+        attachments: attachments.map(toLocalAttachmentCard)
       }),
       createMessage({
         id: `${threadId}-${nextThread.messages.length + 2}`,
