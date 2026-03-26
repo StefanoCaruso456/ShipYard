@@ -337,7 +337,8 @@ function summarizeRunTrace(
     context: contextSummary,
     orchestration: readOrchestrationSummary(rootSpan?.metadata),
     phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata),
-    rebuild: readRebuildSummary(rootSpan?.metadata)
+    rebuild: readRebuildSummary(rootSpan?.metadata),
+    controlPlane: readControlPlaneSummary(rootSpan?.metadata)
   };
 }
 
@@ -933,5 +934,26 @@ function readRebuildSummary(metadata: TraceMetadata | undefined) {
     interventionCount: readMetadataNumber(metadata.rebuildInterventionCount) ?? 0,
     interventionKinds: collectMetadataStringArray(metadata.rebuildInterventionKinds),
     lastFailureReason: readMetadataString(metadata.rebuildLastFailureReason)
+  };
+}
+
+function readControlPlaneSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.controlPlaneStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.controlPlaneStatus),
+    artifactCount: readMetadataNumber(metadata.controlPlaneArtifactCount) ?? 0,
+    artifactKinds: collectMetadataStringArray(metadata.controlPlaneArtifactKinds),
+    handoffCount: readMetadataNumber(metadata.controlPlaneHandoffCount) ?? 0,
+    pendingHandoffCount: readMetadataNumber(metadata.controlPlanePendingHandoffCount) ?? 0,
+    acceptedHandoffCount: readMetadataNumber(metadata.controlPlaneAcceptedHandoffCount) ?? 0,
+    completedHandoffCount: readMetadataNumber(metadata.controlPlaneCompletedHandoffCount) ?? 0,
+    workPacketCount: readMetadataNumber(metadata.controlPlaneWorkPacketCount) ?? 0,
+    workPacketOwnerAgentTypes: collectMetadataStringArray(metadata.controlPlaneWorkPacketOwnerAgentTypes),
+    activeApprovalGateId: readMetadataString(metadata.controlPlaneActiveApprovalGateId),
+    currentEntityKind: readMetadataString(metadata.controlPlaneCurrentEntityKind),
+    currentEntityId: readMetadataString(metadata.controlPlaneCurrentEntityId)
   };
 }

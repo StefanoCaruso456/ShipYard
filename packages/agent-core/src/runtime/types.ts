@@ -787,6 +787,40 @@ export type OperatorRunBlocker = {
   createdAt: string;
 };
 
+export type OperatorRunPlanningArtifact = {
+  id: string;
+  kind: ControlPlaneArtifactKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  producerLabel: string;
+  path: string | null;
+  highlights: string[];
+};
+
+export type OperatorRunDelegationPacket = {
+  id: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  routeLabel: string;
+  purpose: string;
+  status: ControlPlaneHandoffStatus;
+  createdAt: string;
+  acceptedAt: string | null;
+  completedAt: string | null;
+  ownerLabel: string;
+  artifactIds: string[];
+  dependencyIds: string[];
+  acceptanceCriteria: string[];
+  validationTargets: string[];
+  workPacket:
+    | (ControlPlaneWorkPacket & {
+        ownerLabel: string | null;
+      })
+    | null;
+};
+
 export type OperatorRunJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -826,6 +860,8 @@ export type OperatorRunView = {
     gates: OperatorRunApprovalGate[];
   } | null;
   blockers: OperatorRunBlocker[];
+  planningArtifacts: OperatorRunPlanningArtifact[];
+  delegationPackets: OperatorRunDelegationPacket[];
   journal: OperatorRunJournalEntry[];
 };
 

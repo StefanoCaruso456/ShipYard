@@ -24,6 +24,8 @@ export function OperatorRunOverview({
   onApprovalDecision
 }: OperatorRunOverviewProps) {
   const visibleJournal = operatorView.journal.slice(0, 8);
+  const visiblePlanningArtifacts = operatorView.planningArtifacts.slice(0, 6);
+  const visibleDelegationPackets = operatorView.delegationPackets.slice(0, 6);
   const activeGate = operatorView.approval?.activeGate ?? null;
   const [comment, setComment] = useState("");
   const [submittingDecision, setSubmittingDecision] =
@@ -157,6 +159,96 @@ export function OperatorRunOverview({
                 </div>
               </div>
             ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {operatorView.planningArtifacts.length > 0 ? (
+        <section className="operator-overview__planning">
+          <div className="operator-overview__section-head">
+            <strong>Planned artifacts</strong>
+            <span>{operatorView.planningArtifacts.length}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            {visiblePlanningArtifacts.map((artifact) => (
+              <article key={artifact.id} className="operator-overview__detail-card">
+                <div className="operator-overview__journal-head">
+                  <strong>{humanizeArtifactKind(artifact.kind)}</strong>
+                  <span>{formatDateTime(artifact.createdAt)}</span>
+                </div>
+                <p>{artifact.summary}</p>
+                <div className="operator-overview__meta">
+                  <span>{artifact.producerLabel}</span>
+                  <span>
+                    {artifact.entityKind} {artifact.entityId}
+                  </span>
+                  {artifact.path ? <span>{artifact.path}</span> : null}
+                </div>
+                {artifact.highlights.length > 0 ? (
+                  <div className="operator-overview__meta">
+                    {artifact.highlights.map((highlight) => (
+                      <span key={`${artifact.id}-${highlight}`}>{highlight}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {operatorView.delegationPackets.length > 0 ? (
+        <section className="operator-overview__delegation">
+          <div className="operator-overview__section-head">
+            <strong>Delegation packets</strong>
+            <span>{operatorView.delegationPackets.length}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            {visibleDelegationPackets.map((packet) => (
+              <article key={packet.id} className="operator-overview__detail-card">
+                <div className="operator-overview__journal-head">
+                  <strong>{packet.routeLabel}</strong>
+                  <span>{humanizePacketStatus(packet.status)}</span>
+                </div>
+                <span className="operator-overview__eyebrow">
+                  {packet.entityKind} {packet.entityId} · {packet.ownerLabel}
+                </span>
+                <p>{packet.workPacket?.scopeSummary || packet.purpose}</p>
+                <div className="operator-overview__meta">
+                  <span>{packet.artifactIds.length} artifacts</span>
+                  <span>{packet.validationTargets.length} validation targets</span>
+                  <span>{packet.dependencyIds.length} dependencies</span>
+                  {packet.workPacket?.ownerLabel ? <span>{packet.workPacket.ownerLabel}</span> : null}
+                </div>
+                {packet.workPacket ? (
+                  <div className="operator-overview__packet-groups">
+                    {packet.workPacket.acceptanceCriteria.length > 0 ? (
+                      <div className="operator-overview__packet-group">
+                        <span className="operator-overview__eyebrow">Acceptance</span>
+                        <p>{packet.workPacket.acceptanceCriteria.slice(0, 3).join(" | ")}</p>
+                      </div>
+                    ) : null}
+                    {packet.workPacket.validationTargets.length > 0 ? (
+                      <div className="operator-overview__packet-group">
+                        <span className="operator-overview__eyebrow">Validation</span>
+                        <p>{packet.workPacket.validationTargets.slice(0, 3).join(" | ")}</p>
+                      </div>
+                    ) : null}
+                    {packet.workPacket.fileTargets.length > 0 || packet.workPacket.domainTargets.length > 0 ? (
+                      <div className="operator-overview__packet-group">
+                        <span className="operator-overview__eyebrow">Scope</span>
+                        <p>
+                          {packet.workPacket.fileTargets.slice(0, 2).join(" | ") ||
+                            packet.workPacket.domainTargets.slice(0, 2).join(" | ")}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </article>
+            ))}
           </div>
         </section>
       ) : null}
@@ -297,5 +389,26 @@ function humanizeApprovalDecision(decision: RuntimeOperatorApprovalDecision) {
       return "Rejected";
     default:
       return "Retry requested";
+  }
+}
+
+function humanizeArtifactKind(kind: string) {
+  return kind
+    .split(/[_-]+/g)
+    .filter(Boolean)
+    .map((segment) => `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`)
+    .join(" ");
+}
+
+function humanizePacketStatus(status: string) {
+  switch (status) {
+    case "created":
+      return "Created";
+    case "accepted":
+      return "Accepted";
+    case "completed":
+      return "Completed";
+    default:
+      return status;
   }
 }

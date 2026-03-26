@@ -753,7 +753,9 @@ a {
 .operator-overview__card,
 .operator-overview__approval-card,
 .operator-overview__blocker,
-.operator-overview__journal-item {
+.operator-overview__journal-item,
+.operator-overview__detail-card,
+.operator-overview__packet-group {
   display: grid;
   gap: 0.28rem;
 }
@@ -782,7 +784,9 @@ a {
 .operator-overview__card p,
 .operator-overview__approval-card p,
 .operator-overview__blocker p,
-.operator-overview__journal-item p {
+.operator-overview__journal-item p,
+.operator-overview__detail-card p,
+.operator-overview__packet-group p {
   margin: 0;
   color: #b3b3ad;
   line-height: 1.55;
@@ -803,7 +807,9 @@ a {
 .operator-overview__card,
 .operator-overview__approval-card,
 .operator-overview__blocker,
-.operator-overview__journal-item {
+.operator-overview__journal-item,
+.operator-overview__detail-card,
+.operator-overview__packet-group {
   padding: 0.85rem 0.92rem;
   border-radius: 0.95rem;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -814,7 +820,8 @@ a {
 .operator-overview__card strong,
 .operator-overview__approval-card strong,
 .operator-overview__blocker strong,
-.operator-overview__journal-head strong {
+.operator-overview__journal-head strong,
+.operator-overview__detail-card strong {
   font-size: 0.9rem;
   font-weight: 620;
 }
@@ -848,7 +855,8 @@ a {
 }
 
 .operator-overview__grid,
-.operator-overview__journal-list {
+.operator-overview__journal-list,
+.operator-overview__detail-list {
   display: grid;
   gap: 0.75rem;
 }
@@ -871,6 +879,20 @@ a {
 .operator-overview__approval-card {
   border-color: rgba(176, 143, 80, 0.28);
   background: rgba(176, 143, 80, 0.08);
+}
+
+.operator-overview__detail-card {
+  gap: 0.5rem;
+}
+
+.operator-overview__packet-groups {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.operator-overview__packet-group {
+  padding: 0.7rem 0.8rem;
+  background: rgba(12, 14, 18, 0.4);
 }
 
 .operator-overview__approval-actions {
