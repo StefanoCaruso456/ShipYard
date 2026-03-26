@@ -885,6 +885,18 @@ a {
   gap: 0.5rem;
 }
 
+.operator-overview__detail-card--info {
+  border-color: rgba(88, 110, 139, 0.3);
+}
+
+.operator-overview__detail-card--warning {
+  border-color: rgba(176, 143, 80, 0.3);
+}
+
+.operator-overview__detail-card--danger {
+  border-color: rgba(154, 96, 96, 0.34);
+}
+
 .operator-overview__packet-groups {
   display: grid;
   gap: 0.55rem;
@@ -943,6 +955,31 @@ a {
 
 .operator-overview__approval-button--reject {
   border-color: rgba(154, 96, 96, 0.32);
+}
+
+.operator-overview__link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.operator-overview__link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 110, 139, 0.32);
+  background: rgba(88, 110, 139, 0.12);
+  color: #dbe8ff;
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 620;
+}
+
+.operator-overview__link:hover {
+  border-color: rgba(116, 153, 124, 0.32);
+  color: #edf7ee;
 }
 
 .operator-overview__journal-item--success {

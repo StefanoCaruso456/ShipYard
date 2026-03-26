@@ -263,6 +263,29 @@ export type TraceRunSummary = {
     currentEntityKind: string | null;
     currentEntityId: string | null;
   } | null;
+  delivery: {
+    status: string | null;
+    headline: string | null;
+    outputCount: number;
+    linkCount: number;
+    riskCount: number;
+    followUpCount: number;
+    sourceArtifactCount: number;
+  } | null;
+  evaluation: {
+    blockerCount: number;
+    openBlockerCount: number;
+    retryCount: number;
+    approvalGateCount: number;
+    approvalDecisionCount: number;
+    interventionCount: number;
+    conflictCount: number;
+    openConflictCount: number;
+    mergeDecisionCount: number;
+    failureReportCount: number;
+    failurePatternCount: number;
+    bottlenecks: string[];
+  } | null;
 };
 
 export type TraceRunLog = {

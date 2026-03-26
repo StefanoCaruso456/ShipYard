@@ -6,8 +6,11 @@ import {
   deriveOperatorRunView,
   normalizePhaseExecutionInput,
   recordMergeGovernanceDecision,
+  recordPhaseCompleted,
   recordPhaseStarted,
+  recordStoryCompleted,
   recordStoryStarted,
+  recordTaskCompleted,
   recordTaskStarted,
   type AgentRunRecord
 } from "../index";
@@ -404,5 +407,171 @@ test("operator view surfaces merge conflicts and production-lead decisions", () 
   );
   assert.ok(
     operatorView.journal.some((entry) => entry.label === "Merge decision: Reassign")
+  );
+});
+
+test("operator view assembles delivery summary and evaluation for completed runs", () => {
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-delivery",
+        name: "Delivery",
+        description: "Prepare the final operator closeout.",
+        userStories: [
+          {
+            id: "story-delivery",
+            title: "Ship the final closeout",
+            description: "Complete the closeout flow.",
+            acceptanceCriteria: ["Operator summary shipped"],
+            tasks: [
+              {
+                id: "task-delivery",
+                instruction: "Write the delivery summary.",
+                expectedOutcome: "Delivery summary prepared."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+
+  phaseExecution.status = "completed";
+  phaseExecution.current = {
+    phaseId: null,
+    storyId: null,
+    taskId: null
+  };
+  phaseExecution.phases[0]!.status = "completed";
+  phaseExecution.phases[0]!.userStories[0]!.status = "completed";
+  phaseExecution.phases[0]!.userStories[0]!.tasks[0]!.status = "completed";
+  phaseExecution.phases[0]!.userStories[0]!.tasks[0]!.retryCount = 1;
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+  const phase = phaseExecution.phases[0]!;
+  const story = phase.userStories[0]!;
+  const task = story.tasks[0]!;
+
+  recordPhaseStarted(controlPlane, phase);
+  recordStoryStarted(controlPlane, story);
+  recordTaskStarted(controlPlane, story, task);
+  recordTaskCompleted(
+    controlPlane,
+    task,
+    {
+      mode: "phase-execution",
+      summary: "Delivery summary prepared.",
+      instructionEcho: task.instruction,
+      skillId: "execution_subagent",
+      completedAt: "2026-03-26T14:03:00.000Z"
+    },
+    [
+      {
+        gateId: "task-complete",
+        description: "Task completed",
+        kind: "task_completed",
+        success: true,
+        message: "Task completed cleanly."
+      }
+    ]
+  );
+  recordStoryCompleted(controlPlane, story, [
+    {
+      gateId: "story-complete",
+      description: "Story completed",
+      kind: "all_tasks_completed",
+      success: true,
+      message: "Story completed cleanly."
+    }
+  ]);
+  recordPhaseCompleted(controlPlane, phase, [
+    {
+      gateId: "phase-complete",
+      description: "Phase completed",
+      kind: "all_user_stories_completed",
+      success: true,
+      message: "Phase completed cleanly."
+    }
+  ]);
+
+  const operatorView = deriveOperatorRunView(
+    createRun({
+      status: "completed",
+      startedAt: "2026-03-26T14:00:00.000Z",
+      completedAt: "2026-03-26T14:04:00.000Z",
+      phaseExecution,
+      controlPlane,
+      project: {
+        id: "project-1",
+        name: "Shipyard",
+        links: [
+          {
+            kind: "repository",
+            url: "https://github.com/StefanoCaruso456/ShipYard",
+            title: "Repository"
+          }
+        ]
+      },
+      externalSync: {
+        version: 1,
+        provider: "file_mirror",
+        status: "ready",
+        lastSyncedAt: "2026-03-26T14:04:30.000Z",
+        lastError: null,
+        actions: [],
+        records: [
+          {
+            externalId: "ext-run-1",
+            provider: "file_mirror",
+            entityKind: "run",
+            entityId: "run-1",
+            title: "Run summary",
+            status: "completed",
+            summary: "Completed run mirror.",
+            parentExternalId: null,
+            childExternalIds: [],
+            links: [
+              {
+                id: "link-1",
+                kind: "deployment",
+                url: "https://shipyard.app/demo",
+                title: "Deployment",
+                provider: "vercel",
+                entityKind: "run",
+                entityId: "run-1",
+                syncedAt: "2026-03-26T14:04:30.000Z"
+              }
+            ],
+            lastSyncedAt: "2026-03-26T14:04:30.000Z",
+            lastUpdateSummary: "Completed",
+            updateCount: 2
+          }
+        ]
+      },
+      result: {
+        mode: "phase-execution",
+        summary: "Shipped the delivery closeout.",
+        instructionEcho: "Build the operator workflow layer.",
+        skillId: "production_lead",
+        completedAt: "2026-03-26T14:04:00.000Z",
+        phaseExecution,
+        controlPlane
+      }
+    })
+  );
+
+  assert.equal(operatorView.stage.id, "delivery");
+  assert.equal(operatorView.delivery?.status, "completed");
+  assert.match(
+    operatorView.delivery?.headline ?? "",
+    /Delivery summary prepared|Phase Delivery completed|Shipped/i
+  );
+  assert.ok(operatorView.delivery?.outputs.includes("Operator summary shipped"));
+  assert.equal(operatorView.delivery?.links.length, 2);
+  assert.equal(operatorView.evaluation?.scorecard.retryCount, 1);
+  assert.ok(
+    operatorView.evaluation?.bottlenecks.some((bottleneck) => bottleneck.id === "retry-pressure")
   );
 });

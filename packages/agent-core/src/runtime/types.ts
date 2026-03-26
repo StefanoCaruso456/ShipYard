@@ -584,12 +584,48 @@ export type ControlPlaneDelegationBriefArtifactPayload = {
   dependencyIds: string[];
 };
 
+export type DeliverySummaryLinkKind =
+  | "repository"
+  | "pull_request"
+  | "deployment"
+  | "project"
+  | "workspace"
+  | "factory_artifact";
+
+export type ControlPlaneDeliverySummaryLink = {
+  kind: DeliverySummaryLinkKind;
+  label: string;
+  url: string;
+  provider: string | null;
+};
+
+export type ControlPlaneDeliverySummaryArtifactPayload = {
+  kind: "delivery_summary";
+  version: 1;
+  headline: string;
+  outputs: string[];
+  links: ControlPlaneDeliverySummaryLink[];
+  risks: string[];
+  followUps: string[];
+};
+
+export type ControlPlaneFailureReportArtifactPayload = {
+  kind: "failure_report";
+  version: 1;
+  headline: string;
+  risks: string[];
+  followUps: string[];
+  validationFailures: string[];
+};
+
 export type ControlPlaneArtifactPayload =
   | ControlPlanePlanArtifactPayload
   | ControlPlaneRequirementsArtifactPayload
   | ControlPlaneArchitectureDecisionArtifactPayload
   | ControlPlaneSubtaskBreakdownArtifactPayload
-  | ControlPlaneDelegationBriefArtifactPayload;
+  | ControlPlaneDelegationBriefArtifactPayload
+  | ControlPlaneDeliverySummaryArtifactPayload
+  | ControlPlaneFailureReportArtifactPayload;
 
 export type ControlPlaneArtifact = {
   id: string;
@@ -906,6 +942,51 @@ export type OperatorRunMergeDecision = {
   notes: string | null;
 };
 
+export type OperatorRunDeliveryLink = {
+  kind: DeliverySummaryLinkKind;
+  label: string;
+  url: string;
+  provider: string | null;
+};
+
+export type OperatorRunDeliverySummary = {
+  status: "completed" | "failed" | "in_progress";
+  headline: string;
+  outputs: string[];
+  links: OperatorRunDeliveryLink[];
+  risks: string[];
+  followUps: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type OperatorRunEvaluationScorecard = {
+  blockerCount: number;
+  openBlockerCount: number;
+  retryCount: number;
+  approvalGateCount: number;
+  approvalDecisionCount: number;
+  interventionCount: number;
+  conflictCount: number;
+  openConflictCount: number;
+  mergeDecisionCount: number;
+  failureReportCount: number;
+};
+
+export type OperatorRunEvaluationBottleneck = {
+  id: string;
+  label: string;
+  detail: string;
+  severity: "info" | "warning" | "danger";
+  metric: number;
+};
+
+export type OperatorRunEvaluation = {
+  scorecard: OperatorRunEvaluationScorecard;
+  bottlenecks: OperatorRunEvaluationBottleneck[];
+  failurePatterns: string[];
+};
+
 export type OperatorRunJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -947,6 +1028,8 @@ export type OperatorRunView = {
   blockers: OperatorRunBlocker[];
   conflicts: OperatorRunConflict[];
   mergeDecisions: OperatorRunMergeDecision[];
+  delivery: OperatorRunDeliverySummary | null;
+  evaluation: OperatorRunEvaluation | null;
   planningArtifacts: OperatorRunPlanningArtifact[];
   delegationPackets: OperatorRunDelegationPacket[];
   journal: OperatorRunJournalEntry[];

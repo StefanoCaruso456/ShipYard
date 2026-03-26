@@ -382,6 +382,14 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.equal(trace?.summary.controlPlane?.conflictCount, 0);
     assert.equal(trace?.summary.controlPlane?.openConflictCount, 0);
     assert.equal(trace?.summary.controlPlane?.mergeDecisionCount, 0);
+    assert.equal(trace?.summary.delivery?.status, "completed");
+    assert.ok((trace?.summary.delivery?.outputCount ?? 0) >= 1);
+    assert.ok((trace?.summary.delivery?.sourceArtifactCount ?? 0) >= 1);
+    assert.equal(trace?.summary.evaluation?.retryCount, 0);
+    assert.equal(trace?.summary.evaluation?.openBlockerCount, 0);
+    assert.ok(
+      (trace?.summary.evaluation?.bottlenecks ?? []).includes("Clean closeout")
+    );
     assert.ok(
       trace?.spans
         .flatMap((span) => span.events)

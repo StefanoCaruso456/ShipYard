@@ -31,6 +31,7 @@ import type {
   TeamSkillId
 } from "./types";
 import type { RunEvent, RunEventType } from "../validation/types";
+import { deriveRunCloseout } from "./runCloseout";
 
 const STAGE_ORDER: OperatorRunStageId[] = [
   "queued",
@@ -58,6 +59,7 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   const blockers = deriveOpenBlockers(run.controlPlane);
   const conflicts = deriveOpenConflicts(run.controlPlane);
   const mergeDecisions = deriveMergeDecisions(run.controlPlane);
+  const closeout = deriveRunCloseout(run);
   const owner = deriveOwner(run, current, stageId);
   const stages = buildStageSequence(run, stageId, current, blockers, conflicts);
   const approval = deriveApproval(run);
@@ -71,7 +73,7 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   };
 
   return {
-    summary: deriveSummary(run, stage, blockers, conflicts, mergeDecisions),
+    summary: deriveSummary(run, stage, blockers, conflicts, mergeDecisions, closeout.delivery),
     stage,
     stages,
     owner,
@@ -83,6 +85,8 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
     blockers,
     conflicts,
     mergeDecisions,
+    delivery: closeout.delivery,
+    evaluation: closeout.evaluation,
     planningArtifacts,
     delegationPackets,
     journal: buildJournal(run)
@@ -353,8 +357,13 @@ function deriveSummary(
   stage: OperatorRunStage,
   blockers: OperatorRunBlocker[],
   conflicts: OperatorRunConflict[],
-  mergeDecisions: OperatorRunMergeDecision[]
+  mergeDecisions: OperatorRunMergeDecision[],
+  delivery: OperatorRunView["delivery"]
 ) {
+  if (delivery?.headline) {
+    return delivery.headline;
+  }
+
   if (run.error?.message?.trim()) {
     return run.error.message.trim();
   }
@@ -1008,6 +1017,8 @@ function describeArtifactHighlights(artifact: ControlPlaneArtifact) {
           ? `${artifact.payload.dependencyIds.length} dependenc${artifact.payload.dependencyIds.length === 1 ? "y" : "ies"}`
           : null
       ]);
+    default:
+      return [];
   }
 }
 

@@ -338,7 +338,9 @@ function summarizeRunTrace(
     orchestration: readOrchestrationSummary(rootSpan?.metadata),
     phaseExecution: readPhaseExecutionSummary(rootSpan?.metadata),
     rebuild: readRebuildSummary(rootSpan?.metadata),
-    controlPlane: readControlPlaneSummary(rootSpan?.metadata)
+    controlPlane: readControlPlaneSummary(rootSpan?.metadata),
+    delivery: readDeliverySummary(rootSpan?.metadata),
+    evaluation: readEvaluationSummary(rootSpan?.metadata)
   };
 }
 
@@ -960,5 +962,42 @@ function readControlPlaneSummary(metadata: TraceMetadata | undefined) {
     activeApprovalGateId: readMetadataString(metadata.controlPlaneActiveApprovalGateId),
     currentEntityKind: readMetadataString(metadata.controlPlaneCurrentEntityKind),
     currentEntityId: readMetadataString(metadata.controlPlaneCurrentEntityId)
+  };
+}
+
+function readDeliverySummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.deliveryStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.deliveryStatus),
+    headline: readMetadataString(metadata.deliveryHeadline),
+    outputCount: readMetadataNumber(metadata.deliveryOutputCount) ?? 0,
+    linkCount: readMetadataNumber(metadata.deliveryLinkCount) ?? 0,
+    riskCount: readMetadataNumber(metadata.deliveryRiskCount) ?? 0,
+    followUpCount: readMetadataNumber(metadata.deliveryFollowUpCount) ?? 0,
+    sourceArtifactCount: readMetadataNumber(metadata.deliverySourceArtifactCount) ?? 0
+  };
+}
+
+function readEvaluationSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataNumber(metadata.evaluationRetryCount) == null) {
+    return null;
+  }
+
+  return {
+    blockerCount: readMetadataNumber(metadata.evaluationBlockerCount) ?? 0,
+    openBlockerCount: readMetadataNumber(metadata.evaluationOpenBlockerCount) ?? 0,
+    retryCount: readMetadataNumber(metadata.evaluationRetryCount) ?? 0,
+    approvalGateCount: readMetadataNumber(metadata.evaluationApprovalGateCount) ?? 0,
+    approvalDecisionCount: readMetadataNumber(metadata.evaluationApprovalDecisionCount) ?? 0,
+    interventionCount: readMetadataNumber(metadata.evaluationInterventionCount) ?? 0,
+    conflictCount: readMetadataNumber(metadata.evaluationConflictCount) ?? 0,
+    openConflictCount: readMetadataNumber(metadata.evaluationOpenConflictCount) ?? 0,
+    mergeDecisionCount: readMetadataNumber(metadata.evaluationMergeDecisionCount) ?? 0,
+    failureReportCount: readMetadataNumber(metadata.evaluationFailureReportCount) ?? 0,
+    failurePatternCount: readMetadataNumber(metadata.evaluationFailurePatternCount) ?? 0,
+    bottlenecks: collectMetadataStringArray(metadata.evaluationBottlenecks)
   };
 }
