@@ -1092,6 +1092,7 @@ function buildRuntimeContextForProject(
       source: "local-file-bridge",
       reason: "Recently created or updated in the connected local folder."
     })),
+    externalContext: [],
     validationTargets: recentFilePaths.slice(0, 8)
   };
 }

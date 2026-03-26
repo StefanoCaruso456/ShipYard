@@ -1,4 +1,5 @@
 import type { RoleContextPayload, SharedRoleContext } from "./types";
+import { buildExternalContextSections, finalizeRoleContextPayload } from "./composeRoleContext";
 
 export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayload {
   const assembledAt = new Date().toISOString();
@@ -68,6 +69,14 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
     format: "markdown",
     content: shared.roleSkillView.renderedText
   });
+
+  const externalContext = buildExternalContextSections({
+    role: "verifier",
+    externalContext: shared.externalContext
+  });
+
+  sections.push(...externalContext.sections);
+  omittedSections.push(...externalContext.omittedSections);
 
   sections.push({
     id: "current-run-state",
@@ -200,30 +209,11 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
     });
   }
 
-  return {
+  return finalizeRoleContextPayload({
     role: "verifier",
     runId: shared.run.id,
     assembledAt,
-    precedence: [
-      "runtime/system contract",
-      "task objective and current task input",
-      "project rules",
-      "skill/runtime behavior guidance",
-      "live execution context",
-      "rolling summary / prior step state"
-    ],
     sections,
-    omittedSections,
-    prompt: renderPrompt("verifier", sections)
-  };
-}
-
-function renderPrompt(role: string, sections: RoleContextPayload["sections"]) {
-  return [
-    `# ${role[0]?.toUpperCase()}${role.slice(1)} Context Payload`,
-    ...sections.map(
-      (section) =>
-        `## ${section.title}\nSource: ${section.source}\nPrecedence: ${section.precedence}\n\n${section.content}`
-    )
-  ].join("\n\n");
+    omittedSections
+  });
 }

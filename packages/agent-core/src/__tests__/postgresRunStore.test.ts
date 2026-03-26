@@ -59,6 +59,7 @@ function createRun(
       objective: null,
       constraints: [],
       relevantFiles: [],
+      externalContext: [],
       validationTargets: []
     },
     status: overrides.status,

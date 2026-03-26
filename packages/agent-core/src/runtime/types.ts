@@ -226,10 +226,30 @@ export type RelevantFileContext = {
   reason?: string | null;
 };
 
+export type ExternalContextKind =
+  | "spec"
+  | "schema"
+  | "prior_output"
+  | "test_result"
+  | "diff_summary"
+  | "validation_target";
+
+export type ExternalContextFormat = "text" | "markdown" | "json";
+
+export type ExternalContextInput = {
+  id: string;
+  kind: ExternalContextKind;
+  title: string;
+  content: string;
+  source?: string | null;
+  format?: ExternalContextFormat | null;
+};
+
 export type RunContextInput = {
   objective?: string | null;
   constraints: string[];
   relevantFiles: RelevantFileContext[];
+  externalContext?: ExternalContextInput[];
   validationTargets: string[];
 };
 
@@ -330,6 +350,157 @@ export type PhaseExecutionState = {
   lastFailureReason: string | null;
 };
 
+export type ControlPlaneRole =
+  | "orchestrator"
+  | "production_lead"
+  | "specialist_dev"
+  | "execution_subagent";
+
+export type ControlPlaneAgentStatus = "available" | "assigned" | "active" | "blocked";
+
+export type ControlPlaneEntityKind = "phase" | "story" | "task";
+
+export type ControlPlaneEntityStatus = "pending" | "in_progress" | "blocked" | "completed" | "failed";
+
+export type ControlPlaneArtifactKind =
+  | "plan"
+  | "task_result"
+  | "validation_report"
+  | "delivery_summary"
+  | "failure_report";
+
+export type ControlPlaneHandoffStatus = "created" | "accepted" | "completed";
+
+export type ControlPlaneInterventionKind = "retry" | "replan" | "manual_review" | "rollback";
+
+export type ControlPlaneTransition = {
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  fromStatus: ControlPlaneEntityStatus | null;
+  toStatus: ControlPlaneEntityStatus;
+  at: string;
+  reason: string;
+};
+
+export type ControlPlaneValidationState = {
+  status: ValidationStatus;
+  lastResults: ValidationGateResult[] | null;
+  updatedAt: string | null;
+};
+
+export type ControlPlaneAgent = {
+  id: string;
+  role: ControlPlaneRole;
+  label: string;
+  status: ControlPlaneAgentStatus;
+  assignedEntityIds: string[];
+};
+
+export type ControlPlaneArtifact = {
+  id: string;
+  kind: ControlPlaneArtifactKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  producerRole: ControlPlaneRole;
+  producerId: string;
+  path?: string | null;
+};
+
+export type ControlPlaneHandoff = {
+  id: string;
+  fromRole: ControlPlaneRole;
+  fromId: string;
+  toRole: ControlPlaneRole;
+  toId: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  purpose: string;
+  status: ControlPlaneHandoffStatus;
+  createdAt: string;
+  acceptedAt: string | null;
+  completedAt: string | null;
+};
+
+export type ControlPlaneIntervention = {
+  id: string;
+  kind: ControlPlaneInterventionKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+};
+
+export type ControlPlaneBlocker = {
+  id: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  status: "open" | "resolved";
+  createdAt: string;
+  resolvedAt: string | null;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+};
+
+type ControlPlaneNodeBase = {
+  status: ControlPlaneEntityStatus;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+  failureReason: string | null;
+  validation: ControlPlaneValidationState;
+  blockerIds: string[];
+  artifactIds: string[];
+  handoffIds: string[];
+  interventionIds: string[];
+  transitionLog: ControlPlaneTransition[];
+};
+
+export type ControlPlaneTaskNode = ControlPlaneNodeBase & {
+  id: string;
+  title: string;
+  instruction: string;
+  expectedOutcome: string;
+  retryCount: number;
+};
+
+export type ControlPlaneStoryNode = ControlPlaneNodeBase & {
+  id: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+  retryCount: number;
+  tasks: ControlPlaneTaskNode[];
+};
+
+export type ControlPlanePhaseNode = ControlPlaneNodeBase & {
+  id: string;
+  name: string;
+  description: string;
+  userStories: ControlPlaneStoryNode[];
+};
+
+export type ControlPlaneState = {
+  version: 1;
+  status: ControlPlaneEntityStatus;
+  runOwnerId: string;
+  agents: ControlPlaneAgent[];
+  current: PhaseExecutionPointer;
+  progress: PhaseExecutionProgress;
+  retryPolicy: PhaseExecutionRetryPolicy;
+  phases: ControlPlanePhaseNode[];
+  artifacts: ControlPlaneArtifact[];
+  handoffs: ControlPlaneHandoff[];
+  interventions: ControlPlaneIntervention[];
+  blockers: ControlPlaneBlocker[];
+  lastFailureReason: string | null;
+  updatedAt: string;
+};
+
 export type RollingSummary = {
   text: string;
   updatedAt: string;
@@ -380,6 +551,7 @@ export type AgentRunResult = {
   completedAt: string;
   orchestration?: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
+  controlPlane?: ControlPlaneState | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -413,6 +585,7 @@ export type AgentRunRecord = {
   lastValidationResult: ValidationResult | null;
   orchestration: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
+  controlPlane?: ControlPlaneState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];
   error: AgentRunFailure | null;

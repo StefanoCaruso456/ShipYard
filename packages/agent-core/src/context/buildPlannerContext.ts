@@ -1,4 +1,5 @@
 import type { RoleContextPayload, SharedRoleContext } from "./types";
+import { buildExternalContextSections, finalizeRoleContextPayload } from "./composeRoleContext";
 
 export function buildPlannerContext(shared: SharedRoleContext): RoleContextPayload {
   return buildRolePayload("planner", shared, {
@@ -86,6 +87,14 @@ function buildRolePayload(
     format: "markdown",
     content: shared.roleSkillView.renderedText
   });
+
+  const externalContext = buildExternalContextSections({
+    role,
+    externalContext: shared.externalContext
+  });
+
+  sections.push(...externalContext.sections);
+  omittedSections.push(...externalContext.omittedSections);
 
   sections.push({
     id: "current-run-state",
@@ -208,30 +217,11 @@ function buildRolePayload(
     });
   }
 
-  return {
+  return finalizeRoleContextPayload({
     role,
     runId: shared.run.id,
     assembledAt,
-    precedence: [
-      "runtime/system contract",
-      "task objective and current task input",
-      "project rules",
-      "skill/runtime behavior guidance",
-      "live execution context",
-      "rolling summary / prior step state"
-    ],
     sections,
-    omittedSections,
-    prompt: renderPrompt(role, sections)
-  };
-}
-
-function renderPrompt(role: string, sections: RoleContextPayload["sections"]) {
-  return [
-    `# ${role[0]?.toUpperCase()}${role.slice(1)} Context Payload`,
-    ...sections.map(
-      (section) =>
-        `## ${section.title}\nSource: ${section.source}\nPrecedence: ${section.precedence}\n\n${section.content}`
-    )
-  ].join("\n\n");
+    omittedSections
+  });
 }

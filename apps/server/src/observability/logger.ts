@@ -660,10 +660,15 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       assemblyCount: number;
       sectionCount: number;
       omittedSectionCount: number;
+      truncatedSectionIds: string[];
+      omittedForBudgetSectionIds: string[];
+      maxPromptChars: number | null;
+      usedPromptChars: number | null;
       promptLength: number | null;
       selectedPaths: string[];
       selectedSources: string[];
       selectedReasons: string[];
+      externalContextKinds: string[];
       hasRollingSummary: boolean;
     }
   >();
@@ -679,10 +684,15 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       assemblyCount: 0,
       sectionCount: 0,
       omittedSectionCount: 0,
+      truncatedSectionIds: [],
+      omittedForBudgetSectionIds: [],
+      maxPromptChars: null,
+      usedPromptChars: null,
       promptLength: null,
       selectedPaths: [],
       selectedSources: [],
       selectedReasons: [],
+      externalContextKinds: [],
       hasRollingSummary: false
     };
     const fileSelections = collectFileSelectionEntries(span.metadata.selectedFiles);
@@ -690,6 +700,14 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
     existing.assemblyCount += 1;
     existing.sectionCount = collectMetadataStringArray(span.metadata.sectionIds).length;
     existing.omittedSectionCount = collectMetadataStringArray(span.metadata.omittedSectionIds).length;
+    existing.truncatedSectionIds = uniqueStrings(
+      collectMetadataStringArray(span.metadata.truncatedSectionIds)
+    ).sort();
+    existing.omittedForBudgetSectionIds = uniqueStrings(
+      collectMetadataStringArray(span.metadata.omittedForBudgetSectionIds)
+    ).sort();
+    existing.maxPromptChars = readMetadataNumber(span.metadata.maxPromptChars);
+    existing.usedPromptChars = readMetadataNumber(span.metadata.usedPromptChars);
     existing.promptLength = readMetadataNumber(span.metadata.promptLength);
     existing.selectedPaths = uniqueStrings(fileSelections.map((entry) => entry.path)).sort();
     existing.selectedSources = uniqueStrings(
@@ -702,6 +720,9 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
         .map((entry) => entry.reason)
         .filter((reason): reason is string => Boolean(reason))
     ).sort();
+    existing.externalContextKinds = uniqueStrings(
+      collectMetadataStringArray(span.metadata.externalContextKinds)
+    ).sort();
     existing.hasRollingSummary = readMetadataString(span.metadata.rollingSummarySource) != null;
 
     roleIndex.set(role, existing);
@@ -713,11 +734,18 @@ function summarizeContextSpans(contextSpans: MutableTraceSpanSnapshot[]): TraceR
       assemblyCount: role.assemblyCount,
       sectionCount: role.sectionCount,
       omittedSectionCount: role.omittedSectionCount,
+      truncatedSectionCount: role.truncatedSectionIds.length,
+      omittedForBudgetSectionCount: role.omittedForBudgetSectionIds.length,
+      maxPromptChars: role.maxPromptChars,
+      usedPromptChars: role.usedPromptChars,
       promptLength: role.promptLength,
       selectedFileCount: role.selectedPaths.length,
       selectedPaths: role.selectedPaths,
       selectedSources: role.selectedSources,
       selectedReasons: role.selectedReasons,
+      externalContextKinds: role.externalContextKinds,
+      truncatedSectionIds: role.truncatedSectionIds,
+      omittedForBudgetSectionIds: role.omittedForBudgetSectionIds,
       hasRollingSummary: role.hasRollingSummary
     }))
     .sort((left, right) => left.role.localeCompare(right.role));

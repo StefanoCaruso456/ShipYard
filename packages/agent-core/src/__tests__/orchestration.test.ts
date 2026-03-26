@@ -88,6 +88,7 @@ test("verifier decision output requests a retry when execution misses the planne
       objective: "Expected output",
       constraints: [],
       relevantFiles: [],
+      externalContext: [],
       validationTargets: []
     },
     orchestration: {
@@ -192,6 +193,16 @@ test("live orchestration consumes assembler payloads and records planner/executo
           reason: "Current runtime entrypoint."
         }
       ],
+      externalContext: [
+        {
+          id: "spec",
+          kind: "spec",
+          title: "Runtime summary spec",
+          content: "# Spec\n\n- Summarize the runtime status conservatively.",
+          source: "docs/runtime-spec.md",
+          format: "markdown"
+        }
+      ],
       validationTargets: ["pnpm --filter @shipyard/server typecheck"]
     }
   });
@@ -210,7 +221,17 @@ test("live orchestration consumes assembler payloads and records planner/executo
     completedRun.orchestration?.lastPlannerResult?.consumedContextSectionIds.includes("task-objective")
   );
   assert.ok(
+    completedRun.orchestration?.lastPlannerResult?.consumedContextSectionIds.includes(
+      "external-context:spec"
+    )
+  );
+  assert.ok(
     completedRun.orchestration?.lastVerifierResult?.consumedContextSectionIds.includes("task-objective")
+  );
+  assert.ok(
+    completedRun.orchestration?.lastVerifierResult?.consumedContextSectionIds.includes(
+      "external-context:spec"
+    )
   );
 });
 
@@ -306,6 +327,7 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
       objective: "Implement the orchestration loop.",
       constraints: [],
       relevantFiles: [],
+      externalContext: [],
       validationTargets: ["pnpm --filter @shipyard/agent-core test"]
     },
     status: overrides.status ?? "running",

@@ -96,6 +96,130 @@ test("verifier payload assembly includes failures and rolling summary", async ()
   assert.ok(payload.prompt.includes("Run failed while validating src/example.ts."));
 });
 
+test("planner payload assembly includes external context in deterministic role order", async () => {
+  const assembler = await createAssemblerForTests();
+  const payload = assembler.buildRolePayload("planner", {
+    run: createRunRecord({
+      context: {
+        objective: "Plan the next step.",
+        constraints: [],
+        relevantFiles: [],
+        externalContext: [
+          {
+            id: "tests",
+            kind: "test_result",
+            title: "Failing tests",
+            content: "FAIL src/example.test.ts",
+            source: "pnpm test",
+            format: "text"
+          },
+          {
+            id: "schema",
+            kind: "schema",
+            title: "Task schema",
+            content: JSON.stringify({ type: "object", properties: { id: { type: "string" } } }, null, 2),
+            source: "docs/schema.json",
+            format: "json"
+          },
+          {
+            id: "spec",
+            kind: "spec",
+            title: "Feature spec",
+            content: "# Spec\n\n- Keep the flow scoped.",
+            source: "docs/spec.md",
+            format: "markdown"
+          }
+        ],
+        validationTargets: []
+      },
+      toolRequest: null
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  const externalSectionIds = payload.sections
+    .filter((section) => section.id.startsWith("external-context:"))
+    .map((section) => section.id);
+  const specSection = payload.sections.find((section) => section.id === "external-context:spec");
+
+  assert.deepEqual(externalSectionIds, [
+    "external-context:spec",
+    "external-context:schema",
+    "external-context:tests"
+  ]);
+  assert.equal(specSection?.precedence, "live execution context");
+  assert.equal(specSection?.metadata?.contextKind, "spec");
+});
+
+test("executor payload truncates oversized external context and records budget metadata", async () => {
+  const assembler = await createAssemblerForTests();
+  const payload = assembler.buildRolePayload("executor", {
+    run: createRunRecord({
+      context: {
+        objective: "Use the injected prior output.",
+        constraints: [],
+        relevantFiles: [],
+        externalContext: [
+          {
+            id: "prior-output",
+            kind: "prior_output",
+            title: "Previous draft",
+            content: "A".repeat(10_000),
+            source: "run-previous",
+            format: "text"
+          }
+        ],
+        validationTargets: []
+      },
+      toolRequest: null
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  const externalSection = payload.sections.find(
+    (section) => section.id === "external-context:prior-output"
+  );
+
+  assert.ok(externalSection);
+  assert.equal(externalSection?.metadata?.truncated, true);
+  assert.ok(payload.budget.truncatedSectionIds.includes("external-context:prior-output"));
+  assert.ok(payload.budget.usedPromptChars <= payload.budget.maxPromptChars);
+  assert.match(externalSection?.content ?? "", /\[Truncated for executor context budget\./);
+});
+
+test("verifier payload records budget-driven section omissions deterministically", async () => {
+  const assembler = await createAssemblerForTests();
+  const payload = assembler.buildRolePayload("verifier", {
+    run: createRunRecord({
+      toolRequest: null,
+      rollingSummary: null,
+      context: {
+        objective: "Verify the result against external evidence.",
+        constraints: [],
+        relevantFiles: [],
+        externalContext: Array.from({ length: 8 }, (_, index) => ({
+          id: `evidence-${index + 1}`,
+          kind: "test_result" as const,
+          title: `Evidence ${index + 1}`,
+          content: "B".repeat(9_000),
+          source: `test-run-${index + 1}`,
+          format: "text" as const
+        })),
+        validationTargets: []
+      }
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  assert.ok(payload.budget.omittedForBudgetSectionIds.length > 0);
+  assert.ok(
+    payload.omittedSections.some((section) =>
+      section.reason.includes("context budget of")
+    )
+  );
+  assert.ok(payload.budget.usedPromptChars <= payload.budget.maxPromptChars);
+});
+
 test("rolling summary defaults to omitted when no prior step state exists", async () => {
   const assembler = await createAssemblerForTests();
   const payload = assembler.buildRolePayload("executor", {
@@ -217,6 +341,7 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
         reason: "Target file for the next edit."
       }
     ],
+    externalContext: [],
     validationTargets: ["pnpm --filter @shipyard/server typecheck"]
   };
 

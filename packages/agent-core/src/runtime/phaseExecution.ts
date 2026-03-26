@@ -20,6 +20,20 @@ import {
 } from "./types";
 import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
+import {
+  createControlPlaneState,
+  recordPhaseCompleted,
+  recordPhaseFailed,
+  recordPhaseStarted,
+  recordStoryCompleted,
+  recordStoryFailed,
+  recordStoryRetry,
+  recordStoryStarted,
+  recordTaskCompleted,
+  recordTaskFailed,
+  recordTaskStarted,
+  syncControlPlaneState
+} from "./controlPlane";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import type { ContextAssembler } from "../context/types";
 import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
@@ -40,6 +54,8 @@ type ExecutePhaseExecutionOptions = {
 type ExecutionFailure = Error & {
   code?: string;
 };
+
+type ExternalContextItem = NonNullable<RunContextInput["externalContext"]>[number];
 
 export function normalizePhaseExecutionInput(
   value: PhaseExecutionInput | null | undefined
@@ -170,6 +186,8 @@ export async function executePhaseExecutionRun(
   }
 
   workingRun.phaseExecution = phaseExecution;
+  workingRun.controlPlane =
+    syncControlPlaneState(workingRun.controlPlane ?? createControlPlaneState(phaseExecution), phaseExecution);
   phaseExecution.status = "in_progress";
 
   for (const phase of phaseExecution.phases) {
@@ -216,6 +234,7 @@ export async function executePhaseExecutionRun(
         if (storyGateResults.every((gate) => gate.success)) {
           story.status = "completed";
           story.failureReason = null;
+          recordStoryCompleted(workingRun.controlPlane ?? null, story, storyGateResults);
           appendRunEvents(
             workingRun,
             ...createGateEvents({
@@ -253,6 +272,7 @@ export async function executePhaseExecutionRun(
 
         story.status = "failed";
         story.failureReason = storyFailureMessage;
+        recordStoryFailed(workingRun.controlPlane ?? null, story, storyFailureMessage, storyGateResults);
         appendRunEvents(
           workingRun,
           ...createGateEvents({
@@ -285,6 +305,12 @@ export async function executePhaseExecutionRun(
           phase.failureReason = storyFailureMessage;
           phaseExecution.status = "failed";
           phaseExecution.lastFailureReason = storyFailureMessage;
+          recordPhaseFailed(
+            workingRun.controlPlane ?? null,
+            phase,
+            storyFailureMessage,
+            phase.lastValidationResults ?? []
+          );
           updateProgress(phaseExecution);
           await persist(options.persistRun, workingRun);
           throw createExecutionFailure(storyFailureMessage);
@@ -293,6 +319,12 @@ export async function executePhaseExecutionRun(
         story.retryCount += 1;
         resetStoryTasks(story);
         story.status = "pending";
+        recordStoryRetry(
+          workingRun.controlPlane ?? null,
+          story,
+          story.retryCount,
+          `Retrying story ${story.title} after validation gate failure.`
+        );
         appendRunEvents(workingRun, {
           at: new Date().toISOString(),
           type: "retry_scheduled",
@@ -323,6 +355,12 @@ export async function executePhaseExecutionRun(
       phase.failureReason = phaseFailureMessage;
       phaseExecution.status = "failed";
       phaseExecution.lastFailureReason = phaseFailureMessage;
+      recordPhaseFailed(
+        workingRun.controlPlane ?? null,
+        phase,
+        phaseFailureMessage,
+        phase.lastValidationResults
+      );
       appendRunEvents(
         workingRun,
         ...createGateEvents({
@@ -348,6 +386,7 @@ export async function executePhaseExecutionRun(
 
     phase.status = "completed";
     phase.failureReason = null;
+    recordPhaseCompleted(workingRun.controlPlane ?? null, phase, phase.lastValidationResults);
     appendRunEvents(
       workingRun,
       ...createGateEvents({
@@ -398,7 +437,8 @@ export async function executePhaseExecutionRun(
     skillId: options.instructionRuntime.skill.meta.id,
     completedAt: new Date().toISOString(),
     responseText: renderPhaseExecutionResponse(phaseExecution),
-    phaseExecution
+    phaseExecution,
+    controlPlane: workingRun.controlPlane ?? null
   };
 }
 
@@ -411,6 +451,7 @@ function beginPhase(run: AgentRunRecord, phaseExecution: PhaseExecutionState, ph
     taskId: null
   };
   updateProgress(phaseExecution);
+  recordPhaseStarted(run.controlPlane ?? null, phase);
   appendRunEvents(run, {
     at: new Date().toISOString(),
     type: "phase_started",
@@ -435,6 +476,7 @@ function beginStory(
     taskId: null
   };
   updateProgress(phaseExecution);
+  recordStoryStarted(run.controlPlane ?? null, story);
   appendRunEvents(run, {
     at: new Date().toISOString(),
     type: "story_started",
@@ -467,6 +509,7 @@ async function executeTask(options: {
     taskId: task.id
   };
   updateProgress(phaseExecution);
+  recordTaskStarted(run.controlPlane ?? null, story, task);
   run.rollingSummary = {
     text: `Executing ${phase.name} -> ${story.title} -> ${task.id}`,
     updatedAt: new Date().toISOString(),
@@ -542,6 +585,12 @@ async function executeTask(options: {
     task.lastValidationResults = run.orchestration?.lastVerifierResult?.validationGateResults ?? null;
     task.status = "failed";
     task.failureReason = failure.message;
+    recordTaskFailed(
+      run.controlPlane ?? null,
+      task,
+      failure.message,
+      task.lastValidationResults
+    );
     appendRunEvents(run, {
       at: new Date().toISOString(),
       type: "task_failed",
@@ -579,6 +628,7 @@ async function executeTask(options: {
   if (taskGateResults.every((gate) => gate.success)) {
     task.status = "completed";
     task.failureReason = null;
+    recordTaskCompleted(run.controlPlane ?? null, task, result, taskGateResults);
     appendRunEvents(
       run,
       ...createGateEvents({
@@ -620,6 +670,7 @@ async function executeTask(options: {
 
   task.status = "failed";
   task.failureReason = taskFailureMessage;
+  recordTaskFailed(run.controlPlane ?? null, task, taskFailureMessage, taskGateResults);
   appendRunEvents(
     run,
     ...createGateEvents({
@@ -881,6 +932,7 @@ function mergeContexts(
       override?.relevantFiles && override.relevantFiles.length > 0
         ? override.relevantFiles
         : base.relevantFiles,
+    externalContext: mergeExternalContext(base.externalContext, override?.externalContext ?? []),
     validationTargets: uniqueStrings([
       ...base.validationTargets,
       ...(override?.validationTargets ?? [])
@@ -1088,8 +1140,26 @@ function normalizeOptionalContext(value: RunContextInput | null | undefined) {
     objective: value.objective?.trim() ? value.objective.trim() : null,
     constraints: uniqueStrings(value.constraints ?? []),
     relevantFiles: Array.isArray(value.relevantFiles) ? value.relevantFiles : [],
+    externalContext: Array.isArray(value.externalContext) ? value.externalContext : [],
     validationTargets: uniqueStrings(value.validationTargets ?? [])
   };
+}
+
+function mergeExternalContext(
+  base: RunContextInput["externalContext"],
+  override: RunContextInput["externalContext"]
+) {
+  const merged = new Map<string, ExternalContextItem>();
+
+  for (const item of [...(base ?? []), ...(override ?? [])]) {
+    if (!item?.id?.trim()) {
+      continue;
+    }
+
+    merged.set(item.id.trim(), item);
+  }
+
+  return [...merged.values()];
 }
 
 function normalizePhaseStatus(value: string): PhaseStatus {
@@ -1165,6 +1235,13 @@ async function persist(
   persistRun: (run: AgentRunRecord) => void | Promise<void>,
   run: AgentRunRecord
 ) {
+  if (run.phaseExecution) {
+    run.controlPlane = syncControlPlaneState(
+      run.controlPlane ?? createControlPlaneState(run.phaseExecution),
+      run.phaseExecution
+    );
+  }
+
   await persistRun(cloneRunRecord(run));
 }
 

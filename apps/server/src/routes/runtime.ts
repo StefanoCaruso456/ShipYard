@@ -439,6 +439,7 @@ function serializeRun(run: AgentRunRecord) {
     lastValidationResult: run.lastValidationResult,
     orchestration: run.orchestration,
     phaseExecution: run.phaseExecution ?? null,
+    controlPlane: run.controlPlane ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
     error: run.error,
@@ -622,6 +623,7 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
     objective?: unknown;
     constraints?: unknown;
     relevantFiles?: unknown;
+    externalContext?: unknown;
     validationTargets?: unknown;
   };
 
@@ -649,6 +651,80 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
     return {
       error: "context.validationTargets must be an array of strings when provided."
     };
+  }
+
+  if (candidate.externalContext !== undefined) {
+    if (!Array.isArray(candidate.externalContext)) {
+      return {
+        error: "context.externalContext must be an array when provided."
+      };
+    }
+
+    for (const item of candidate.externalContext) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return {
+          error: "Each context.externalContext entry must be an object."
+        };
+      }
+
+      const entry = item as {
+        id?: unknown;
+        kind?: unknown;
+        title?: unknown;
+        content?: unknown;
+        source?: unknown;
+        format?: unknown;
+      };
+
+      if (typeof entry.id !== "string" || !entry.id.trim()) {
+        return {
+          error: "Each context.externalContext entry requires a non-empty string id."
+        };
+      }
+
+      if (
+        entry.kind !== "spec" &&
+        entry.kind !== "schema" &&
+        entry.kind !== "prior_output" &&
+        entry.kind !== "test_result" &&
+        entry.kind !== "diff_summary" &&
+        entry.kind !== "validation_target"
+      ) {
+        return {
+          error:
+            "context.externalContext.kind must be spec, schema, prior_output, test_result, diff_summary, or validation_target."
+        };
+      }
+
+      if (typeof entry.title !== "string" || !entry.title.trim()) {
+        return {
+          error: "Each context.externalContext entry requires a non-empty string title."
+        };
+      }
+
+      if (typeof entry.content !== "string" || !entry.content.trim()) {
+        return {
+          error: "Each context.externalContext entry requires a non-empty string content field."
+        };
+      }
+
+      if (entry.source !== undefined && typeof entry.source !== "string") {
+        return {
+          error: "context.externalContext.source must be a string when provided."
+        };
+      }
+
+      if (
+        entry.format !== undefined &&
+        entry.format !== "text" &&
+        entry.format !== "markdown" &&
+        entry.format !== "json"
+      ) {
+        return {
+          error: "context.externalContext.format must be text, markdown, or json when provided."
+        };
+      }
+    }
   }
 
   if (candidate.relevantFiles !== undefined) {
@@ -718,6 +794,9 @@ function parseRunContextInput(value: unknown): { value: SubmitTaskInput["context
       constraints: (candidate.constraints as string[] | undefined) ?? [],
       relevantFiles:
         (candidate.relevantFiles as NonNullable<SubmitTaskInput["context"]>["relevantFiles"] | undefined) ??
+        [],
+      externalContext:
+        (candidate.externalContext as NonNullable<SubmitTaskInput["context"]>["externalContext"] | undefined) ??
         [],
       validationTargets: (candidate.validationTargets as string[] | undefined) ?? []
     }

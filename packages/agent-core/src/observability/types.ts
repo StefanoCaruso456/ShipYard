@@ -182,11 +182,18 @@ export type TraceRunSummary = {
       assemblyCount: number;
       sectionCount: number;
       omittedSectionCount: number;
+      truncatedSectionCount: number;
+      omittedForBudgetSectionCount: number;
+      maxPromptChars: number | null;
+      usedPromptChars: number | null;
       promptLength: number | null;
       selectedFileCount: number;
       selectedPaths: string[];
       selectedSources: string[];
       selectedReasons: string[];
+      externalContextKinds: string[];
+      truncatedSectionIds: string[];
+      omittedForBudgetSectionIds: string[];
       hasRollingSummary: boolean;
     }>;
   };

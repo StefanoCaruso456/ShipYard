@@ -22,6 +22,7 @@ export function buildSharedRoleContext(input: {
     taskObjective: deriveTaskObjective(input.run),
     constraints: input.run.context.constraints ?? [],
     relevantFiles: deriveRelevantFiles(input.run),
+    externalContext: input.run.context.externalContext ?? [],
     recentToolResults: deriveRecentToolResults(input.run),
     validationTargets: deriveValidationTargets(input.run),
     knownFailures: deriveKnownFailures(input.run),
