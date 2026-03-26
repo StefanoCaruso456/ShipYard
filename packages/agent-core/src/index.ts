@@ -46,6 +46,7 @@ export { parseMarkdownSections } from "./instructions/parseMarkdownSections";
 export { buildExecutorContext } from "./context/buildExecutorContext";
 export { buildPlannerContext } from "./context/buildPlannerContext";
 export { buildVerifierContext } from "./context/buildVerifierContext";
+export { countTextTokens, getRoleContextPolicy } from "./context/policy";
 export { createContextAssembler, runtimeContextPrecedence } from "./context/createContextAssembler";
 export { selectSkillSections } from "./context/selectSkillSections";
 export { getActiveTraceScope, runWithTraceScope } from "./observability/traceScope";
@@ -97,6 +98,13 @@ export {
   createRebuildState,
   normalizeRebuildState
 } from "./runtime/rebuildState";
+export {
+  controlPlaneArtifactSchema,
+  controlPlaneHandoffSchema,
+  normalizeRunContextInputValue,
+  runContextInputSchema,
+  safeParseRunContextInput
+} from "./runtime/schemas";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
   AgentExecutionStatus,

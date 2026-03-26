@@ -603,6 +603,7 @@ async function executeExecutorStep(input: {
       instructionRuntime: input.instructionRuntime,
       roleContextPrompt: input.payload?.prompt ?? null,
       roleContextSectionIds: input.payload?.sections.map((section) => section.id) ?? [],
+      maxOutputTokens: input.payload?.budget.maxOutputTokens ?? null,
       plannedStep: input.plannerStep
     });
 
@@ -719,7 +720,10 @@ async function buildRolePayload(
       omittedSectionIds: payload.omittedSections.map((section) => section.id),
       promptLength: payload.prompt.length,
       maxPromptChars: payload.budget.maxPromptChars,
+      maxPromptTokens: payload.budget.maxPromptTokens,
+      maxOutputTokens: payload.budget.maxOutputTokens,
       usedPromptChars: payload.budget.usedPromptChars,
+      usedPromptTokens: payload.budget.usedPromptTokens,
       truncatedSectionIds: payload.budget.truncatedSectionIds,
       omittedForBudgetSectionIds: payload.budget.omittedForBudgetSectionIds,
       rollingSummarySource: run.rollingSummary?.source ?? null,
