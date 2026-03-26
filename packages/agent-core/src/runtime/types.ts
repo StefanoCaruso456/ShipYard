@@ -945,12 +945,138 @@ export type RollingSummary = {
   source: "result" | "failure" | "retry";
 };
 
+export type ExternalRecordProviderId = "file_mirror";
+
+export type ExternalRecordEntityKind = "run" | ControlPlaneEntityKind;
+
+export type ExternalRecordLinkKind = "pull_request" | "deployment";
+
+export type RunProjectLinkInput = {
+  id?: string | null;
+  kind: ExternalRecordLinkKind;
+  url: string;
+  title?: string | null;
+  provider?: string | null;
+  entityKind?: ExternalRecordEntityKind | null;
+  entityId?: string | null;
+};
+
+export type ExternalRecordLink = {
+  id: string;
+  kind: ExternalRecordLinkKind;
+  url: string;
+  title: string | null;
+  provider: string | null;
+  entityKind: ExternalRecordEntityKind;
+  entityId: string;
+  syncedAt: string | null;
+};
+
+export type ExternalRecordStatus = AgentRunStatus | PhaseStatus;
+
+export type ExternalSyncUpdateKind =
+  | "status"
+  | "approval"
+  | "blocker"
+  | "completion"
+  | "failure"
+  | "retry"
+  | "link";
+
+export type ExternalRecordUpdate = {
+  id: string;
+  kind: ExternalSyncUpdateKind;
+  summary: string;
+  status: ExternalRecordStatus | null;
+  at: string;
+  actionId: string;
+};
+
+export type ExternalRecordMirror = {
+  externalId: string;
+  provider: ExternalRecordProviderId;
+  entityKind: ExternalRecordEntityKind;
+  entityId: string;
+  title: string;
+  status: ExternalRecordStatus;
+  summary: string;
+  parentExternalId: string | null;
+  childExternalIds: string[];
+  links: ExternalRecordLink[];
+  lastSyncedAt: string | null;
+  lastUpdateSummary: string | null;
+  updateCount: number;
+};
+
+export type ExternalRecordMirrorDetail = ExternalRecordMirror & {
+  runId: string;
+  updates: ExternalRecordUpdate[];
+};
+
+export type ExternalSyncActionKind = "upsert_record" | "append_update" | "attach_link";
+
+export type ExternalSyncActionStatus = "pending" | "completed" | "failed";
+
+export type ExternalSyncUpsertRecordPayload = {
+  kind: "upsert_record";
+  title: string;
+  status: ExternalRecordStatus;
+  summary: string;
+  parentEntityKind: ExternalRecordEntityKind | null;
+  parentEntityId: string | null;
+};
+
+export type ExternalSyncAppendUpdatePayload = {
+  kind: "append_update";
+  updateKind: ExternalSyncUpdateKind;
+  summary: string;
+  status: ExternalRecordStatus | null;
+  occurredAt: string;
+};
+
+export type ExternalSyncAttachLinkPayload = {
+  kind: "attach_link";
+  link: Omit<ExternalRecordLink, "syncedAt">;
+};
+
+export type ExternalSyncActionPayload =
+  | ExternalSyncUpsertRecordPayload
+  | ExternalSyncAppendUpdatePayload
+  | ExternalSyncAttachLinkPayload;
+
+export type ExternalSyncAction = {
+  id: string;
+  dedupeKey: string;
+  provider: ExternalRecordProviderId;
+  entityKind: ExternalRecordEntityKind;
+  entityId: string;
+  kind: ExternalSyncActionKind;
+  status: ExternalSyncActionStatus;
+  payload: ExternalSyncActionPayload;
+  attempts: number;
+  lastAttemptAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  externalRecordId: string | null;
+};
+
+export type ExternalSyncState = {
+  version: 1;
+  provider: ExternalRecordProviderId;
+  status: "idle" | "ready" | "degraded";
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  actions: ExternalSyncAction[];
+  records: ExternalRecordMirror[];
+};
+
 export type RunProjectInput = {
   id: string;
   name?: string | null;
   kind?: "live" | "local";
   environment?: string | null;
   description?: string | null;
+  links?: RunProjectLinkInput[] | null;
   folder?: {
     name?: string | null;
     displayPath?: string | null;
@@ -1039,6 +1165,7 @@ export type AgentRunRecord = {
   phaseExecution?: PhaseExecutionState | null;
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
+  externalSync?: ExternalSyncState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];
   error: AgentRunFailure | null;
@@ -1084,6 +1211,18 @@ export type PersistentAgentRuntimeService = {
   getRun(id: string): AgentRunRecord | null;
   listRuns(): AgentRunRecord[];
   getStatus(): AgentRuntimeStatus;
+};
+
+export type ExternalRecordSyncServiceDescriptor = {
+  providerId: ExternalRecordProviderId;
+  location: string | null;
+};
+
+export type ExternalRecordSyncService = {
+  descriptor: ExternalRecordSyncServiceDescriptor;
+  syncRun(run: AgentRunRecord): Promise<ExternalSyncState>;
+  listRecords(): Promise<ExternalRecordMirrorDetail[]>;
+  getRecord(externalId: string): Promise<ExternalRecordMirrorDetail | null>;
 };
 
 export type ResolveApprovalGateInput = {

@@ -4,7 +4,8 @@ import test from "node:test";
 
 import { createAgentRuntime } from "../runtime/createAgentRuntime";
 import { createPersistentRuntimeService } from "../runtime/createPersistentRuntimeService";
-import type { AgentRunResult } from "../runtime/types";
+import { normalizeExternalSyncState } from "../runtime/externalRecordSync";
+import type { AgentRunResult, ExternalRecordSyncService } from "../runtime/types";
 
 test("persistent runtime processes queued tasks sequentially without restart", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
@@ -819,6 +820,106 @@ test("persistent runtime tracks rebuild targets artifacts and interventions for 
   assert.ok(
     completedRun.rebuild?.interventionLog.some((intervention) => intervention.kind === "retry")
   );
+});
+
+test("persistent runtime persists external record sync state without affecting completion", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const syncedDedupeKeys: string[] = [];
+  const externalRecordSync: ExternalRecordSyncService = {
+    descriptor: {
+      providerId: "file_mirror",
+      location: "memory://external-record-sync"
+    },
+    async syncRun(run) {
+      const state = normalizeExternalSyncState(run.externalSync);
+      const recordsById = new Map(state.records.map((record) => [record.externalId, record]));
+      const syncedAt = new Date().toISOString();
+
+      for (const action of state.actions) {
+        if (action.status === "completed") {
+          continue;
+        }
+
+        syncedDedupeKeys.push(action.dedupeKey);
+        action.status = "completed";
+        action.attempts += 1;
+        action.lastAttemptAt = syncedAt;
+        action.completedAt = syncedAt;
+        action.error = null;
+        action.externalRecordId = `memory:${run.id}:${action.entityKind}:${action.entityId}`;
+
+        if (action.payload.kind === "upsert_record") {
+          recordsById.set(action.externalRecordId, {
+            externalId: action.externalRecordId,
+            provider: "file_mirror",
+            entityKind: action.entityKind,
+            entityId: action.entityId,
+            title: action.payload.title,
+            status: action.payload.status,
+            summary: action.payload.summary,
+            parentExternalId:
+              action.payload.parentEntityKind && action.payload.parentEntityId
+                ? `memory:${run.id}:${action.payload.parentEntityKind}:${action.payload.parentEntityId}`
+                : null,
+            childExternalIds: [],
+            links: [],
+            lastSyncedAt: syncedAt,
+            lastUpdateSummary: action.payload.summary,
+            updateCount: 0
+          });
+        }
+      }
+
+      return {
+        ...state,
+        status: "ready",
+        lastSyncedAt: syncedAt,
+        lastError: null,
+        records: Array.from(recordsById.values())
+      };
+    },
+    async listRecords() {
+      return [];
+    },
+    async getRecord() {
+      return null;
+    }
+  };
+
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    externalRecordSync
+  });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Mirror this run outward.",
+    project: {
+      id: "project-runtime",
+      name: "Runtime",
+      links: [
+        {
+          kind: "pull_request",
+          url: "https://github.com/StefanoCaruso456/ShipYard/pull/71"
+        }
+      ]
+    }
+  });
+
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.ok(completedRun.externalSync);
+  assert.equal(completedRun.externalSync?.status, "ready");
+  assert.ok(completedRun.externalSync?.actions.every((action) => action.status === "completed"));
+  assert.ok(
+    completedRun.externalSync?.records.some(
+      (record) => record.entityKind === "run" && record.entityId === run.id
+    )
+  );
+  assert.equal(
+    new Set(completedRun.externalSync?.actions.map((action) => action.dedupeKey)).size,
+    completedRun.externalSync?.actions.length
+  );
+  assert.ok(syncedDedupeKeys.length > 0);
 });
 
 async function createInstructionRuntimeForTests() {

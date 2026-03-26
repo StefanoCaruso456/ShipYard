@@ -11,6 +11,11 @@ import {
   recordApprovalGateDecision,
   syncControlPlaneState
 } from "./controlPlane";
+import {
+  normalizeExternalSyncState,
+  normalizeProjectLinks,
+  reconcileExternalSyncState
+} from "./externalRecordSync";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
@@ -28,6 +33,7 @@ import {
   type AgentRunStatus,
   type AgentRunStore,
   type AgentRuntimeStatus,
+  type ExternalRecordSyncService,
   type ExecuteRun,
   type PersistentAgentRuntimeService,
   type ResolveApprovalGateInput,
@@ -42,6 +48,7 @@ type CreatePersistentRuntimeServiceOptions = {
   store?: AgentRunStore;
   executeRun?: ExecuteRun;
   traceService?: TraceService;
+  externalRecordSync?: ExternalRecordSyncService;
 };
 
 const runStatuses: AgentRunStatus[] = ["pending", "running", "paused", "completed", "failed"];
@@ -133,6 +140,130 @@ export async function createPersistentRuntimeService(
     return cloneRunRecord(normalized);
   }
 
+  async function createPersistedRun(run: AgentRunRecord) {
+    const preparedRun = prepareRunForExternalSync(run);
+    const createdRun = await createStoredRun(preparedRun);
+
+    return syncExternalRun(createdRun);
+  }
+
+  async function updatePersistedRun(run: AgentRunRecord) {
+    const preparedRun = prepareRunForExternalSync(run);
+    const updatedRun = await updateStoredRun(preparedRun);
+
+    return syncExternalRun(updatedRun);
+  }
+
+  async function syncRunWithTrace(
+    run: AgentRunRecord,
+    syncRun: () => Promise<AgentRunRecord>
+  ) {
+    const traceScope = getActiveTraceScope();
+
+    if (!traceScope) {
+      return syncRun();
+    }
+
+    const pendingActionCount =
+      run.externalSync?.actions.filter((action) => action.status !== "completed").length ?? 0;
+    const syncSpan = await traceScope.activeSpan.startChild({
+      name: "external-sync:file_mirror",
+      spanType: "sync",
+      inputSummary: `Sync ${pendingActionCount} outbound external record action(s).`,
+      metadata: {
+        provider: run.externalSync?.provider ?? "file_mirror",
+        pendingActionCount
+      },
+      tags: ["external-sync", "provider:file_mirror"]
+    });
+
+    try {
+      const syncedRun = await syncRun();
+
+      syncSpan.annotate({
+        pendingActionCount,
+        syncedActionCount:
+          syncedRun.externalSync?.actions.filter((action) => action.status === "completed").length ??
+          0,
+        externalRecordCount: syncedRun.externalSync?.records.length ?? 0
+      });
+      await syncSpan.end({
+        status: "completed",
+        outputSummary: `Mirrored ${syncedRun.externalSync?.records.length ?? 0} external record(s).`
+      });
+
+      return syncedRun;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "External record sync failed.";
+
+      await syncSpan.end({
+        status: "failed",
+        outputSummary: message,
+        error: message
+      });
+      throw error;
+    }
+  }
+
+  async function performExternalSync(
+    run: AgentRunRecord,
+    externalRecordSync: ExternalRecordSyncService,
+    updateRun: (run: AgentRunRecord) => Promise<AgentRunRecord>
+  ) {
+    const syncedState = await externalRecordSync.syncRun(run);
+    const syncedRun = normalizeRunRecord({
+      ...run,
+      externalSync: syncedState
+    });
+
+    if (didExternalSyncStateChange(run.externalSync, syncedState)) {
+      return updateRun(syncedRun);
+    }
+
+    return syncedRun;
+  }
+
+  async function failExternalSyncGracefully(
+    run: AgentRunRecord,
+    error: unknown,
+    updateRun: (run: AgentRunRecord) => Promise<AgentRunRecord>
+  ) {
+    const message = error instanceof Error ? error.message : "External record sync failed.";
+    const degradedState = normalizeExternalSyncState(run.externalSync);
+    const degradedRun = normalizeRunRecord({
+      ...run,
+      externalSync: {
+        ...degradedState,
+        status: "degraded",
+        lastError: message
+      }
+    });
+
+    if (didExternalSyncStateChange(run.externalSync, degradedRun.externalSync)) {
+      return updateRun(degradedRun);
+    }
+
+    return degradedRun;
+  }
+
+  async function syncExternalRun(run: AgentRunRecord) {
+    const normalized = normalizeRunRecord(run);
+
+    if (!options.externalRecordSync) {
+      return normalized;
+    }
+
+    const updateRun = async (nextRun: AgentRunRecord) => updateStoredRun(nextRun);
+
+    try {
+      return await syncRunWithTrace(normalized, () =>
+        performExternalSync(normalized, options.externalRecordSync!, updateRun)
+      );
+    } catch (error) {
+      return failExternalSyncGracefully(normalized, error, updateRun);
+    }
+  }
+
   async function submitTask(input: SubmitTaskInput): Promise<AgentRunRecord> {
     const instruction = input.instruction.trim();
 
@@ -182,11 +313,11 @@ export async function createPersistentRuntimeService(
       result: null
     };
 
-    await createStoredRun(run);
-    enqueueRun(run);
+    const storedRun = await createPersistedRun(run);
+    enqueueRun(storedRun);
     scheduleProcessing();
 
-    return cloneRunRecord(run);
+    return cloneRunRecord(storedRun);
   }
 
   async function resolveApprovalGate(input: ResolveApprovalGateInput): Promise<AgentRunRecord> {
@@ -260,17 +391,17 @@ export async function createPersistentRuntimeService(
       })
     });
 
-    await updateStoredRun(updatedRun);
+    const persistedRun = await updatePersistedRun(updatedRun);
 
     if (nextStatus === "pending") {
-      if (!queue.includes(updatedRun.id)) {
-        enqueueRun(updatedRun);
+      if (!queue.includes(persistedRun.id)) {
+        enqueueRun(persistedRun);
       }
 
       scheduleProcessing();
     }
 
-    return cloneRunRecord(updatedRun);
+    return cloneRunRecord(persistedRun);
   }
 
   function getRun(id: string): AgentRunRecord | null {
@@ -377,7 +508,7 @@ export async function createPersistentRuntimeService(
       }
 
       if (run.status === "running") {
-        await updateStoredRun({
+        await updatePersistedRun({
           ...normalizeRunRecord(run),
           status: "failed",
           completedAt: recoveredAt,
@@ -484,7 +615,7 @@ export async function createPersistentRuntimeService(
                   contextAssembler: options.contextAssembler,
                   executeRun,
                   persistRun: async (updatedRun) => {
-                    await updateStoredRun(normalizeRunRecord(updatedRun));
+                    await updatePersistedRun(normalizeRunRecord(updatedRun));
                   },
                   getRuntimeStatus: () => getStatus()
                 })
@@ -494,7 +625,7 @@ export async function createPersistentRuntimeService(
                   contextAssembler: options.contextAssembler,
                   executeRun,
                   persistRun: async (updatedRun) => {
-                    await updateStoredRun(normalizeRunRecord(updatedRun));
+                    await updatePersistedRun(normalizeRunRecord(updatedRun));
                   },
                   getRuntimeStatus: () => getStatus()
                 });
@@ -516,7 +647,7 @@ export async function createPersistentRuntimeService(
                 }
               });
 
-              await updateStoredRun(pausedRun);
+              await updatePersistedRun(pausedRun);
               rootTrace?.annotate({
                 ...buildRunTraceMetadata(pausedRun),
                 finalStatus: pausedRun.status
@@ -556,7 +687,7 @@ export async function createPersistentRuntimeService(
               }
             });
 
-            await updateStoredRun(completedRun);
+            await updatePersistedRun(completedRun);
             rootTrace?.annotate({
               ...buildRunTraceMetadata(completedRun),
               finalStatus: completedRun.status,
@@ -606,7 +737,7 @@ export async function createPersistentRuntimeService(
               result: null
             });
 
-            await updateStoredRun(nextRun);
+            await updatePersistedRun(nextRun);
             rootTrace?.annotate({
               ...buildRunTraceMetadata(nextRun)
             });
@@ -755,6 +886,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
       updatedAt: controlPlane?.updatedAt ?? run.completedAt ?? run.startedAt ?? run.createdAt,
       lastFailureReason: run.error?.message ?? null
     }),
+    externalSync: normalizeExternalSyncState(run.externalSync),
     rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
   };
@@ -797,6 +929,7 @@ function normalizeRunProject(
     kind: project.kind === "local" ? "local" : "live",
     environment: project.environment?.trim() ? project.environment.trim() : null,
     description: project.description?.trim() ? project.description.trim() : null,
+    links: normalizeProjectLinks(project.links),
     folder: project.folder
       ? {
           name: project.folder.name?.trim() ? project.folder.name.trim() : null,
@@ -813,6 +946,22 @@ function normalizeRunProject(
         }
       : null
   };
+}
+
+function prepareRunForExternalSync(run: AgentRunRecord): AgentRunRecord {
+  const normalized = normalizeRunRecord(run);
+
+  return normalizeRunRecord({
+    ...normalized,
+    externalSync: reconcileExternalSyncState(normalized)
+  });
+}
+
+function didExternalSyncStateChange(
+  previous: AgentRunRecord["externalSync"],
+  next: AgentRunRecord["externalSync"]
+) {
+  return JSON.stringify(normalizeExternalSyncState(previous)) !== JSON.stringify(normalizeExternalSyncState(next));
 }
 
 function normalizeRunContextInput(
