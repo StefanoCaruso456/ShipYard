@@ -174,6 +174,7 @@ function toLangSmithRunType(spanType: TraceSpanType) {
     case "tool":
     case "validation":
     case "rollback":
+    case "sync":
       return "tool";
     default:
       return "chain";

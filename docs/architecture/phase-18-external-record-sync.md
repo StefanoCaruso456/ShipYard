@@ -9,9 +9,11 @@ that lesson while keeping the control plane as the actual source of truth.
 
 ## What We Build
 
-- stage progress sync to an external record system
-- child work-item sync for stories or stages
-- approval, blocker, and completion sync
+- a typed outbound sync outbox on each run
+- a first external mirror provider backed by a file store
+- stage progress sync for run, phase, story, and task records
+- child work-item sync for phase, story, and task hierarchy
+- approval, blocker, retry, failure, and completion sync
 - PR and deploy link sync
 - idempotent retry-safe sync behavior
 
@@ -23,7 +25,7 @@ External records make the system easier to adopt operationally.
 
 ## How It Works
 
-Typed runtime events produce outbound sync actions.
+Typed runtime events and control-plane state produce outbound sync actions.
 
 Those actions should be:
 
@@ -34,6 +36,9 @@ Those actions should be:
 
 The external system mirrors state. It does not invent it.
 
+The first provider uses a file-backed external record mirror so Shipyard can prove the integration
+contract before binding to Linear, Jira, or another third-party system.
+
 ## Outcome
 
 After this phase:
@@ -41,6 +46,7 @@ After this phase:
 - a run can be followed from outside the runtime UI
 - PR and deploy links stay attached to the work record
 - retries and resumes do not create duplicate external history
+- the runtime can expose mirrored parent/child work items and their update history through the API
 
 ## What This Phase Does Not Do
 
@@ -53,3 +59,15 @@ It only mirrors runtime progression into operator-facing record systems.
 - external progress updates are consistent with runtime state
 - sync actions are idempotent across retries and resumes
 - PR and deploy references remain attached to the correct run or work item
+
+## Architecture
+
+- typed external sync contracts live in `packages/agent-core/src/runtime/types.ts`
+- sync-action derivation and dedupe live in `packages/agent-core/src/runtime/externalRecordSync.ts`
+- runtime persistence and sync orchestration live in `packages/agent-core/src/runtime/createPersistentRuntimeService.ts`
+- the file-backed mirror provider lives in `apps/server/src/runtime/createFileExternalRecordSyncService.ts`
+- runtime APIs expose sync state and mirrored records in `apps/server/src/routes/runtime.ts`
+
+## Status
+
+Complete

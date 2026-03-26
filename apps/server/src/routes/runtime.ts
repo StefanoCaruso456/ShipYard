@@ -5,7 +5,9 @@ import type {
   AgentRunRecord,
   AgentRole,
   ContextAssembler,
+  ExternalRecordEntityKind,
   PersistentAgentRuntimeService,
+  RunProjectLinkInput,
   RepoToolRequest,
   SubmitTaskInput,
   TraceService,
@@ -26,6 +28,7 @@ import {
   type AudioTranscriptionConfig,
   type createAudioTranscriber
 } from "../runtime/createAudioTranscriber";
+import type { createFileExternalRecordSyncService } from "../runtime/createFileExternalRecordSyncService";
 
 type RuntimeTaskRequest = Request & {
   files?: Express.Multer.File[];
@@ -56,14 +59,16 @@ export function registerRuntimeRoutes(
   audioTranscriber: ReturnType<typeof createAudioTranscriber>,
   contextAssembler?: ContextAssembler,
   traceService?: TraceService,
-  repoBranchService?: ReturnType<typeof createRepoBranchService>
+  repoBranchService?: ReturnType<typeof createRepoBranchService>,
+  externalRecordSync?: ReturnType<typeof createFileExternalRecordSyncService>
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
       ...runtimeService.getStatus(),
       model: serializeOpenAIConfig(openAI),
       audioTranscription: serializeAudioTranscriptionConfig(audioTranscriber.config),
-      observability: traceService?.status ?? null
+      observability: traceService?.status ?? null,
+      externalRecordSync: externalRecordSync?.descriptor ?? null
     });
   });
 
@@ -307,6 +312,72 @@ export function registerRuntimeRoutes(
       runId: request.params.id,
       observability: traceService.status,
       trace
+    });
+  });
+
+  app.get("/api/runtime/external-records", async (_request, response) => {
+    if (!externalRecordSync) {
+      response.status(503).json({
+        error: "External record sync is not available."
+      });
+      return;
+    }
+
+    const records = await externalRecordSync.listRecords();
+
+    response.json({
+      provider: externalRecordSync.descriptor,
+      total: records.length,
+      records
+    });
+  });
+
+  app.get("/api/runtime/external-records/:id", async (request, response) => {
+    if (!externalRecordSync) {
+      response.status(503).json({
+        error: "External record sync is not available."
+      });
+      return;
+    }
+
+    const record = await externalRecordSync.getRecord(request.params.id);
+
+    if (!record) {
+      response.status(404).json({
+        error: `External record ${request.params.id} not found.`
+      });
+      return;
+    }
+
+    response.json({
+      provider: externalRecordSync.descriptor,
+      record
+    });
+  });
+
+  app.get("/api/runtime/tasks/:id/external-records", async (request, response) => {
+    if (!externalRecordSync) {
+      response.status(503).json({
+        error: "External record sync is not available."
+      });
+      return;
+    }
+
+    const task = runtimeService.getRun(request.params.id);
+
+    if (!task) {
+      response.status(404).json({
+        error: `Task ${request.params.id} not found.`
+      });
+      return;
+    }
+
+    const records = await externalRecordSync.listRecords();
+
+    response.json({
+      provider: externalRecordSync.descriptor,
+      runId: task.id,
+      records: records.filter((record) => record.runId === task.id)
     });
   });
 
@@ -582,6 +653,7 @@ function serializeRun(run: AgentRunRecord) {
     phaseExecution: run.phaseExecution ?? null,
     controlPlane: run.controlPlane ?? null,
     rebuild: run.rebuild ?? null,
+    externalSync: run.externalSync ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
     operatorView: deriveOperatorRunView(run),
@@ -624,6 +696,11 @@ function parseProjectInput(
   }
 
   const folderInput = candidate.folder;
+  const links = parseProjectLinks(candidate.links);
+
+  if ("error" in links) {
+    return links;
+  }
 
   if (
     folderInput !== undefined &&
@@ -706,9 +783,97 @@ function parseProjectInput(
         typeof candidate.description === "string" && candidate.description.trim()
           ? candidate.description.trim()
           : null,
+      links: links.value,
       folder: folder.value
     }
   };
+}
+
+function parseProjectLinks(
+  value: unknown
+): { value: RunProjectLinkInput[] } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: []
+    };
+  }
+
+  if (!Array.isArray(value)) {
+    return {
+      error: "project.links must be an array when provided."
+    };
+  }
+
+  const links: RunProjectLinkInput[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return {
+        error: "Each project link must be an object."
+      };
+    }
+
+    const candidate = item as Record<string, unknown>;
+
+    if (candidate.kind !== "pull_request" && candidate.kind !== "deployment") {
+      return {
+        error: "project.links[].kind must be pull_request or deployment."
+      };
+    }
+
+    if (typeof candidate.url !== "string" || !candidate.url.trim()) {
+      return {
+        error: "project.links[].url must be a non-empty string."
+      };
+    }
+
+    const entityKind = parseExternalRecordEntityKind(candidate.entityKind);
+
+    if (candidate.entityKind !== undefined && entityKind === null) {
+      return {
+        error: "project.links[].entityKind must be run, phase, story, or task when provided."
+      };
+    }
+
+    if (
+      candidate.entityId !== undefined &&
+      candidate.entityId !== null &&
+      typeof candidate.entityId !== "string"
+    ) {
+      return {
+        error: "project.links[].entityId must be a string when provided."
+      };
+    }
+
+    links.push({
+      id: typeof candidate.id === "string" && candidate.id.trim() ? candidate.id.trim() : null,
+      kind: candidate.kind,
+      url: candidate.url.trim(),
+      title:
+        typeof candidate.title === "string" && candidate.title.trim()
+          ? candidate.title.trim()
+          : null,
+      provider:
+        typeof candidate.provider === "string" && candidate.provider.trim()
+          ? candidate.provider.trim()
+          : null,
+      entityKind: entityKind ?? "run",
+      entityId:
+        typeof candidate.entityId === "string" && candidate.entityId.trim()
+          ? candidate.entityId.trim()
+          : null
+    });
+  }
+
+  return {
+    value: links
+  };
+}
+
+function parseExternalRecordEntityKind(value: unknown): ExternalRecordEntityKind | null {
+  return value === "run" || value === "phase" || value === "story" || value === "task"
+    ? value
+    : null;
 }
 
 function parseUnknownJson(value: unknown) {

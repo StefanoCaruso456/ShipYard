@@ -84,6 +84,11 @@ export {
   recordTaskStarted,
   syncControlPlaneState
 } from "./runtime/controlPlane";
+export {
+  normalizeExternalSyncState,
+  normalizeProjectLinks,
+  reconcileExternalSyncState
+} from "./runtime/externalRecordSync";
 export { deriveOperatorRunView } from "./runtime/operatorView";
 export {
   executeOrchestrationLoop,
@@ -204,6 +209,25 @@ export type {
   ExternalContextFormat,
   ExternalContextInput,
   ExternalContextKind,
+  ExternalRecordEntityKind,
+  ExternalRecordLink,
+  ExternalRecordLinkKind,
+  ExternalRecordMirror,
+  ExternalRecordMirrorDetail,
+  ExternalRecordProviderId,
+  ExternalRecordStatus,
+  ExternalRecordSyncService,
+  ExternalRecordSyncServiceDescriptor,
+  ExternalRecordUpdate,
+  ExternalSyncAction,
+  ExternalSyncActionKind,
+  ExternalSyncActionPayload,
+  ExternalSyncActionStatus,
+  ExternalSyncAppendUpdatePayload,
+  ExternalSyncAttachLinkPayload,
+  ExternalSyncState,
+  ExternalSyncUpsertRecordPayload,
+  ExternalSyncUpdateKind,
   OrchestrationAction,
   OrchestrationState,
   OrchestrationStatus,
@@ -241,6 +265,7 @@ export type {
   RebuildTargetInput,
   RunAttachment,
   RunAttachmentKind,
+  RunProjectLinkInput,
   RepoInspectionToolRequest,
   RepoInspectionToolResult,
   RepoMutationToolRequest,

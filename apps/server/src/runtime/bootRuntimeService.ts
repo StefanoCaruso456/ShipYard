@@ -16,6 +16,7 @@ import {
   createAudioTranscriber,
   resolveAudioTranscriptionConfig
 } from "./createAudioTranscriber";
+import { createFileExternalRecordSyncService } from "./createFileExternalRecordSyncService";
 import { createRepoBranchService } from "./createRepoBranchService";
 import { createTraceService } from "../observability/createTraceService";
 import {
@@ -36,6 +37,8 @@ export type BootedRuntimeService = {
   repoBranchService: ReturnType<typeof createRepoBranchService>;
   traceService: ReturnType<typeof createTraceService>;
   traceLogPath: string;
+  externalRecordSync: ReturnType<typeof createFileExternalRecordSyncService>;
+  externalRecordLogPath: string;
 };
 
 export type RuntimeStoreDescriptor = {
@@ -55,6 +58,10 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const traceService = createTraceService({
     logPath: traceLogPath
   });
+  const externalRecordLogPath = resolveExternalRecordLogPath(rootDir);
+  const externalRecordSync = createFileExternalRecordSyncService({
+    filePath: externalRecordLogPath
+  });
   const repoBranchService = createRepoBranchService({
     rootDir
   });
@@ -73,6 +80,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
       contextAssembler,
       store,
       traceService,
+      externalRecordSync,
       executeRun: createRuntimeExecutor({
         openAI,
         repoToolset
@@ -85,7 +93,9 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
     runtimeStore,
     repoBranchService,
     traceService,
-    traceLogPath
+    traceLogPath,
+    externalRecordSync,
+    externalRecordLogPath
   };
 }
 
@@ -180,4 +190,18 @@ function resolveTraceLogPath(rootDir: string, env: NodeJS.ProcessEnv = process.e
   }
 
   return path.resolve(rootDir, ".shipyard/runtime/traces.jsonl");
+}
+
+function resolveExternalRecordLogPath(rootDir: string, env: NodeJS.ProcessEnv = process.env) {
+  const configuredPath = env.SHIPYARD_EXTERNAL_RECORD_STATE_PATH?.trim();
+
+  if (configuredPath) {
+    return path.resolve(configuredPath);
+  }
+
+  if (env.NODE_ENV === "production") {
+    return path.resolve("/tmp/shipyard/runtime/external-records.json");
+  }
+
+  return path.resolve(rootDir, ".shipyard/runtime/external-records.json");
 }

@@ -17,6 +17,7 @@ import {
 } from "./runtime/bootRuntimeService";
 import type { AudioTranscriptionConfig } from "./runtime/createAudioTranscriber";
 import type { OpenAIExecutorConfig } from "./runtime/createOpenAIExecutor";
+import type { createFileExternalRecordSyncService } from "./runtime/createFileExternalRecordSyncService";
 import type { createRepoBranchService } from "./runtime/createRepoBranchService";
 
 type RuntimeBootState = {
@@ -30,6 +31,7 @@ type RuntimeBootState = {
   traceService: TraceService | null;
   runtimeStore: RuntimeStoreDescriptor | null;
   repoBranchService: ReturnType<typeof createRepoBranchService> | null;
+  externalRecordSync: ReturnType<typeof createFileExternalRecordSyncService> | null;
 };
 
 const host = process.env.HOST?.trim() || "0.0.0.0";
@@ -47,7 +49,8 @@ async function startServer() {
     audioTranscription: null,
     traceService: null,
     runtimeStore: null,
-    repoBranchService: null
+    repoBranchService: null,
+    externalRecordSync: null
   };
   const app = express();
 
@@ -123,7 +126,9 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       runtimeStore,
       repoBranchService,
       traceService,
-      traceLogPath
+      traceLogPath,
+      externalRecordSync,
+      externalRecordLogPath
     } =
       await bootRuntimeService();
 
@@ -136,6 +141,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
     bootState.traceService = traceService;
     bootState.runtimeStore = runtimeStore;
     bootState.repoBranchService = repoBranchService;
+    bootState.externalRecordSync = externalRecordSync;
 
     registerRuntimeRoutes(
       app,
@@ -144,7 +150,8 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       audioTranscriber,
       contextAssembler,
       traceService,
-      repoBranchService
+      repoBranchService,
+      externalRecordSync
     );
 
     console.log("Shipyard runtime boot complete.", {
@@ -152,6 +159,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       runtimeStatePath,
       runtimeStore,
       traceLogPath,
+      externalRecordLogPath,
       skillId: runtimeService.instructionRuntime.skill.meta.id,
       openAIConfigured: openAI.configured,
       modelId: openAI.modelId
@@ -242,6 +250,7 @@ function createHealthPayload(bootState: RuntimeBootState) {
       apiKeySource: bootState.openAI.apiKeySource
     },
     observability: bootState.traceService?.status ?? null,
+    externalRecordSync: bootState.externalRecordSync?.descriptor ?? null,
     audioTranscription: {
       provider: bootState.audioTranscription.provider,
       configured: bootState.audioTranscription.configured,
@@ -268,6 +277,7 @@ function isRuntimeReady(
   openAI: OpenAIExecutorConfig;
   audioTranscription: AudioTranscriptionConfig;
   traceService: TraceService;
+  externalRecordSync: ReturnType<typeof createFileExternalRecordSyncService>;
 } {
   return (
     bootState.status === "ready" &&
@@ -275,7 +285,8 @@ function isRuntimeReady(
     bootState.contextAssembler !== null &&
     bootState.openAI !== null &&
     bootState.audioTranscription !== null &&
-    bootState.traceService !== null
+    bootState.traceService !== null &&
+    bootState.externalRecordSync !== null
   );
 }
 

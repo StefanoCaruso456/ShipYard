@@ -24,6 +24,7 @@ export type TraceSpanType =
   | "validation"
   | "retry"
   | "rollback"
+  | "sync"
   | "model";
 
 export type TraceSpanStatus = "running" | "completed" | "failed";
