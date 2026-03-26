@@ -3,6 +3,7 @@ import { useState } from "react";
 import type {
   RuntimeOperatorApprovalDecision,
   RuntimeOperatorApprovalGate,
+  RuntimeOperatorEvaluationBottleneck,
   RuntimeOperatorStageStatus,
   RuntimeOperatorView
 } from "../types";
@@ -162,6 +163,151 @@ export function OperatorRunOverview({
               </div>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {operatorView.delivery ? (
+        <section className="operator-overview__delivery">
+          <div className="operator-overview__section-head">
+            <strong>Delivery summary</strong>
+            <span>{humanizeDeliveryStatus(operatorView.delivery.status)}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            <article className="operator-overview__detail-card">
+              <div className="operator-overview__journal-head">
+                <strong>{operatorView.delivery.headline}</strong>
+                <span>
+                  {operatorView.delivery.updatedAt
+                    ? formatDateTime(operatorView.delivery.updatedAt)
+                    : "Pending"}
+                </span>
+              </div>
+              <div className="operator-overview__meta">
+                <span>{operatorView.delivery.outputs.length} outputs</span>
+                <span>{operatorView.delivery.links.length} links</span>
+                <span>{operatorView.delivery.sourceArtifactIds.length} summary artifacts</span>
+              </div>
+            </article>
+
+            {operatorView.delivery.outputs.length > 0 ? (
+              <article className="operator-overview__detail-card">
+                <span className="operator-overview__eyebrow">Outputs</span>
+                <div className="operator-overview__meta">
+                  {operatorView.delivery.outputs.map((output) => (
+                    <span key={output}>{output}</span>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+
+            {operatorView.delivery.links.length > 0 ? (
+              <article className="operator-overview__detail-card">
+                <span className="operator-overview__eyebrow">Links</span>
+                <div className="operator-overview__link-list">
+                  {operatorView.delivery.links.map((link) => (
+                    <a
+                      key={`${link.kind}:${link.url}`}
+                      className="operator-overview__link"
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+
+            {operatorView.delivery.risks.length > 0 ? (
+              <article className="operator-overview__detail-card">
+                <span className="operator-overview__eyebrow">Risks</span>
+                <div className="operator-overview__meta">
+                  {operatorView.delivery.risks.map((risk) => (
+                    <span key={risk}>{risk}</span>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+
+            {operatorView.delivery.followUps.length > 0 ? (
+              <article className="operator-overview__detail-card">
+                <span className="operator-overview__eyebrow">Follow-ups</span>
+                <div className="operator-overview__meta">
+                  {operatorView.delivery.followUps.map((followUp) => (
+                    <span key={followUp}>{followUp}</span>
+                  ))}
+                </div>
+              </article>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {operatorView.evaluation ? (
+        <section className="operator-overview__evaluation">
+          <div className="operator-overview__section-head">
+            <strong>Operator evaluation</strong>
+            <span>{operatorView.evaluation.failurePatterns.length} failure patterns</span>
+          </div>
+
+          <div className="operator-overview__grid">
+            <article className="operator-overview__card">
+              <span className="operator-overview__eyebrow">Scorecard</span>
+              <strong>{operatorView.evaluation.scorecard.retryCount} retries</strong>
+              <p>
+                {operatorView.evaluation.scorecard.openBlockerCount} open blockers ·{" "}
+                {operatorView.evaluation.scorecard.openConflictCount} open conflicts
+              </p>
+            </article>
+
+            <article className="operator-overview__card">
+              <span className="operator-overview__eyebrow">Approvals</span>
+              <strong>{operatorView.evaluation.scorecard.approvalDecisionCount} decisions</strong>
+              <p>
+                {operatorView.evaluation.scorecard.approvalGateCount} gates ·{" "}
+                {operatorView.evaluation.scorecard.interventionCount} interventions
+              </p>
+            </article>
+
+            <article className="operator-overview__card">
+              <span className="operator-overview__eyebrow">Governance</span>
+              <strong>{operatorView.evaluation.scorecard.mergeDecisionCount} merge decisions</strong>
+              <p>
+                {operatorView.evaluation.scorecard.conflictCount} conflicts ·{" "}
+                {operatorView.evaluation.scorecard.failureReportCount} failure reports
+              </p>
+            </article>
+          </div>
+
+          {operatorView.evaluation.bottlenecks.length > 0 ? (
+            <div className="operator-overview__detail-list">
+              {operatorView.evaluation.bottlenecks.map((bottleneck) => (
+                <article
+                  key={bottleneck.id}
+                  className={`operator-overview__detail-card operator-overview__detail-card--${bottleneck.severity}`}
+                >
+                  <div className="operator-overview__journal-head">
+                    <strong>{bottleneck.label}</strong>
+                    <span>{renderBottleneckMetric(bottleneck)}</span>
+                  </div>
+                  <p>{bottleneck.detail}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
+
+          {operatorView.evaluation.failurePatterns.length > 0 ? (
+            <article className="operator-overview__detail-card">
+              <span className="operator-overview__eyebrow">Failure patterns</span>
+              <div className="operator-overview__meta">
+                {operatorView.evaluation.failurePatterns.map((pattern) => (
+                  <span key={pattern}>{pattern}</span>
+                ))}
+              </div>
+            </article>
+          ) : null}
         </section>
       ) : null}
 
@@ -489,6 +635,25 @@ function humanizePacketStatus(status: string) {
     default:
       return status;
   }
+}
+
+function humanizeDeliveryStatus(status: "completed" | "failed" | "in_progress") {
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    default:
+      return "In progress";
+  }
+}
+
+function renderBottleneckMetric(bottleneck: RuntimeOperatorEvaluationBottleneck) {
+  if (bottleneck.metric === 0) {
+    return "Clear";
+  }
+
+  return `${bottleneck.metric}`;
 }
 
 function humanizeConflictStatus(status: "open" | "resolved") {

@@ -105,6 +105,7 @@ export {
   syncFactoryRunState
 } from "./runtime/factoryMode";
 export { deriveOperatorRunView } from "./runtime/operatorView";
+export { deriveRunCloseout } from "./runtime/runCloseout";
 export {
   executeOrchestrationLoop,
   planNextStep,
@@ -203,10 +204,13 @@ export type {
   ControlPlaneConflict,
   ControlPlaneConflictKind,
   ControlPlaneConflictStatus,
+  ControlPlaneDeliverySummaryArtifactPayload,
+  ControlPlaneDeliverySummaryLink,
   ControlPlaneDecomposedTask,
   ControlPlaneDelegationBriefArtifactPayload,
   ControlPlaneEntityKind,
   ControlPlaneEntityStatus,
+  ControlPlaneFailureReportArtifactPayload,
   ControlPlaneHandoff,
   ControlPlaneHandoffStatus,
   ControlPlaneIntervention,
@@ -226,6 +230,7 @@ export type {
   ControlPlaneTransition,
   ControlPlaneValidationState,
   ControlPlaneWorkPacket,
+  DeliverySummaryLinkKind,
   ExecutorStepResult,
   ExecuteRun,
   FactoryArtifact,
@@ -271,7 +276,12 @@ export type {
   OperatorRunApprovalGate,
   OperatorRunConflict,
   OperatorRunCurrentWork,
+  OperatorRunDeliveryLink,
+  OperatorRunDeliverySummary,
   OperatorRunDelegationPacket,
+  OperatorRunEvaluation,
+  OperatorRunEvaluationBottleneck,
+  OperatorRunEvaluationScorecard,
   OperatorRunJournalEntry,
   OperatorRunMergeDecision,
   OperatorRunOwner,

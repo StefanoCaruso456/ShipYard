@@ -508,6 +508,29 @@ export type RuntimeTraceRunLog = {
       currentEntityKind: string | null;
       currentEntityId: string | null;
     } | null;
+    delivery: {
+      status: string | null;
+      headline: string | null;
+      outputCount: number;
+      linkCount: number;
+      riskCount: number;
+      followUpCount: number;
+      sourceArtifactCount: number;
+    } | null;
+    evaluation: {
+      blockerCount: number;
+      openBlockerCount: number;
+      retryCount: number;
+      approvalGateCount: number;
+      approvalDecisionCount: number;
+      interventionCount: number;
+      conflictCount: number;
+      openConflictCount: number;
+      mergeDecisionCount: number;
+      failureReportCount: number;
+      failurePatternCount: number;
+      bottlenecks: string[];
+    } | null;
   };
   spans: RuntimeTraceSpan[];
 };
@@ -692,6 +715,51 @@ export type RuntimeOperatorMergeDecision = {
   notes: string | null;
 };
 
+export type RuntimeOperatorDeliveryLink = {
+  kind: string;
+  label: string;
+  url: string;
+  provider: string | null;
+};
+
+export type RuntimeOperatorDeliverySummary = {
+  status: "completed" | "failed" | "in_progress";
+  headline: string;
+  outputs: string[];
+  links: RuntimeOperatorDeliveryLink[];
+  risks: string[];
+  followUps: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type RuntimeOperatorEvaluationScorecard = {
+  blockerCount: number;
+  openBlockerCount: number;
+  retryCount: number;
+  approvalGateCount: number;
+  approvalDecisionCount: number;
+  interventionCount: number;
+  conflictCount: number;
+  openConflictCount: number;
+  mergeDecisionCount: number;
+  failureReportCount: number;
+};
+
+export type RuntimeOperatorEvaluationBottleneck = {
+  id: string;
+  label: string;
+  detail: string;
+  severity: "info" | "warning" | "danger";
+  metric: number;
+};
+
+export type RuntimeOperatorEvaluation = {
+  scorecard: RuntimeOperatorEvaluationScorecard;
+  bottlenecks: RuntimeOperatorEvaluationBottleneck[];
+  failurePatterns: string[];
+};
+
 export type RuntimeOperatorPlanningArtifact = {
   id: string;
   kind: string;
@@ -791,6 +859,8 @@ export type RuntimeOperatorView = {
   blockers: RuntimeOperatorBlocker[];
   conflicts: RuntimeOperatorConflict[];
   mergeDecisions: RuntimeOperatorMergeDecision[];
+  delivery: RuntimeOperatorDeliverySummary | null;
+  evaluation: RuntimeOperatorEvaluation | null;
   planningArtifacts: RuntimeOperatorPlanningArtifact[];
   delegationPackets: RuntimeOperatorDelegationPacket[];
   journal: RuntimeOperatorJournalEntry[];

@@ -30,6 +30,7 @@ import {
   resolvePhaseExecutionApproval
 } from "./phaseExecution";
 import { createRebuildState, normalizeRebuildState } from "./rebuildState";
+import { deriveRunCloseout } from "./runCloseout";
 import { normalizeRunContextInputValue } from "./schemas";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import {
@@ -1235,6 +1236,8 @@ function extractChangedFilesFromToolResult(toolResult: AgentRunResult["toolResul
 }
 
 function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
+  const closeout = deriveRunCloseout(run);
+
   return {
     threadId: run.threadId,
     parentRunId: run.parentRunId,
@@ -1259,6 +1262,8 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     ...buildOrchestrationTraceMetadata(run.orchestration),
     ...buildPhaseExecutionTraceMetadata(run.phaseExecution),
     ...buildControlPlaneTraceMetadata(run.controlPlane),
+    ...buildDeliveryTraceMetadata(closeout.delivery),
+    ...buildEvaluationTraceMetadata(closeout.evaluation),
     ...buildRebuildTraceMetadata(run.rebuild)
   };
 }
@@ -1426,6 +1431,66 @@ function buildControlPlaneTraceMetadata(controlPlane: AgentRunRecord["controlPla
             : null,
     controlPlaneCurrentEntityId:
       controlPlane.current.taskId ?? controlPlane.current.storyId ?? controlPlane.current.phaseId ?? null
+  };
+}
+
+function buildDeliveryTraceMetadata(delivery: ReturnType<typeof deriveRunCloseout>["delivery"]): TraceMetadata {
+  if (!delivery) {
+    return {
+      deliveryStatus: null,
+      deliveryHeadline: null,
+      deliveryOutputCount: null,
+      deliveryLinkCount: null,
+      deliveryRiskCount: null,
+      deliveryFollowUpCount: null,
+      deliverySourceArtifactCount: null
+    };
+  }
+
+  return {
+    deliveryStatus: delivery.status,
+    deliveryHeadline: delivery.headline,
+    deliveryOutputCount: delivery.outputs.length,
+    deliveryLinkCount: delivery.links.length,
+    deliveryRiskCount: delivery.risks.length,
+    deliveryFollowUpCount: delivery.followUps.length,
+    deliverySourceArtifactCount: delivery.sourceArtifactIds.length
+  };
+}
+
+function buildEvaluationTraceMetadata(
+  evaluation: ReturnType<typeof deriveRunCloseout>["evaluation"]
+): TraceMetadata {
+  if (!evaluation) {
+    return {
+      evaluationBlockerCount: null,
+      evaluationOpenBlockerCount: null,
+      evaluationRetryCount: null,
+      evaluationApprovalGateCount: null,
+      evaluationApprovalDecisionCount: null,
+      evaluationInterventionCount: null,
+      evaluationConflictCount: null,
+      evaluationOpenConflictCount: null,
+      evaluationMergeDecisionCount: null,
+      evaluationFailureReportCount: null,
+      evaluationFailurePatternCount: null,
+      evaluationBottlenecks: []
+    };
+  }
+
+  return {
+    evaluationBlockerCount: evaluation.scorecard.blockerCount,
+    evaluationOpenBlockerCount: evaluation.scorecard.openBlockerCount,
+    evaluationRetryCount: evaluation.scorecard.retryCount,
+    evaluationApprovalGateCount: evaluation.scorecard.approvalGateCount,
+    evaluationApprovalDecisionCount: evaluation.scorecard.approvalDecisionCount,
+    evaluationInterventionCount: evaluation.scorecard.interventionCount,
+    evaluationConflictCount: evaluation.scorecard.conflictCount,
+    evaluationOpenConflictCount: evaluation.scorecard.openConflictCount,
+    evaluationMergeDecisionCount: evaluation.scorecard.mergeDecisionCount,
+    evaluationFailureReportCount: evaluation.scorecard.failureReportCount,
+    evaluationFailurePatternCount: evaluation.failurePatterns.length,
+    evaluationBottlenecks: evaluation.bottlenecks.map((item) => item.label)
   };
 }
 

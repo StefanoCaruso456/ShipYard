@@ -17,6 +17,7 @@ structured delivery summary plus operator-facing evaluation data that helps impr
 - operator scorecards for blockers, retries, approvals, and interventions
 - bottleneck and failure-pattern reporting
 - summary artifacts suitable for post-run review
+- trace-visible delivery and evaluation metadata
 
 ## Why It Matters
 
@@ -27,7 +28,10 @@ Without evaluation, repeated failure modes stay invisible.
 
 ## How It Works
 
-Delivery summaries should be assembled from typed runtime evidence:
+Delivery summaries should be assembled from typed runtime evidence and stored as structured
+`delivery_summary` and `failure_report` payloads.
+
+The run-level closeout should then aggregate:
 
 - artifacts
 - handoffs
@@ -35,6 +39,13 @@ Delivery summaries should be assembled from typed runtime evidence:
 - interventions
 - validation outcomes
 - links to PRs and deployments
+
+The operator view and trace summary should both expose:
+
+- a delivery summary
+- a scorecard
+- bottlenecks
+- repeated failure patterns
 
 Evaluation should highlight patterns, not only replay logs.
 
@@ -57,3 +68,4 @@ It turns existing execution evidence into operational learning.
 - completed runs can produce a structured delivery summary
 - operator evaluation surfaces blocker and retry patterns
 - follow-up improvements can be identified without replaying traces manually
+- trace summaries expose the final closeout state alongside the control-plane state

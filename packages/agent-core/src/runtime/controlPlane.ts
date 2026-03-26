@@ -9,10 +9,13 @@ import type {
   ControlPlaneBlocker,
   ControlPlaneConflict,
   ControlPlaneConflictKind,
+  ControlPlaneDeliverySummaryArtifactPayload,
+  ControlPlaneDeliverySummaryLink,
   ControlPlaneDecomposedTask,
   ControlPlaneDelegationBriefArtifactPayload,
   ControlPlaneEntityKind,
   ControlPlaneEntityStatus,
+  ControlPlaneFailureReportArtifactPayload,
   ControlPlaneHandoff,
   ControlPlaneIntervention,
   ControlPlaneMergeDecision,
@@ -611,6 +614,28 @@ export function recordTaskCompleted(
     producerRole: "execution_subagent",
     producerId: taskNode.ownerId
   });
+  upsertArtifact(controlPlane, {
+    id: `artifact:task-summary:${task.id}`,
+    kind: "delivery_summary",
+    entityKind: "task",
+    entityId: task.id,
+    summary: result.summary,
+    createdAt: new Date().toISOString(),
+    producerRole: taskNode.ownerRole,
+    producerId: taskNode.ownerId,
+    payload: buildDeliverySummaryPayload({
+      controlPlane,
+      entityKind: "task",
+      entityId: task.id,
+      headline: result.summary,
+      outputs: [task.expectedOutcome, renderValidationSummary(validationResults)],
+      links: [],
+      followUps:
+        task.retryCount > 0
+          ? [`Watch for regression because ${task.id} required ${task.retryCount} retries.`]
+          : []
+    })
+  });
 
   if (task.retryCount > 0) {
     upsertIntervention(controlPlane, {
@@ -659,7 +684,14 @@ export function recordTaskFailed(
     summary: failureMessage,
     createdAt: new Date().toISOString(),
     producerRole: taskNode.ownerRole,
-    producerId: taskNode.ownerId
+    producerId: taskNode.ownerId,
+    payload: buildFailureReportPayload({
+      controlPlane,
+      entityKind: "task",
+      entityId: task.id,
+      headline: failureMessage,
+      validationResults
+    })
   });
 
   if (validationResults && validationResults.length > 0) {
@@ -703,7 +735,19 @@ export function recordStoryCompleted(
     summary: `Story ${story.title} completed.`,
     createdAt: new Date().toISOString(),
     producerRole: storyNode.ownerRole,
-    producerId: storyNode.ownerId
+    producerId: storyNode.ownerId,
+    payload: buildDeliverySummaryPayload({
+      controlPlane,
+      entityKind: "story",
+      entityId: story.id,
+      headline: `Story ${story.title} completed.`,
+      outputs: [...story.acceptanceCriteria, renderValidationSummary(validationResults)],
+      links: [],
+      followUps:
+        story.retryCount > 0
+          ? [`Review retry history for story ${story.id} before shipping adjacent work.`]
+          : []
+    })
   });
   upsertArtifact(controlPlane, {
     id: `artifact:story-validation:${story.id}`,
@@ -785,7 +829,14 @@ export function recordStoryFailed(
     summary,
     createdAt: new Date().toISOString(),
     producerRole: storyNode.ownerRole,
-    producerId: storyNode.ownerId
+    producerId: storyNode.ownerId,
+    payload: buildFailureReportPayload({
+      controlPlane,
+      entityKind: "story",
+      entityId: story.id,
+      headline: summary,
+      validationResults
+    })
   });
   upsertArtifact(controlPlane, {
     id: `artifact:story-validation:${story.id}`,
@@ -826,7 +877,16 @@ export function recordPhaseCompleted(
     summary: `Phase ${phase.name} completed.`,
     createdAt: new Date().toISOString(),
     producerRole: phaseNode.ownerRole,
-    producerId: phaseNode.ownerId
+    producerId: phaseNode.ownerId,
+    payload: buildDeliverySummaryPayload({
+      controlPlane,
+      entityKind: "phase",
+      entityId: phase.id,
+      headline: `Phase ${phase.name} completed.`,
+      outputs: [phase.description, renderValidationSummary(validationResults)],
+      links: [],
+      followUps: []
+    })
   });
   upsertArtifact(controlPlane, {
     id: `artifact:phase-validation:${phase.id}`,
@@ -881,7 +941,14 @@ export function recordPhaseFailed(
     summary,
     createdAt: new Date().toISOString(),
     producerRole: phaseNode.ownerRole,
-    producerId: phaseNode.ownerId
+    producerId: phaseNode.ownerId,
+    payload: buildFailureReportPayload({
+      controlPlane,
+      entityKind: "phase",
+      entityId: phase.id,
+      headline: summary,
+      validationResults
+    })
   });
   upsertArtifact(controlPlane, {
     id: `artifact:phase-validation:${phase.id}`,
@@ -892,6 +959,106 @@ export function recordPhaseFailed(
     createdAt: new Date().toISOString(),
     producerRole: phaseNode.ownerRole,
     producerId: phaseNode.ownerId
+  });
+}
+
+function buildDeliverySummaryPayload(input: {
+  controlPlane: ControlPlaneState;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  headline: string;
+  outputs: string[];
+  links: ControlPlaneDeliverySummaryLink[];
+  followUps: string[];
+}): ControlPlaneDeliverySummaryArtifactPayload {
+  return {
+    kind: "delivery_summary",
+    version: 1,
+    headline: input.headline,
+    outputs: uniqueStrings(input.outputs.filter((value) => value.trim().length > 0)).slice(0, 6),
+    links: dedupeDeliveryLinks(input.links).slice(0, 6),
+    risks: collectEntityRisks(input.controlPlane, input.entityKind, input.entityId),
+    followUps: uniqueStrings(input.followUps.filter((value) => value.trim().length > 0)).slice(0, 6)
+  };
+}
+
+function buildFailureReportPayload(input: {
+  controlPlane: ControlPlaneState;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  headline: string;
+  validationResults: ValidationGateResult[] | null | undefined;
+}): ControlPlaneFailureReportArtifactPayload {
+  return {
+    kind: "failure_report",
+    version: 1,
+    headline: input.headline,
+    risks: collectEntityRisks(input.controlPlane, input.entityKind, input.entityId),
+    followUps: collectEntityFollowUps(input.controlPlane, input.entityKind, input.entityId),
+    validationFailures: (input.validationResults ?? [])
+      .filter((result) => !result.success)
+      .map((result) => result.message)
+      .slice(0, 6)
+  };
+}
+
+function collectEntityRisks(
+  controlPlane: ControlPlaneState,
+  entityKind: ControlPlaneEntityKind,
+  entityId: string
+) {
+  return uniqueStrings(
+    [
+      ...controlPlane.blockers
+        .filter(
+          (blocker) =>
+            blocker.entityKind === entityKind &&
+            blocker.entityId === entityId &&
+            blocker.status === "open"
+        )
+        .map((blocker) => blocker.summary),
+      ...controlPlane.conflicts
+        .filter(
+          (conflict) =>
+            conflict.entityKind === entityKind &&
+            conflict.entityId === entityId &&
+            conflict.status === "open"
+        )
+        .map((conflict) => conflict.summary)
+    ].filter((value) => value.trim().length > 0)
+  ).slice(0, 6);
+}
+
+function collectEntityFollowUps(
+  controlPlane: ControlPlaneState,
+  entityKind: ControlPlaneEntityKind,
+  entityId: string
+) {
+  return uniqueStrings(
+    controlPlane.interventions
+      .filter(
+        (intervention) =>
+          intervention.entityKind === entityKind &&
+          intervention.entityId === entityId &&
+          intervention.resolvedAt === null
+      )
+      .map((intervention) => intervention.summary)
+      .filter((value) => value.trim().length > 0)
+  ).slice(0, 6);
+}
+
+function dedupeDeliveryLinks(links: ControlPlaneDeliverySummaryLink[]) {
+  const seen = new Set<string>();
+
+  return links.filter((link) => {
+    const key = `${link.kind}:${link.url}`;
+
+    if (!link.url.trim() || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
   });
 }
 
@@ -2133,6 +2300,34 @@ function summarizeArtifactPayloadForTrace(payload: ControlPlaneArtifact["payload
         acceptanceCriteria: previewStrings(payload.acceptanceCriteria),
         validationTargets: previewStrings(payload.validationTargets),
         dependencyIds: previewStrings(payload.dependencyIds)
+      } as TraceValue;
+    case "delivery_summary":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        headline: payload.headline,
+        outputs: previewStrings(payload.outputs),
+        links: payload.links.slice(0, TRACE_ARRAY_PREVIEW_LIMIT).map((link) => ({
+          kind: link.kind,
+          label: link.label,
+          provider: link.provider
+        })),
+        riskCount: payload.risks.length,
+        risks: previewStrings(payload.risks),
+        followUpCount: payload.followUps.length,
+        followUps: previewStrings(payload.followUps)
+      } as TraceValue;
+    case "failure_report":
+      return {
+        kind: payload.kind,
+        version: payload.version,
+        headline: payload.headline,
+        riskCount: payload.risks.length,
+        risks: previewStrings(payload.risks),
+        followUpCount: payload.followUps.length,
+        followUps: previewStrings(payload.followUps),
+        validationFailureCount: payload.validationFailures.length,
+        validationFailures: previewStrings(payload.validationFailures)
       } as TraceValue;
   }
 }
