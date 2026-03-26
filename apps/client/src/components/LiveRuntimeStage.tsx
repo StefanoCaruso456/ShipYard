@@ -1,5 +1,6 @@
 import type {
   RuntimeOperatorApprovalDecision,
+  RuntimeThreadFocusedRun,
   WorkspaceThread
 } from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
@@ -35,6 +36,7 @@ export function LiveRuntimeStage({
 
   const queuedFollowUps = liveRuntime.queuedFollowUps;
   const canSteer = thread.status === "running" || thread.status === "pending";
+  const factory = focusedRun.factory;
   const isActiveRunVisible =
     thread.status === "running" || thread.status === "pending" || thread.status === "paused";
   const runtimeMetaLabel =
@@ -102,6 +104,23 @@ export function LiveRuntimeStage({
             </div>
           ) : null}
 
+          {factory ? (
+            <div className="live-runtime-stage__factory-card">
+              <div className="live-runtime-stage__factory-head">
+                <strong>Factory Mode</strong>
+                <span>{humanizeFactoryStage(factory.currentStage)}</span>
+              </div>
+              <p>
+                {factory.appName} · {factory.stackLabel}
+              </p>
+              <div className="live-runtime-stage__meta">
+                <span>{factory.repositoryName}</span>
+                <span>{factory.deploymentProvider}</span>
+                {factory.workspacePath ? <span>{factory.workspacePath}</span> : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="live-runtime-stage__meta">
             {focusedRun.attachmentsCount > 0 ? (
               <span>
@@ -151,4 +170,17 @@ export function LiveRuntimeStage({
       ) : null}
     </section>
   );
+}
+
+function humanizeFactoryStage(stage: NonNullable<RuntimeThreadFocusedRun["factory"]>["currentStage"]) {
+  switch (stage) {
+    case "bootstrap":
+      return "Bootstrap";
+    case "implementation":
+      return "Implementation";
+    case "delivery":
+      return "Delivery";
+    default:
+      return "Intake";
+  }
 }

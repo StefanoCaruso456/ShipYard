@@ -81,6 +81,10 @@ function createRunFixture(): AgentRunRecord {
       description: "Live runtime project.",
       links: [
         {
+          kind: "repository",
+          url: "https://github.com/StefanoCaruso456/shipyard-runtime"
+        },
+        {
           kind: "pull_request",
           url: "https://github.com/StefanoCaruso456/ShipYard/pull/71",
           title: "Phase 17 restore"
@@ -176,6 +180,15 @@ test("reconcileExternalSyncState derives record, event, blocker, and link action
         action.kind === "append_update" &&
         action.payload.kind === "append_update" &&
         action.payload.updateKind === "blocker"
+    )
+  );
+  assert.ok(
+    externalSync.actions.some(
+      (action) =>
+        action.kind === "attach_link" &&
+        action.entityKind === "run" &&
+        action.payload.kind === "attach_link" &&
+        action.payload.link.kind === "repository"
     )
   );
   assert.ok(

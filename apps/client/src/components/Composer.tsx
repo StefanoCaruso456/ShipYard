@@ -6,13 +6,18 @@ import { buildComposerAttachments } from "../attachments";
 import type {
   ComposerAttachment,
   ComposerMode,
+  RuntimeFactoryComposerDraft,
   RuntimeThreadQueuedItem,
+  RuntimeWorkflowMode,
   WorkspaceProject
 } from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type ComposerProps = {
   project: WorkspaceProject | null;
+  backendConnected: boolean;
+  workflowMode: RuntimeWorkflowMode;
+  factoryDraft: RuntimeFactoryComposerDraft;
   composerMode: ComposerMode;
   composerValue: string;
   attachments: ComposerAttachment[];
@@ -27,6 +32,8 @@ type ComposerProps = {
   feedback: { tone: "success" | "danger" | "info"; text: string } | null;
   submitting: boolean;
   transcribingAudio: boolean;
+  onWorkflowModeChange: (mode: RuntimeWorkflowMode) => void;
+  onFactoryDraftChange: (draft: RuntimeFactoryComposerDraft) => void;
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onAttachmentsChange: (attachments: ComposerAttachment[]) => void;
@@ -37,6 +44,9 @@ type ComposerProps = {
 
 export function Composer({
   project,
+  backendConnected,
+  workflowMode,
+  factoryDraft,
   composerMode,
   composerValue,
   attachments,
@@ -45,6 +55,8 @@ export function Composer({
   feedback,
   submitting,
   transcribingAudio,
+  onWorkflowModeChange,
+  onFactoryDraftChange,
   onComposerModeChange,
   onComposerValueChange,
   onAttachmentsChange,
@@ -61,6 +73,8 @@ export function Composer({
   const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
   const [steerDrawerOpen, setSteerDrawerOpen] = useState(false);
   const steerEnabled = Boolean(steerMode);
+  const factoryModeSupported =
+    !steerEnabled && backendConnected && project?.kind === "live";
   const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
   const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
@@ -70,6 +84,8 @@ export function Composer({
         ? "Transcribing voice note..."
         : steerMode
           ? "Ask for follow-up changes"
+        : workflowMode === "factory"
+          ? "Describe the application you want Factory Mode to build..."
         : composerMode === "image"
           ? "Describe the image task..."
           : composerMode === "voice"
@@ -267,6 +283,33 @@ export function Composer({
       ) : null}
 
       <div className={`composer__field ${steerMode ? "composer__field--steer" : ""}`}>
+        {!steerMode ? (
+          <div className="composer__workflow-switcher">
+            <div className="composer__workflow-buttons">
+              <button
+                type="button"
+                className={`composer__workflow-button ${workflowMode === "standard" ? "is-active" : ""}`}
+                onClick={() => onWorkflowModeChange("standard")}
+              >
+                Task mode
+              </button>
+              <button
+                type="button"
+                className={`composer__workflow-button ${workflowMode === "factory" ? "is-active" : ""}`}
+                disabled={!factoryModeSupported && workflowMode !== "factory"}
+                onClick={() => onWorkflowModeChange("factory")}
+              >
+                Factory mode
+              </button>
+            </div>
+            <p className="composer__workflow-copy">
+              {workflowMode === "factory"
+                ? "Factory Mode creates an isolated greenfield workspace for a new app."
+                : "Task mode keeps working in the current project or thread."}
+            </p>
+          </div>
+        ) : null}
+
         {steerMode ? (
           <div className="composer__steer-window">
             <div className="composer__steer-window-copy">
@@ -373,6 +416,126 @@ export function Composer({
           </div>
         ) : (
           <>
+            {workflowMode === "factory" ? (
+              <div className="composer__factory-panel">
+                <div className="composer__factory-grid">
+                  <label className="composer__factory-field">
+                    <span>App name</span>
+                    <input
+                      type="text"
+                      value={factoryDraft.appName}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          appName: event.target.value
+                        })
+                      }
+                      placeholder="Acme Portal"
+                    />
+                  </label>
+                  <label className="composer__factory-field">
+                    <span>Repo owner</span>
+                    <input
+                      type="text"
+                      value={factoryDraft.repositoryOwner}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          repositoryOwner: event.target.value
+                        })
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="composer__factory-field">
+                    <span>Repo name</span>
+                    <input
+                      type="text"
+                      value={factoryDraft.repositoryName}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          repositoryName: event.target.value
+                        })
+                      }
+                      placeholder="acme-portal"
+                    />
+                  </label>
+                  <label className="composer__factory-field">
+                    <span>Stack</span>
+                    <select
+                      value={factoryDraft.stackTemplateId}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          stackTemplateId: event.target.value as RuntimeFactoryComposerDraft["stackTemplateId"]
+                        })
+                      }
+                    >
+                      <option value="nextjs_supabase_vercel">Next.js + Supabase + Vercel</option>
+                      <option value="nextjs_railway_postgres">Next.js + Railway Postgres</option>
+                      <option value="react_express_railway">React + Express + Railway</option>
+                    </select>
+                  </label>
+                  <label className="composer__factory-field">
+                    <span>Deploy target</span>
+                    <select
+                      value={factoryDraft.deploymentProvider}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          deploymentProvider: event.target.value as RuntimeFactoryComposerDraft["deploymentProvider"]
+                        })
+                      }
+                    >
+                      <option value="vercel">Vercel</option>
+                      <option value="railway">Railway</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </label>
+                  <label className="composer__factory-field">
+                    <span>Deploy project</span>
+                    <input
+                      type="text"
+                      value={factoryDraft.deploymentProjectName}
+                      onChange={(event) =>
+                        onFactoryDraftChange({
+                          ...factoryDraft,
+                          deploymentProjectName: event.target.value
+                        })
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+
+                <label className="composer__factory-field">
+                  <span>Environment</span>
+                  <input
+                    type="text"
+                    value={factoryDraft.deploymentEnvironment}
+                    onChange={(event) =>
+                      onFactoryDraftChange({
+                        ...factoryDraft,
+                        deploymentEnvironment: event.target.value
+                      })
+                    }
+                    placeholder="production"
+                  />
+                </label>
+
+                {!factoryModeSupported ? (
+                  <p className="composer__factory-note">
+                    Factory Mode runs through the live runtime project and needs the backend to be connected.
+                  </p>
+                ) : (
+                  <p className="composer__factory-note">
+                    Shipyard will create a fresh isolated workspace for this app before the run starts.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
             <textarea
               ref={textareaRef}
               value={composerValue}

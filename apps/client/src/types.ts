@@ -89,6 +89,87 @@ export type RuntimeRepoBranchSnapshot = {
 export type RuntimeRepoBranchResponse = RuntimeRepoBranchSnapshot;
 
 export type RuntimeTaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
+export type RuntimeWorkflowMode = "standard" | "factory";
+export type RuntimeFactoryStackTemplateId =
+  | "nextjs_supabase_vercel"
+  | "nextjs_railway_postgres"
+  | "react_express_railway";
+export type RuntimeFactoryRepositoryVisibility = "private" | "public";
+export type RuntimeFactoryDeploymentProviderId = "vercel" | "railway" | "manual";
+
+export type RuntimeFactoryRunInput = {
+  appName: string;
+  stackTemplateId: RuntimeFactoryStackTemplateId;
+  repository: {
+    provider?: "github" | null;
+    owner?: string | null;
+    name: string;
+    visibility?: RuntimeFactoryRepositoryVisibility | null;
+    baseBranch?: string | null;
+  };
+  deployment: {
+    provider: RuntimeFactoryDeploymentProviderId;
+    projectName?: string | null;
+    environment?: string | null;
+    url?: string | null;
+  };
+};
+
+export type RuntimeFactoryRunState = {
+  version: 1;
+  mode: "factory";
+  appName: string;
+  productBrief: string;
+  stack: {
+    templateId: RuntimeFactoryStackTemplateId;
+    label: string;
+    frontend: string;
+    backend: string;
+    data: string;
+    deployment: string;
+  };
+  repository: {
+    provider: "github";
+    owner: string | null;
+    name: string;
+    visibility: RuntimeFactoryRepositoryVisibility;
+    baseBranch: string;
+    url: string | null;
+    localPath: string | null;
+  };
+  deployment: {
+    provider: RuntimeFactoryDeploymentProviderId;
+    projectName: string | null;
+    environment: string | null;
+    url: string | null;
+  };
+  currentStage: "intake" | "bootstrap" | "implementation" | "delivery";
+  artifacts: Array<{
+    id: string;
+    kind: "repository" | "bootstrap_plan" | "deployment_handoff" | "delivery_summary";
+    title: string;
+    summary: string;
+    status: "planned" | "active" | "ready" | "completed";
+    url: string | null;
+    path: string | null;
+    provider: string | null;
+    updatedAt: string;
+  }>;
+  deliverySummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RuntimeFactoryComposerDraft = {
+  appName: string;
+  stackTemplateId: RuntimeFactoryStackTemplateId;
+  repositoryOwner: string;
+  repositoryName: string;
+  repositoryVisibility: RuntimeFactoryRepositoryVisibility;
+  deploymentProvider: RuntimeFactoryDeploymentProviderId;
+  deploymentProjectName: string;
+  deploymentEnvironment: string;
+};
 
 export type AttachmentKind =
   | "image"
@@ -200,6 +281,7 @@ export type RuntimeTask = {
     source: "result" | "failure" | "retry";
   } | null;
   operatorView?: RuntimeOperatorView | null;
+  factory?: RuntimeFactoryRunState | null;
   events?: Array<{
     at: string;
     type: string;
@@ -261,6 +343,7 @@ export type RuntimeTask = {
     responseText?: string | null;
     provider?: "openai" | null;
     modelId?: string | null;
+    factory?: RuntimeFactoryRunState | null;
     toolResult?: unknown;
   } | null;
 };
@@ -780,6 +863,16 @@ export type RuntimeThreadFocusedRun = {
   createdAt: string;
   startedAt: string | null;
   attachmentsCount: number;
+  factory:
+    | {
+        appName: string;
+        stackLabel: string;
+        repositoryName: string;
+        deploymentProvider: RuntimeFactoryDeploymentProviderId;
+        currentStage: RuntimeFactoryRunState["currentStage"];
+        workspacePath: string | null;
+      }
+    | null;
   attachments: AttachmentCard[];
 };
 

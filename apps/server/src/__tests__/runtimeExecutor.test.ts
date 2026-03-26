@@ -230,6 +230,56 @@ test("runtime executor can process a search_repo task through the persistent run
   }
 });
 
+test("runtime executor routes factory repo tools into the runtime workspace folder", async () => {
+  const defaultDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-default-"));
+  const factoryDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-factory-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: defaultDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Create the initial factory README.",
+      toolRequest: {
+        toolName: "create_file",
+        input: {
+          path: "README.md",
+          content: "# Factory app\n"
+        }
+      },
+      project: {
+        id: "shipyard-runtime",
+        kind: "live",
+        folder: {
+          name: "factory-app",
+          displayPath: factoryDir,
+          provider: "runtime",
+          status: "connected"
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "repo-tool");
+    assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(
+      await readFile(path.join(factoryDir, "README.md"), "utf8"),
+      "# Factory app\n"
+    );
+    await assert.rejects(() => readFile(path.join(defaultDir, "README.md"), "utf8"));
+  } finally {
+    await rm(defaultDir, { recursive: true, force: true });
+    await rm(factoryDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime executor can process a phase execution plan that uses repo tools", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-phase-"));
   const filePath = path.join(tempDir, "src/example.ts");

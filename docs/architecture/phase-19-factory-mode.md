@@ -10,11 +10,11 @@ replacement for it.
 
 ## What We Build
 
-- a greenfield request intake flow
-- repo bootstrap support
-- staged implementation flow from planning to PR
-- deploy handoff support
-- delivery summary generation for factory runs
+- an explicit `Factory Mode` toggle alongside the normal coding workflow
+- a greenfield request intake flow with typed app, repo, stack, and deploy targets
+- isolated runtime workspaces under `.shipyard/factory-workspaces/`
+- staged implementation flow compiled onto the existing typed runtime
+- deploy handoff support and delivery summary generation for factory runs
 
 ## Why It Matters
 
@@ -31,14 +31,23 @@ Factory mode should reuse:
 - approval gates
 - external record sync
 
-It adds a product workflow for repo creation, staged execution, and delivery output.
+It adds a product workflow for greenfield intake, isolated workspace bootstrap, staged execution,
+and delivery output.
+
+In the shipped Phase 19 path:
+
+- `Factory Mode` off keeps the normal coding/editor workflow unchanged
+- `Factory Mode` on compiles the intake into typed context, phase execution, and factory state
+- the server seeds a fresh runtime workspace with `README.md`, `.gitignore`, and
+  `shipyard.factory.json`
+- repo-tool tasks execute against that isolated workspace instead of the Shipyard control repo
 
 ## Outcome
 
 After this phase:
 
 - Shipyard can run an end-to-end greenfield workflow
-- repo, PR, and deployment artifacts are part of the run record
+- factory repository and deployment artifacts are part of the run record
 - operators get a coherent factory experience on top of the existing runtime
 
 ## What This Phase Does Not Do
@@ -50,5 +59,5 @@ Those concerns are hardened in the next phases.
 ## Exit Criteria
 
 - Shipyard can execute a greenfield factory run from intake to delivery output
-- repo and deployment artifacts are attached to the run
+- repository and deployment artifacts are attached to the run
 - factory mode uses the typed runtime rather than bypassing it

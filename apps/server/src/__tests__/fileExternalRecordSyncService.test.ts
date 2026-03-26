@@ -71,6 +71,10 @@ function createRunFixture(): AgentRunRecord {
       description: "Runtime project",
       links: [
         {
+          kind: "repository",
+          url: "https://github.com/StefanoCaruso456/shipyard-sync"
+        },
+        {
           kind: "pull_request",
           url: "https://github.com/StefanoCaruso456/ShipYard/pull/71"
         },
@@ -171,6 +175,7 @@ test("file external record sync service mirrors parent-child records and links i
     assert.ok(runRecord?.childExternalIds.includes(phaseRecord!.externalId));
     assert.equal(storyRecord?.parentExternalId, phaseRecord?.externalId ?? null);
     assert.equal(taskRecord?.parentExternalId, storyRecord?.externalId ?? null);
+    assert.ok(runRecord?.links.some((link) => link.kind === "repository"));
     assert.ok(runRecord?.links.some((link) => link.kind === "pull_request"));
     assert.ok(taskRecord?.links.some((link) => link.kind === "deployment"));
 

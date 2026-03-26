@@ -89,6 +89,20 @@ export {
   normalizeProjectLinks,
   reconcileExternalSyncState
 } from "./runtime/externalRecordSync";
+export {
+  compileFactoryTaskSubmission,
+  createFactoryRunState,
+  factoryDeploymentProviderIds,
+  factoryRepositoryVisibilityOptions,
+  factoryStackTemplateIds,
+  getFactoryStackSummary,
+  isFactoryDeploymentProviderId,
+  isFactoryRepositoryVisibility,
+  isFactoryStackTemplateId,
+  normalizeFactoryRunInput,
+  normalizeFactoryRunState,
+  syncFactoryRunState
+} from "./runtime/factoryMode";
 export { deriveOperatorRunView } from "./runtime/operatorView";
 export {
   executeOrchestrationLoop,
@@ -206,6 +220,19 @@ export type {
   ControlPlaneWorkPacket,
   ExecutorStepResult,
   ExecuteRun,
+  FactoryArtifact,
+  FactoryArtifactKind,
+  FactoryArtifactStatus,
+  FactoryDeploymentState,
+  FactoryDeploymentProviderId,
+  FactoryRepositoryProviderId,
+  FactoryRepositoryState,
+  FactoryRepositoryVisibility,
+  FactoryRunInput,
+  FactoryRunState,
+  FactoryStackSummary,
+  FactoryStackTemplateId,
+  FactoryStageId,
   ExternalContextFormat,
   ExternalContextInput,
   ExternalContextKind,

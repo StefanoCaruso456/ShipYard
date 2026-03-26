@@ -6,6 +6,9 @@ import type {
   AgentRole,
   ContextAssembler,
   ExternalRecordEntityKind,
+  FactoryDeploymentProviderId,
+  FactoryRepositoryVisibility,
+  FactoryStackTemplateId,
   PersistentAgentRuntimeService,
   RunProjectLinkInput,
   RepoToolRequest,
@@ -14,7 +17,13 @@ import type {
   ValidationGate,
   ValidationGateKind
 } from "@shipyard/agent-core";
-import { deriveOperatorRunView, safeParseRunContextInput } from "@shipyard/agent-core";
+import {
+  deriveOperatorRunView,
+  isFactoryDeploymentProviderId,
+  isFactoryRepositoryVisibility,
+  isFactoryStackTemplateId,
+  safeParseRunContextInput
+} from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import {
@@ -29,6 +38,7 @@ import {
   type createAudioTranscriber
 } from "../runtime/createAudioTranscriber";
 import type { createFileExternalRecordSyncService } from "../runtime/createFileExternalRecordSyncService";
+import { prepareFactoryTaskSubmission } from "../runtime/prepareFactoryTaskSubmission";
 
 type RuntimeTaskRequest = Request & {
   files?: Express.Multer.File[];
@@ -60,7 +70,8 @@ export function registerRuntimeRoutes(
   contextAssembler?: ContextAssembler,
   traceService?: TraceService,
   repoBranchService?: ReturnType<typeof createRepoBranchService>,
-  externalRecordSync?: ReturnType<typeof createFileExternalRecordSyncService>
+  externalRecordSync?: ReturnType<typeof createFileExternalRecordSyncService>,
+  workspaceRoot?: string
 ) {
   app.get("/api/runtime/status", (_request, response) => {
     response.json({
@@ -149,7 +160,12 @@ export function registerRuntimeRoutes(
     }
 
     try {
-      const task = await runtimeService.submitTask(submission);
+      const preparedSubmission = submission.factory
+        ? await prepareFactoryTaskSubmission(submission, {
+            workspaceRoot: workspaceRoot ?? process.cwd()
+          })
+        : submission;
+      const task = await runtimeService.submitTask(preparedSubmission);
 
       response.status(202).json({
         task: serializeRun(task)
@@ -538,6 +554,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     context?: unknown;
     phaseExecution?: unknown;
     rebuild?: unknown;
+    factory?: unknown;
   };
 
   if (typeof body?.instruction !== "string" || !body.instruction.trim()) {
@@ -606,6 +623,19 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     return rebuild;
   }
 
+  const factory = parseFactoryInput(parseUnknownJson(body.factory));
+
+  if ("error" in factory) {
+    return factory;
+  }
+
+  if (factory.value && (toolRequest.value || phaseExecution.value || rebuild.value)) {
+    return {
+      error:
+        "Factory mode submissions cannot include tool requests, custom phase execution, or rebuild payloads."
+    };
+  }
+
   return {
     instruction: body.instruction,
     title: body.title,
@@ -626,7 +656,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     project: project.value,
     context: context.value,
     phaseExecution: phaseExecution.value,
-    rebuild: rebuild.value
+    rebuild: rebuild.value,
+    factory: factory.value
   };
 }
 
@@ -653,6 +684,7 @@ function serializeRun(run: AgentRunRecord) {
     phaseExecution: run.phaseExecution ?? null,
     controlPlane: run.controlPlane ?? null,
     rebuild: run.rebuild ?? null,
+    factory: run.factory ?? null,
     externalSync: run.externalSync ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
@@ -815,9 +847,13 @@ function parseProjectLinks(
 
     const candidate = item as Record<string, unknown>;
 
-    if (candidate.kind !== "pull_request" && candidate.kind !== "deployment") {
+    if (
+      candidate.kind !== "repository" &&
+      candidate.kind !== "pull_request" &&
+      candidate.kind !== "deployment"
+    ) {
       return {
-        error: "project.links[].kind must be pull_request or deployment."
+        error: "project.links[].kind must be repository, pull_request, or deployment."
       };
     }
 
@@ -867,6 +903,153 @@ function parseProjectLinks(
 
   return {
     value: links
+  };
+}
+
+function parseFactoryInput(
+  value: unknown
+): { value: SubmitTaskInput["factory"] } | { error: string } {
+  if (value === undefined || value === null || value === "") {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      error: "factory must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    appName?: unknown;
+    stackTemplateId?: unknown;
+    repository?: unknown;
+    deployment?: unknown;
+  };
+
+  if (typeof candidate.appName !== "string" || !candidate.appName.trim()) {
+    return {
+      error: "factory.appName must be a non-empty string."
+    };
+  }
+
+  if (!isFactoryStackTemplateId(candidate.stackTemplateId)) {
+    return {
+      error:
+        "factory.stackTemplateId must be nextjs_supabase_vercel, nextjs_railway_postgres, or react_express_railway."
+    };
+  }
+
+  if (!candidate.repository || typeof candidate.repository !== "object" || Array.isArray(candidate.repository)) {
+    return {
+      error: "factory.repository must be an object."
+    };
+  }
+
+  if (!candidate.deployment || typeof candidate.deployment !== "object" || Array.isArray(candidate.deployment)) {
+    return {
+      error: "factory.deployment must be an object."
+    };
+  }
+
+  const repository = candidate.repository as {
+    owner?: unknown;
+    name?: unknown;
+    visibility?: unknown;
+    baseBranch?: unknown;
+  };
+  const deployment = candidate.deployment as {
+    provider?: unknown;
+    projectName?: unknown;
+    environment?: unknown;
+    url?: unknown;
+  };
+
+  if (typeof repository.name !== "string" || !repository.name.trim()) {
+    return {
+      error: "factory.repository.name must be a non-empty string."
+    };
+  }
+
+  if (repository.owner !== undefined && repository.owner !== null && typeof repository.owner !== "string") {
+    return {
+      error: "factory.repository.owner must be a string when provided."
+    };
+  }
+
+  if (
+    repository.visibility !== undefined &&
+    repository.visibility !== null &&
+    !isFactoryRepositoryVisibility(repository.visibility)
+  ) {
+    return {
+      error: "factory.repository.visibility must be private or public when provided."
+    };
+  }
+
+  if (
+    repository.baseBranch !== undefined &&
+    repository.baseBranch !== null &&
+    typeof repository.baseBranch !== "string"
+  ) {
+    return {
+      error: "factory.repository.baseBranch must be a string when provided."
+    };
+  }
+
+  if (!isFactoryDeploymentProviderId(deployment.provider)) {
+    return {
+      error: "factory.deployment.provider must be vercel, railway, or manual."
+    };
+  }
+
+  if (
+    deployment.projectName !== undefined &&
+    deployment.projectName !== null &&
+    typeof deployment.projectName !== "string"
+  ) {
+    return {
+      error: "factory.deployment.projectName must be a string when provided."
+    };
+  }
+
+  if (
+    deployment.environment !== undefined &&
+    deployment.environment !== null &&
+    typeof deployment.environment !== "string"
+  ) {
+    return {
+      error: "factory.deployment.environment must be a string when provided."
+    };
+  }
+
+  if (deployment.url !== undefined && deployment.url !== null && typeof deployment.url !== "string") {
+    return {
+      error: "factory.deployment.url must be a string when provided."
+    };
+  }
+
+  return {
+    value: {
+      appName: candidate.appName.trim(),
+      stackTemplateId: candidate.stackTemplateId as FactoryStackTemplateId,
+      repository: {
+        provider: "github",
+        owner: repository.owner?.trim() ? repository.owner.trim() : null,
+        name: repository.name.trim(),
+        visibility: isFactoryRepositoryVisibility(repository.visibility)
+          ? (repository.visibility as FactoryRepositoryVisibility)
+          : "private",
+        baseBranch: repository.baseBranch?.trim() ? repository.baseBranch.trim() : "main"
+      },
+      deployment: {
+        provider: deployment.provider as FactoryDeploymentProviderId,
+        projectName: deployment.projectName?.trim() ? deployment.projectName.trim() : null,
+        environment: deployment.environment?.trim() ? deployment.environment.trim() : null,
+        url: deployment.url?.trim() ? deployment.url.trim() : null
+      }
+    }
   };
 }
 

@@ -16,6 +16,12 @@ import {
   normalizeProjectLinks,
   reconcileExternalSyncState
 } from "./externalRecordSync";
+import {
+  createFactoryRunState,
+  normalizeFactoryRunInput,
+  normalizeFactoryRunState,
+  syncFactoryRunState
+} from "./factoryMode";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
@@ -276,6 +282,7 @@ export async function createPersistentRuntimeService(
     const parentRunId = input.parentRunId?.trim() ? input.parentRunId.trim() : null;
     const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
     const controlPlane = phaseExecution ? createControlPlaneState(phaseExecution) : null;
+    const factoryInput = normalizeFactoryRunInput(input.factory);
     const rebuild = input.rebuild
       ? createRebuildState(input.rebuild, {
           phaseExecution,
@@ -307,6 +314,15 @@ export async function createPersistentRuntimeService(
       phaseExecution,
       controlPlane,
       rebuild,
+      factory: factoryInput
+        ? createFactoryRunState({
+            input: factoryInput,
+            productBrief: instruction,
+            workspacePath:
+              input.project?.folder?.displayPath?.trim() || factoryInput.repository.name,
+            deploymentUrl: factoryInput.deployment.url ?? null
+          })
+        : null,
       rollingSummary: null,
       events: [],
       error: null,
@@ -863,6 +879,21 @@ function toRunFailure(error: unknown): NonNullable<AgentRunRecord["error"]> {
 function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   const phaseExecution = normalizePhaseExecutionState(run.phaseExecution);
   const controlPlane = normalizeControlPlaneState(run.controlPlane, phaseExecution);
+  const project = normalizeRunProject(run.project);
+  const rollingSummary = normalizeRollingSummary(run.rollingSummary);
+  const factory = syncFactoryRunState({
+    factory: normalizeFactoryRunState(run.factory),
+    phaseExecution,
+    project,
+    status: run.status,
+    rollingSummary,
+    resultSummary: run.result?.summary ?? null,
+    updatedAt:
+      rollingSummary?.updatedAt ??
+      run.completedAt ??
+      run.startedAt ??
+      run.createdAt
+  });
 
   return {
     ...run,
@@ -870,7 +901,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     parentRunId: run.parentRunId?.trim() ? run.parentRunId.trim() : null,
     toolRequest: run.toolRequest ?? null,
     attachments: normalizeRunAttachments(run.attachments),
-    project: normalizeRunProject(run.project),
+    project,
     context: normalizeRunContextInput(run.context),
     retryCount: typeof run.retryCount === "number" ? run.retryCount : 0,
     validationStatus: run.validationStatus ?? "not_run",
@@ -886,8 +917,9 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
       updatedAt: controlPlane?.updatedAt ?? run.completedAt ?? run.startedAt ?? run.createdAt,
       lastFailureReason: run.error?.message ?? null
     }),
+    factory,
     externalSync: normalizeExternalSyncState(run.externalSync),
-    rollingSummary: normalizeRollingSummary(run.rollingSummary),
+    rollingSummary,
     events: Array.isArray(run.events) ? run.events : []
   };
 }

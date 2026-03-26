@@ -225,6 +225,7 @@ function buildTaskPrompt(
           .filter(Boolean)
           .join("\n")
       : null,
+    renderFactoryContext(run),
     renderProjectContext(run),
     renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
@@ -287,6 +288,27 @@ function renderProjectContext(run: AgentRunRecord) {
       : null,
     run.project.folder?.provider ? `Folder provider: ${run.project.folder.provider}` : null,
     run.project.folder?.status ? `Folder status: ${run.project.folder.status}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderFactoryContext(run: AgentRunRecord) {
+  if (!run.factory) {
+    return null;
+  }
+
+  return [
+    "Factory mode context:",
+    `App: ${run.factory.appName}`,
+    `Current stage: ${run.factory.currentStage}`,
+    `Stack: ${run.factory.stack.label}`,
+    `Repository target: ${run.factory.repository.owner ? `${run.factory.repository.owner}/` : ""}${run.factory.repository.name}`,
+    `Deployment target: ${run.factory.deployment.provider}`,
+    run.factory.repository.localPath
+      ? `Factory workspace: ${run.factory.repository.localPath}`
+      : null,
+    "Important: work only inside the connected runtime folder for this factory run. Do not modify the Shipyard control repository."
   ]
     .filter(Boolean)
     .join("\n");

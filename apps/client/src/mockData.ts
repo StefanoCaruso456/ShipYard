@@ -698,6 +698,16 @@ function buildFocusedRunSummary(
     createdAt: formatDateTime(run.createdAt),
     startedAt: run.startedAt ? formatDateTime(run.startedAt) : null,
     attachmentsCount: run.attachments.length,
+    factory: run.factory
+      ? {
+          appName: run.factory.appName,
+          stackLabel: run.factory.stack.label,
+          repositoryName: run.factory.repository.name,
+          deploymentProvider: run.factory.deployment.provider,
+          currentStage: run.factory.currentStage,
+          workspacePath: run.factory.repository.localPath
+        }
+      : null,
     attachments: run.attachments.map((attachment) =>
       toAttachmentCard(attachment, buildAttachmentPreviewLookup(runtimeAttachmentPreviewsByTaskId[run.id]))
     )
@@ -985,6 +995,11 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
 
   if (typeof traceSummary?.usage.totalTokens === "number") {
     meta.push(`${traceSummary.usage.totalTokens} tokens`);
+  }
+
+  if (task.factory) {
+    meta.push(task.factory.stack.label);
+    meta.push(`Factory ${task.factory.currentStage}`);
   }
 
   if (traceSummary?.validation.status) {

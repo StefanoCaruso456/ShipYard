@@ -44,6 +44,8 @@ import type {
   LocalFileExecutionEffect,
   ProgressEvent,
   ProjectPayload,
+  RuntimeFactoryComposerDraft,
+  RuntimeFactoryRunInput,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeRepoBranchSnapshot,
@@ -53,6 +55,7 @@ import type {
   RuntimeQueuedFollowUpDraft,
   RuntimeTask,
   RuntimeTaskSubmitContext,
+  RuntimeWorkflowMode,
   SidebarNavItemId,
   ThreadGroup,
   ThreadMessage,
@@ -98,6 +101,8 @@ function App() {
     Record<string, RuntimeQueuedFollowUpDraft[]>
   >({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
+  const [workflowMode, setWorkflowMode] = useState<RuntimeWorkflowMode>("standard");
+  const [factoryDraft, setFactoryDraft] = useState<RuntimeFactoryComposerDraft>(createDefaultFactoryDraft());
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
@@ -695,6 +700,7 @@ function App() {
     }));
     setSelectedProjectId(projectToUse.id);
     setActiveNav("projects");
+    setWorkflowMode("standard");
     setComposerValue("");
     setComposerAttachments([]);
     setComposerMode("text");
@@ -705,6 +711,23 @@ function App() {
     setActiveNav("projects");
     setComposerMode("text");
     setComposerFocusRequestKey((current) => current + 1);
+  }
+
+  function handleFactoryDraftChange(nextDraft: RuntimeFactoryComposerDraft) {
+    setFactoryDraft((current) => {
+      const appNameChanged = nextDraft.appName !== current.appName;
+      const currentRepoSlug = slugifyFactorySegment(current.appName);
+      const nextRepoName =
+        appNameChanged &&
+        (!current.repositoryName.trim() || current.repositoryName.trim() === currentRepoSlug)
+          ? slugifyFactorySegment(nextDraft.appName)
+          : nextDraft.repositoryName;
+
+      return {
+        ...nextDraft,
+        repositoryName: nextRepoName
+      };
+    });
   }
 
   async function handleSubmitTask(event: FormEvent<HTMLFormElement>) {
@@ -723,6 +746,11 @@ function App() {
       });
       return;
     }
+
+    const factoryInput =
+      workflowMode === "factory"
+        ? buildFactorySubmission(factoryDraft)
+        : null;
 
     const submittedAttachments = composerAttachments;
     const canSendToRuntime = backendConnected;
@@ -806,10 +834,37 @@ function App() {
       return;
     }
 
+    if (workflowMode === "factory") {
+      if (!backendConnected) {
+        setSubmissionFeedback({
+          tone: "danger",
+          text: "Factory Mode needs the live runtime backend to be connected."
+        });
+        return;
+      }
+
+      if (activeProject.kind !== "live") {
+        setSubmissionFeedback({
+          tone: "danger",
+          text: "Factory Mode runs through the live runtime project. Switch back to Shipyard Runtime first."
+        });
+        return;
+      }
+
+      if (!factoryInput) {
+        setSubmissionFeedback({
+          tone: "danger",
+          text: "Fill in the app name and repository name before starting Factory Mode."
+        });
+        return;
+      }
+    }
+
     const draftId = activeThread?.source === "draft" ? activeThread.id : createDraftId();
     const optimisticThread = buildDraftSubmissionThread({
       existingThread: activeThread?.source === "draft" ? activeThread : null,
       threadId: draftId,
+      titleOverride: factoryInput ? `Factory · ${factoryInput.appName}` : null,
       instruction,
       attachments: submittedAttachments,
       backendConnected: canSendToRuntime
@@ -853,7 +908,8 @@ function App() {
         title: optimisticThread.title,
         attachments: submittedAttachments,
         project: activeProject,
-        context: runtimeContext
+        context: factoryInput ? undefined : runtimeContext,
+        factory: factoryInput
       });
 
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
@@ -1188,6 +1244,8 @@ function App() {
           runtimeRepoSwitchingBranchName={runtimeRepoSwitchingBranchName}
           runtimeRepoError={runtimeRepoError}
           instructions={instructions}
+          workflowMode={workflowMode}
+          factoryDraft={factoryDraft}
           composerMode={composerMode}
           composerValue={composerValue}
           composerAttachments={composerAttachments}
@@ -1196,6 +1254,8 @@ function App() {
           submitting={submitting}
           transcribingAudio={transcribingAudio}
           backendConnected={backendConnected}
+          onWorkflowModeChange={setWorkflowMode}
+          onFactoryDraftChange={handleFactoryDraftChange}
           onComposerModeChange={setComposerMode}
           onComposerValueChange={setComposerValue}
           onComposerAttachmentsChange={setComposerAttachments}
@@ -1326,12 +1386,14 @@ function createDraftThread(projectName: string): WorkspaceThread {
 function buildDraftSubmissionThread({
   existingThread,
   threadId,
+  titleOverride,
   instruction,
   attachments,
   backendConnected
 }: {
   existingThread: WorkspaceThread | null;
   threadId: string;
+  titleOverride?: string | null;
   instruction: string;
   attachments: ComposerAttachment[];
   backendConnected: boolean;
@@ -1356,8 +1418,10 @@ function buildDraftSubmissionThread({
   return {
     ...nextThread,
     title:
-      nextThread.title === "New thread" || nextThread.messages.length === 0
-        ? deriveThreadTitle(instruction)
+      titleOverride?.trim()
+        ? titleOverride.trim()
+        : nextThread.title === "New thread" || nextThread.messages.length === 0
+          ? deriveThreadTitle(instruction)
         : nextThread.title,
     summary: instruction,
     status: backendConnected ? "pending" : "draft",
@@ -1431,6 +1495,57 @@ function markDraftThreadFailed(thread: WorkspaceThread, errorMessage: string): W
 
 function deriveThreadTitle(instruction: string) {
   return instruction.split(/\s+/).slice(0, 6).join(" ") || "New thread";
+}
+
+function createDefaultFactoryDraft(): RuntimeFactoryComposerDraft {
+  return {
+    appName: "",
+    stackTemplateId: "nextjs_supabase_vercel",
+    repositoryOwner: "",
+    repositoryName: "",
+    repositoryVisibility: "private",
+    deploymentProvider: "vercel",
+    deploymentProjectName: "",
+    deploymentEnvironment: "production"
+  };
+}
+
+function buildFactorySubmission(
+  draft: RuntimeFactoryComposerDraft
+): RuntimeFactoryRunInput | null {
+  const appName = draft.appName.trim();
+  const repositoryName = draft.repositoryName.trim() || slugifyFactorySegment(appName);
+
+  if (!appName || !repositoryName) {
+    return null;
+  }
+
+  return {
+    appName,
+    stackTemplateId: draft.stackTemplateId,
+    repository: {
+      provider: "github",
+      owner: draft.repositoryOwner.trim() || null,
+      name: repositoryName,
+      visibility: draft.repositoryVisibility,
+      baseBranch: "main"
+    },
+    deployment: {
+      provider: draft.deploymentProvider,
+      projectName: draft.deploymentProjectName.trim() || null,
+      environment: draft.deploymentEnvironment.trim() || null
+    }
+  };
+}
+
+function slugifyFactorySegment(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "factory-app"
+  );
 }
 
 function createDraftId() {

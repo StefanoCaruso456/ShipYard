@@ -381,6 +381,10 @@ function toExternalId(
 }
 
 function humanizeLinkKind(kind: ExternalRecordLink["kind"]) {
+  if (kind === "repository") {
+    return "Repository";
+  }
+
   return kind === "pull_request" ? "Pull request" : "Deployment";
 }
 

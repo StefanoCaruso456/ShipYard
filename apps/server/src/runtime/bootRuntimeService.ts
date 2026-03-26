@@ -28,6 +28,7 @@ import { loadProjectRules } from "./loadProjectRules";
 import { resolveWorkspaceRoot } from "./resolveWorkspaceRoot";
 
 export type BootedRuntimeService = {
+  workspaceRoot: string;
   runtimeService: PersistentAgentRuntimeService;
   contextAssembler: ContextAssembler;
   openAI: OpenAIExecutorConfig;
@@ -75,6 +76,7 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   const { store, runtimeStatePath, runtimeStore } = createConfiguredRunStore(rootDir);
 
   return {
+    workspaceRoot: rootDir,
     runtimeService: await createPersistentRuntimeService({
       instructionRuntime,
       contextAssembler,
