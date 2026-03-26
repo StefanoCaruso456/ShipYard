@@ -341,6 +341,7 @@ export function buildRuntimeThread(
 function selectFocusedRun(runs: RuntimeTask[]) {
   return (
     runs.find((run) => run.status === "running") ??
+    runs.find((run) => run.status === "paused") ??
     runs.find((run) => run.status === "pending") ??
     runs[runs.length - 1]
   );
@@ -349,6 +350,10 @@ function selectFocusedRun(runs: RuntimeTask[]) {
 function deriveThreadStatus(runs: RuntimeTask[]): WorkspaceThread["status"] {
   if (runs.some((run) => run.status === "running")) {
     return "running";
+  }
+
+  if (runs.some((run) => run.status === "paused")) {
+    return "paused";
   }
 
   if (runs.some((run) => run.status === "pending")) {
@@ -376,6 +381,12 @@ function deriveRuntimeThreadSummary(
       : "Queued in the persistent runtime service.";
   }
 
+  if (status === "paused") {
+    return focusedRun.operatorView?.approval?.activeGate
+      ? `${focusedRun.operatorView.approval.activeGate.title} is waiting before ${focusedRun.operatorView.approval.activeGate.phaseName} can continue.`
+      : "Paused in the persistent runtime until an approval decision is recorded.";
+  }
+
   if (status === "failed") {
     return latestRun.error?.message ?? "Runtime failure.";
   }
@@ -400,6 +411,10 @@ function deriveRuntimeThreadUpdatedLabel(
 
   if (status === "pending") {
     return queuedFollowUpCount > 1 ? `${queuedFollowUpCount} queued` : "Queued";
+  }
+
+  if (status === "paused") {
+    return "Approval needed";
   }
 
   return formatDateTime(latestRun.completedAt ?? latestRun.createdAt);
@@ -434,7 +449,8 @@ function buildRuntimeThreadMessages(
     }
 
     const queueLabel =
-      run.id === focusedRun.id && (run.status === "running" || run.status === "pending")
+      run.id === focusedRun.id &&
+      (run.status === "running" || run.status === "pending" || run.status === "paused")
         ? "You · active request"
         : isFollowUp
           ? "You · follow-up"
@@ -508,6 +524,10 @@ function deriveRuntimeSystemMessage(run: RuntimeTask, focusedRun: RuntimeTask) {
 
   if (run.status === "pending") {
     return "Run accepted into the persistent loop and awaiting execution.";
+  }
+
+  if (run.status === "paused") {
+    return "Run paused and waiting for an approval decision before the next phase starts.";
   }
 
   if (run.status === "failed") {
@@ -612,6 +632,21 @@ function buildRuntimeThreadProgress(
           run.error?.message ?? "Unknown runtime error.",
           formatDateTime(run.completedAt),
           "danger"
+        )
+      );
+    }
+
+    if (run.status === "paused") {
+      progress.push(
+        createProgress(
+          `${run.id}-paused`,
+          "Approval required",
+          run.operatorView?.approval?.activeGate?.instructions ??
+            run.operatorView?.approval?.activeGate?.title ??
+            run.rollingSummary?.text ??
+            "The run is waiting for a human approval decision.",
+          formatDateTime(run.rollingSummary?.updatedAt ?? run.startedAt ?? run.createdAt),
+          "warning"
         )
       );
     }
@@ -967,6 +1002,8 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
         ? "Run in progress"
         : task.status === "pending"
           ? "Run queued"
+          : task.status === "paused"
+            ? "Run paused for approval"
           : task.status === "failed"
             ? "Run failed"
             : "Run completed",
@@ -975,6 +1012,10 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
         ? "The runtime is still reasoning through the active request."
         : task.status === "pending"
           ? "The request is accepted and waiting in the persistent runtime queue."
+          : task.status === "paused"
+            ? task.operatorView?.approval?.activeGate?.instructions ??
+              task.rollingSummary?.text ??
+              "The run is paused until an approval decision is recorded."
           : task.status === "failed"
             ? task.error?.message ?? "The runtime ended in a failure state."
             : task.result?.summary || "The latest request completed and the execution trace is available below.",
@@ -984,6 +1025,8 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
         ? "danger"
         : task.status === "completed"
           ? "success"
+          : task.status === "paused"
+            ? "warning"
           : "info",
     depth: 0,
     surface: "primary",

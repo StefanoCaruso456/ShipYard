@@ -227,3 +227,79 @@ test("operator view prioritizes open blockers during validation failure", () => 
   assert.ok(operatorView.journal.some((entry) => entry.label === "Task blocker opened"));
   assert.ok(operatorView.journal.some((entry) => entry.label === "Run failed"));
 });
+
+test("operator view surfaces active approval gates for paused runs", () => {
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-implementation",
+        name: "Implementation",
+        description: "Pause for implementation approval.",
+        approvalGate: {
+          id: "gate-implementation",
+          kind: "implementation",
+          instructions: "Review the implementation brief before coding starts."
+        },
+        userStories: [
+          {
+            id: "story-implementation",
+            title: "Prepare implementation",
+            description: "Wait at the implementation gate.",
+            acceptanceCriteria: ["Implementation approved"],
+            tasks: [
+              {
+                id: "task-implementation",
+                instruction: "Prepare implementation.",
+                expectedOutcome: "Prepare implementation."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+
+  phaseExecution.status = "blocked";
+  phaseExecution.activeApprovalGateId = "gate-implementation";
+  phaseExecution.current = {
+    phaseId: "phase-implementation",
+    storyId: null,
+    taskId: null
+  };
+  phaseExecution.phases[0]!.status = "blocked";
+  phaseExecution.phases[0]!.approvalGate!.status = "waiting";
+  phaseExecution.phases[0]!.approvalGate!.waitingAt = "2026-03-26T12:10:00.000Z";
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+  const operatorView = deriveOperatorRunView(
+    createRun({
+      status: "paused",
+      startedAt: "2026-03-26T12:09:00.000Z",
+      phaseExecution,
+      controlPlane,
+      rollingSummary: {
+        text: "Waiting for implementation approval.",
+        updatedAt: "2026-03-26T12:10:00.000Z",
+        source: "result"
+      },
+      events: [
+        {
+          at: "2026-03-26T12:10:00.000Z",
+          type: "approval_gate_waiting",
+          phaseId: "phase-implementation",
+          gateId: "gate-implementation",
+          message: "Waiting for approval before Implementation."
+        }
+      ]
+    })
+  );
+
+  assert.equal(operatorView.stage.id, "coordination");
+  assert.equal(operatorView.stage.status, "active");
+  assert.equal(operatorView.approval?.activeGate?.id, "gate-implementation");
+  assert.equal(operatorView.approval?.activeGate?.status, "waiting");
+  assert.match(operatorView.nextAction ?? "", /Review implementation approval/i);
+  assert.ok(operatorView.journal.some((entry) => entry.label === "Approval gate waiting"));
+});

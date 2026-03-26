@@ -10,11 +10,13 @@ type AgentActivityFeedProps = {
 export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) {
   const liveStatusItem = buildLiveStatusItem(activity, status);
   const displayActivity = liveStatusItem ? [...activity, liveStatusItem] : activity;
-  const isLive = status === "pending" || status === "running";
+  const isLive = status === "pending" || status === "running" || status === "paused";
   const heading = isLive ? "Working" : "Execution trace";
   const headerDetail = isLive
     ? status === "pending"
       ? "Queued in runtime"
+      : status === "paused"
+        ? "Waiting on approval"
       : "Streaming execution path"
     : displayActivity.length === 1
       ? "1 update"
@@ -42,7 +44,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
           {isLive ? (
             <span className="agent-activity__live-pill">
               <span className="agent-activity__live-pill-dot" aria-hidden="true" />
-              {status === "pending" ? "Queued" : "Thinking"}
+              {status === "pending" ? "Queued" : status === "paused" ? "Paused" : "Thinking"}
             </span>
           ) : null}
         </div>
@@ -114,6 +116,24 @@ function buildLiveStatusItem(
       sourceType: "summary",
       sourceName: "live-status",
       meta: ["Awaiting worker pickup"]
+    };
+  }
+
+  if (status === "paused") {
+    return {
+      id: "agent-live-status",
+      kind: "summary",
+      badge: "Approval",
+      label: "Run paused for human approval",
+      detail: "The runtime is waiting for an approval decision before it can continue the next phase.",
+      timestamp: "Live",
+      tone: "warning",
+      depth: 0,
+      surface: "secondary",
+      status: "running",
+      sourceType: "summary",
+      sourceName: "live-status",
+      meta: ["Operator decision required"]
     };
   }
 

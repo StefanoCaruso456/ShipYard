@@ -88,7 +88,7 @@ export type RuntimeRepoBranchSnapshot = {
 
 export type RuntimeRepoBranchResponse = RuntimeRepoBranchSnapshot;
 
-export type RuntimeTaskStatus = "pending" | "running" | "completed" | "failed";
+export type RuntimeTaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
 
 export type AttachmentKind =
   | "image"
@@ -559,6 +559,33 @@ export type RuntimeOperatorBlocker = {
   createdAt: string;
 };
 
+export type RuntimeOperatorApprovalDecision = "approve" | "reject" | "request_retry";
+
+export type RuntimeOperatorApprovalGateStatus =
+  | "pending"
+  | "waiting"
+  | "approved"
+  | "rejected";
+
+export type RuntimeOperatorApprovalGate = {
+  id: string;
+  kind: "architecture" | "implementation" | "deployment";
+  phaseId: string;
+  phaseName: string;
+  title: string;
+  instructions: string | null;
+  status: RuntimeOperatorApprovalGateStatus;
+  waitingAt: string | null;
+  resolvedAt: string | null;
+  ownerLabel: string;
+  decisions: Array<{
+    id: string;
+    decision: RuntimeOperatorApprovalDecision;
+    comment: string | null;
+    decidedAt: string;
+  }>;
+};
+
 export type RuntimeOperatorJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -578,6 +605,11 @@ export type RuntimeOperatorView = {
   nextAction: string | null;
   progress: RuntimeOperatorProgress | null;
   retries: RuntimeOperatorRetrySummary;
+  approval: {
+    activeGateId: string | null;
+    activeGate: RuntimeOperatorApprovalGate | null;
+    gates: RuntimeOperatorApprovalGate[];
+  } | null;
   blockers: RuntimeOperatorBlocker[];
   journal: RuntimeOperatorJournalEntry[];
 };

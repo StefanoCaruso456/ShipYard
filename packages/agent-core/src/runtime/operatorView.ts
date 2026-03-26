@@ -9,6 +9,7 @@ import type {
   ControlPlaneTaskNode,
   OperatorJournalTone,
   OperatorRunBlocker,
+  OperatorRunApprovalGate,
   OperatorRunCurrentWork,
   OperatorRunJournalEntry,
   OperatorRunOwner,
@@ -50,6 +51,7 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   const blockers = deriveOpenBlockers(run.controlPlane);
   const owner = deriveOwner(run, current, stageId);
   const stages = buildStageSequence(run, stageId, current, blockers);
+  const approval = deriveApproval(run);
   const stage = stages.find((candidate) => candidate.id === stageId) ?? stages[0] ?? {
     id: "queued",
     label: STAGE_LABELS.queued,
@@ -63,9 +65,10 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
     stages,
     owner,
     current,
-    nextAction: deriveNextAction(run, stageId, current, blockers),
+    nextAction: deriveNextAction(run, stageId, current, blockers, approval),
     progress: deriveProgress(run),
     retries: deriveRetrySummary(run),
+    approval,
     blockers,
     journal: buildJournal(run)
   };
@@ -389,6 +392,43 @@ function deriveRetrySummary(run: AgentRunRecord): OperatorRunRetrySummary {
   };
 }
 
+function deriveApproval(run: AgentRunRecord): OperatorRunView["approval"] {
+  const controlPlane = run.controlPlane;
+
+  if (!controlPlane || controlPlane.approvalGates.length === 0) {
+    return null;
+  }
+
+  const gates: OperatorRunApprovalGate[] = controlPlane.approvalGates.map((gate) => ({
+    id: gate.id,
+    kind: gate.kind,
+    phaseId: gate.phaseId,
+    phaseName: gate.phaseName,
+    title: gate.title,
+    instructions: gate.instructions,
+    status: gate.status,
+    waitingAt: gate.waitingAt,
+    resolvedAt: gate.resolvedAt,
+    ownerLabel: resolveAgentLabel(
+      controlPlane,
+      gate.ownerId,
+      gate.ownerRole,
+      gate.ownerAgentTypeId
+    ),
+    decisions: gate.decisions.map((decision) => ({ ...decision }))
+  }));
+  const activeGate =
+    gates.find((gate) => gate.id === controlPlane.activeApprovalGateId) ??
+    gates.find((gate) => gate.status === "waiting" || gate.status === "rejected") ??
+    null;
+
+  return {
+    activeGateId: activeGate?.id ?? null,
+    activeGate,
+    gates
+  };
+}
+
 function deriveOpenBlockers(controlPlane: ControlPlaneState | null | undefined): OperatorRunBlocker[] {
   if (!controlPlane) {
     return [];
@@ -566,8 +606,13 @@ function deriveNextAction(
   run: AgentRunRecord,
   stageId: OperatorRunStageId,
   current: OperatorRunCurrentWork,
-  blockers: OperatorRunBlocker[]
+  blockers: OperatorRunBlocker[],
+  approval: OperatorRunView["approval"]
 ) {
+  if (approval?.activeGate) {
+    return `Review ${approval.activeGate.title.toLowerCase()} for ${approval.activeGate.phaseName}.`;
+  }
+
   if (blockers[0]) {
     return `Resolve blocker: ${blockers[0].summary}`;
   }
@@ -969,6 +1014,14 @@ function summarizeText(value: string, maxLength: number) {
 
 function describeEventLabel(type: RunEventType) {
   switch (type) {
+    case "approval_gate_waiting":
+      return "Approval gate waiting";
+    case "approval_gate_approved":
+      return "Approval gate approved";
+    case "approval_gate_rejected":
+      return "Approval gate rejected";
+    case "approval_gate_retry_requested":
+      return "Approval gate retry requested";
     case "planner_step_proposed":
       return "Planner proposed a step";
     case "executor_step_completed":
@@ -1003,6 +1056,7 @@ function describeArtifactLabel(kind: ControlPlaneArtifact["kind"]) {
 
 function mapEventTone(type: RunEventType): OperatorJournalTone {
   if (
+    type.includes("rejected") ||
     type.includes("failed") ||
     type.includes("execution_failed") ||
     type.includes("rollback_failed")
@@ -1010,11 +1064,12 @@ function mapEventTone(type: RunEventType): OperatorJournalTone {
     return "danger";
   }
 
-  if (type.includes("retry") || type.includes("conflict")) {
+  if (type.includes("retry") || type.includes("conflict") || type.includes("waiting")) {
     return "warning";
   }
 
   if (
+    type.includes("approved") ||
     type.includes("completed") ||
     type.includes("passed") ||
     type.includes("succeeded")

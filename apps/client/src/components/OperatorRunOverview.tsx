@@ -1,15 +1,54 @@
+import { useState } from "react";
+
 import type {
-  RuntimeOperatorJournalEntry,
+  RuntimeOperatorApprovalDecision,
+  RuntimeOperatorApprovalGate,
   RuntimeOperatorStageStatus,
   RuntimeOperatorView
 } from "../types";
 
 type OperatorRunOverviewProps = {
+  runId: string;
   operatorView: RuntimeOperatorView;
+  onApprovalDecision: (
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) => Promise<void>;
 };
 
-export function OperatorRunOverview({ operatorView }: OperatorRunOverviewProps) {
+export function OperatorRunOverview({
+  runId,
+  operatorView,
+  onApprovalDecision
+}: OperatorRunOverviewProps) {
   const visibleJournal = operatorView.journal.slice(0, 8);
+  const activeGate = operatorView.approval?.activeGate ?? null;
+  const [comment, setComment] = useState("");
+  const [submittingDecision, setSubmittingDecision] =
+    useState<RuntimeOperatorApprovalDecision | null>(null);
+  const canResolveGate =
+    activeGate !== null &&
+    (activeGate.status === "waiting" || activeGate.status === "rejected");
+
+  async function handleApprovalDecision(decision: RuntimeOperatorApprovalDecision) {
+    if (!activeGate) {
+      return;
+    }
+
+    setSubmittingDecision(decision);
+
+    try {
+      await onApprovalDecision(runId, activeGate.id, decision, comment);
+
+      if (decision !== "reject") {
+        setComment("");
+      }
+    } finally {
+      setSubmittingDecision(null);
+    }
+  }
 
   return (
     <section className="operator-overview">
@@ -52,6 +91,75 @@ export function OperatorRunOverview({ operatorView }: OperatorRunOverviewProps) 
           <p>{renderCurrentStatus(operatorView)}</p>
         </article>
       </div>
+
+      {activeGate ? (
+        <section className="operator-overview__approval">
+          <div className="operator-overview__section-head">
+            <strong>{activeGate.title}</strong>
+            <span>{humanizeApprovalStatus(activeGate.status)}</span>
+          </div>
+
+          <div className="operator-overview__approval-card">
+            <span className="operator-overview__eyebrow">
+              {activeGate.phaseName} · {humanizeApprovalKind(activeGate.kind)}
+            </span>
+            <p>
+              {activeGate.instructions?.trim() ||
+                `${activeGate.ownerLabel} is waiting on a decision before this phase can continue.`}
+            </p>
+            {activeGate.decisions.length > 0 ? (
+              <div className="operator-overview__meta">
+                {activeGate.decisions
+                  .slice(-2)
+                  .reverse()
+                  .map((decision) => (
+                    <span key={decision.id}>
+                      {humanizeApprovalDecision(decision.decision)} · {formatDateTime(decision.decidedAt)}
+                    </span>
+                  ))}
+              </div>
+            ) : null}
+
+            {canResolveGate ? (
+              <div className="operator-overview__approval-actions">
+                <textarea
+                  className="operator-overview__approval-comment"
+                  rows={3}
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  placeholder="Add optional approval notes for the runtime."
+                />
+                <div className="operator-overview__approval-buttons">
+                  <button
+                    type="button"
+                    className="operator-overview__approval-button operator-overview__approval-button--approve"
+                    disabled={submittingDecision !== null}
+                    onClick={() => void handleApprovalDecision("approve")}
+                  >
+                    {submittingDecision === "approve" ? "Approving..." : "Approve"}
+                  </button>
+                  <button
+                    type="button"
+                    className="operator-overview__approval-button operator-overview__approval-button--retry"
+                    disabled={submittingDecision !== null}
+                    onClick={() => void handleApprovalDecision("request_retry")}
+                  >
+                    {submittingDecision === "request_retry" ? "Requesting..." : "Request retry"}
+                  </button>
+                  <button
+                    type="button"
+                    className="operator-overview__approval-button operator-overview__approval-button--reject"
+                    disabled={submittingDecision !== null}
+                    onClick={() => void handleApprovalDecision("reject")}
+                  >
+                    {submittingDecision === "reject" ? "Rejecting..." : "Reject"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {operatorView.blockers.length > 0 ? (
         <section className="operator-overview__blockers">
@@ -155,4 +263,39 @@ function formatDateTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function humanizeApprovalStatus(status: RuntimeOperatorApprovalGate["status"]) {
+  switch (status) {
+    case "waiting":
+      return "Waiting for approval";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    default:
+      return "Pending";
+  }
+}
+
+function humanizeApprovalKind(kind: RuntimeOperatorApprovalGate["kind"]) {
+  switch (kind) {
+    case "architecture":
+      return "Architecture gate";
+    case "implementation":
+      return "Implementation gate";
+    default:
+      return "Deployment gate";
+  }
+}
+
+function humanizeApprovalDecision(decision: RuntimeOperatorApprovalDecision) {
+  switch (decision) {
+    case "approve":
+      return "Approved";
+    case "reject":
+      return "Rejected";
+    default:
+      return "Retry requested";
+  }
 }
