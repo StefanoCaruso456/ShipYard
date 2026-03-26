@@ -286,6 +286,61 @@ This phase adds the missing live role orchestration on top of those foundations.
 
 Complete
 
+## Phase 10: Typed Agent Control Plane
+
+### What
+
+The runtime now stores a typed control-plane state for structured delivery runs.
+
+It tracks:
+
+- ownership across orchestrator, production lead, specialist devs, and execution subagents
+- typed phase, story, and task state
+- handoffs between delivery roles
+- control-plane artifacts such as plans, task results, and validation reports
+- interventions such as retries and manual review requests
+- blockers and their resolution state
+
+### Why
+
+The system already had phase, story, and task execution, but the workflow state still lived mostly inside execution flow and event history.
+
+This phase makes coordination state explicit and inspectable so progress, ownership, retries, blockers, and delivery artifacts are stored as runtime data instead of being inferred later.
+
+### How
+
+- derive a typed control plane from phase execution input
+- assign default ownership for each phase, story, and task
+- keep control-plane state synchronized with live execution transitions
+- record typed handoffs, artifacts, interventions, and blockers as the run progresses
+- expose the control plane on runtime task records through the API
+
+### Purpose
+
+Move workflow truth out of prompt behavior and into explicit backend state.
+
+### Outcome
+
+Structured runs can now answer:
+
+- who owns this work right now
+- what already completed
+- what retried
+- what is blocked
+- what artifacts and validation outputs were produced
+
+### Architecture
+
+- typed control-plane contracts live in `packages/agent-core/src/runtime/types.ts`
+- control-plane lifecycle logic lives in `packages/agent-core/src/runtime/controlPlane.ts`
+- phase execution keeps the control plane synchronized in `packages/agent-core/src/runtime/phaseExecution.ts`
+- runtime normalization and persistence live in `packages/agent-core/src/runtime/createPersistentRuntimeService.ts`
+- `apps/server` exposes the control plane through existing runtime task APIs
+
+### Status
+
+Complete
+
 ## What Comes Next
 
 The next major phase should build on these foundations instead of replacing them.
