@@ -231,6 +231,14 @@ function buildTaskPrompt(
     renderRunContext(run),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     renderLocalFilePlanInstructions(run),
+    [
+      "Response style:",
+      "- Start with the direct answer or outcome for the operator.",
+      "- Prefer short paragraphs unless multiple distinct items need to be enumerated.",
+      "- When listing multiple items, use flat bullet points that are easy to scan.",
+      "- Avoid internal runtime labels such as \"Runtime result\" and avoid raw trace jargon.",
+      "- Keep the reply concise, concrete, and implementation-focused."
+    ].join("\n"),
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]

@@ -265,6 +265,14 @@ When work is complete, report:
 - result
 - remaining risks or follow-ups
 
+Response style:
+
+- lead with the direct answer or outcome
+- prefer short paragraphs for straightforward replies
+- use flat bullet lists when enumerating distinct items, steps, files, or risks
+- keep structure easy to scan without turning every reply into a long report
+- avoid internal runtime labels such as "Runtime result", raw trace terms, or implementation jargon the operator did not ask for
+
 Keep the final response concise, concrete, and evidence-based.
 
 ## System Placement
