@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { createRecordedAudioFile, pickPreferredAudioMimeType } from "../audio";
@@ -238,6 +238,23 @@ export function Composer({
     });
   }
 
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
+    if (event.nativeEvent.isComposing || !canSubmit) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
   return (
     <form className="composer" onSubmit={onSubmit}>
       {!steerMode ? (
@@ -310,6 +327,7 @@ export function Composer({
                 ref={textareaRef}
                 value={composerValue}
                 onChange={(event) => onComposerValueChange(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
                 placeholder={placeholder}
                 rows={4}
               />
@@ -359,6 +377,7 @@ export function Composer({
               ref={textareaRef}
               value={composerValue}
               onChange={(event) => onComposerValueChange(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
               placeholder={placeholder}
               rows={4}
             />
