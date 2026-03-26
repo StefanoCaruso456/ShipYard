@@ -83,6 +83,7 @@ export {
   recordTaskStarted,
   syncControlPlaneState
 } from "./runtime/controlPlane";
+export { deriveOperatorRunView } from "./runtime/operatorView";
 export {
   executeOrchestrationLoop,
   planNextStep,
@@ -182,6 +183,17 @@ export type {
   OrchestrationAction,
   OrchestrationState,
   OrchestrationStatus,
+  OperatorJournalTone,
+  OperatorRunBlocker,
+  OperatorRunCurrentWork,
+  OperatorRunJournalEntry,
+  OperatorRunOwner,
+  OperatorRunProgress,
+  OperatorRunRetrySummary,
+  OperatorRunStage,
+  OperatorRunStageId,
+  OperatorRunStageStatus,
+  OperatorRunView,
   OrchestrationStepKind,
   Phase,
   PhaseExecutionInput,

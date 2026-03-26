@@ -183,6 +183,7 @@ export type RuntimeTask = {
     updatedAt: string;
     source: "result" | "failure" | "retry";
   } | null;
+  operatorView?: RuntimeOperatorView | null;
   events?: Array<{
     at: string;
     type: string;
@@ -476,6 +477,95 @@ export type RuntimeAudioTranscriptionResponse = {
   };
 };
 
+export type RuntimeOperatorStageId =
+  | "queued"
+  | "coordination"
+  | "execution"
+  | "validation"
+  | "rebuild"
+  | "delivery";
+
+export type RuntimeOperatorStageStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export type RuntimeOperatorJournalTone = "default" | "info" | "success" | "warning" | "danger";
+
+export type RuntimeOperatorStage = {
+  id: RuntimeOperatorStageId;
+  label: string;
+  status: RuntimeOperatorStageStatus;
+  detail: string;
+};
+
+export type RuntimeOperatorOwner = {
+  id: string | null;
+  role: string | null;
+  label: string;
+  agentTypeId: string | null;
+};
+
+export type RuntimeOperatorCurrentWork = {
+  entityKind: "phase" | "story" | "task" | "run" | "orchestration_step" | "rebuild" | null;
+  entityId: string | null;
+  label: string | null;
+  status: string | null;
+};
+
+export type RuntimeOperatorProgress = {
+  totalPhases: number;
+  completedPhases: number;
+  totalStories: number;
+  completedStories: number;
+  totalTasks: number;
+  completedTasks: number;
+};
+
+export type RuntimeOperatorRetrySummary = {
+  runRetries: number;
+  storyRetries: number;
+  taskRetries: number;
+  totalRetries: number;
+  maxStoryRetries: number | null;
+  maxTaskRetries: number | null;
+  note: string | null;
+};
+
+export type RuntimeOperatorBlocker = {
+  id: string;
+  entityKind: "phase" | "story" | "task";
+  entityId: string;
+  summary: string;
+  ownerLabel: string;
+  createdAt: string;
+};
+
+export type RuntimeOperatorJournalEntry = {
+  id: string;
+  kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
+  at: string;
+  label: string;
+  detail: string;
+  tone: RuntimeOperatorJournalTone;
+  meta: string[];
+};
+
+export type RuntimeOperatorView = {
+  summary: string;
+  stage: RuntimeOperatorStage;
+  stages: RuntimeOperatorStage[];
+  owner: RuntimeOperatorOwner;
+  current: RuntimeOperatorCurrentWork;
+  nextAction: string | null;
+  progress: RuntimeOperatorProgress | null;
+  retries: RuntimeOperatorRetrySummary;
+  blockers: RuntimeOperatorBlocker[];
+  journal: RuntimeOperatorJournalEntry[];
+};
+
 export type WorkspaceProjectKind = "live" | "local";
 
 export type WorkspaceProjectFolderStatus = "connected" | "needs-access";
@@ -611,6 +701,7 @@ export type WorkspaceThread = {
     queuedRunIds: string[];
     runIds: string[];
     focusedRun: RuntimeThreadFocusedRun | null;
+    operatorView: RuntimeOperatorView | null;
     queuedFollowUps: RuntimeThreadQueuedItem[];
     completedRunCount: number;
   };

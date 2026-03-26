@@ -566,6 +566,102 @@ export type ControlPlaneState = {
   updatedAt: string;
 };
 
+export type OperatorRunStageId =
+  | "queued"
+  | "coordination"
+  | "execution"
+  | "validation"
+  | "rebuild"
+  | "delivery";
+
+export type OperatorRunStageStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export type OperatorJournalTone = "default" | "info" | "success" | "warning" | "danger";
+
+export type OperatorRunStage = {
+  id: OperatorRunStageId;
+  label: string;
+  status: OperatorRunStageStatus;
+  detail: string;
+};
+
+export type OperatorRunOwner = {
+  id: string | null;
+  role:
+    | ControlPlaneRole
+    | "planner"
+    | "executor"
+    | "verifier"
+    | "runtime_worker"
+    | "system"
+    | null;
+  label: string;
+  agentTypeId: TeamSkillId | null;
+};
+
+export type OperatorRunCurrentWork = {
+  entityKind: ControlPlaneEntityKind | "run" | "orchestration_step" | "rebuild" | null;
+  entityId: string | null;
+  label: string | null;
+  status: string | null;
+};
+
+export type OperatorRunProgress = {
+  totalPhases: number;
+  completedPhases: number;
+  totalStories: number;
+  completedStories: number;
+  totalTasks: number;
+  completedTasks: number;
+};
+
+export type OperatorRunRetrySummary = {
+  runRetries: number;
+  storyRetries: number;
+  taskRetries: number;
+  totalRetries: number;
+  maxStoryRetries: number | null;
+  maxTaskRetries: number | null;
+  note: string | null;
+};
+
+export type OperatorRunBlocker = {
+  id: string;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  ownerLabel: string;
+  createdAt: string;
+};
+
+export type OperatorRunJournalEntry = {
+  id: string;
+  kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
+  at: string;
+  label: string;
+  detail: string;
+  tone: OperatorJournalTone;
+  meta: string[];
+};
+
+export type OperatorRunView = {
+  summary: string;
+  stage: OperatorRunStage;
+  stages: OperatorRunStage[];
+  owner: OperatorRunOwner;
+  current: OperatorRunCurrentWork;
+  nextAction: string | null;
+  progress: OperatorRunProgress | null;
+  retries: OperatorRunRetrySummary;
+  blockers: OperatorRunBlocker[];
+  journal: OperatorRunJournalEntry[];
+};
+
 export type RebuildScope = "ship" | "project" | "workspace";
 
 export type RebuildTargetInput = {

@@ -501,6 +501,7 @@ a {
   gap: 1rem;
 }
 
+.operator-overview,
 .live-runtime-stage__active,
 .steer-queue {
   border-radius: 1.15rem;
@@ -513,9 +514,158 @@ a {
     0 18px 36px rgba(0, 0, 0, 0.2);
 }
 
+.operator-overview,
 .live-runtime-stage__active,
 .steer-queue {
   padding: 1rem 1.05rem;
+}
+
+.operator-overview {
+  display: grid;
+  gap: 1rem;
+}
+
+.operator-overview__header,
+.operator-overview__section-head,
+.operator-overview__journal-head,
+.operator-overview__meta,
+.operator-overview__blocker-list {
+  display: flex;
+  align-items: center;
+}
+
+.operator-overview__header,
+.operator-overview__section-head,
+.operator-overview__journal-head {
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.operator-overview__header div,
+.operator-overview__card,
+.operator-overview__blocker,
+.operator-overview__journal-item {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.operator-overview__badge,
+.operator-overview__meta span {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.2rem 0.52rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ecece7;
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
+.operator-overview__header strong,
+.operator-overview__section-head strong {
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.operator-overview__header p,
+.operator-overview__card p,
+.operator-overview__blocker p,
+.operator-overview__journal-item p {
+  margin: 0;
+  color: #b3b3ad;
+  line-height: 1.55;
+}
+
+.operator-overview__section-head span,
+.operator-overview__journal-head span {
+  color: #8d8d87;
+  font-size: 0.8rem;
+}
+
+.operator-overview__stages {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.operator-overview__stage,
+.operator-overview__card,
+.operator-overview__blocker,
+.operator-overview__journal-item {
+  padding: 0.85rem 0.92rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.operator-overview__stage span,
+.operator-overview__card strong,
+.operator-overview__blocker strong,
+.operator-overview__journal-head strong {
+  font-size: 0.9rem;
+  font-weight: 620;
+}
+
+.operator-overview__stage small,
+.operator-overview__eyebrow {
+  color: #8d8d87;
+  font-size: 0.78rem;
+}
+
+.operator-overview__stage small {
+  line-height: 1.5;
+}
+
+.operator-overview__stage--active {
+  border-color: rgba(88, 110, 139, 0.36);
+  background: rgba(88, 110, 139, 0.12);
+}
+
+.operator-overview__stage--completed {
+  border-color: rgba(116, 153, 124, 0.34);
+}
+
+.operator-overview__stage--failed {
+  border-color: rgba(154, 96, 96, 0.38);
+  background: rgba(154, 96, 96, 0.1);
+}
+
+.operator-overview__stage--skipped {
+  opacity: 0.62;
+}
+
+.operator-overview__grid,
+.operator-overview__journal-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.operator-overview__grid {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.operator-overview__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.operator-overview__blocker-list,
+.operator-overview__meta {
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.operator-overview__journal-item--success {
+  border-color: rgba(116, 153, 124, 0.32);
+}
+
+.operator-overview__journal-item--warning {
+  border-color: rgba(176, 143, 80, 0.32);
+}
+
+.operator-overview__journal-item--danger {
+  border-color: rgba(154, 96, 96, 0.38);
 }
 
 .live-runtime-stage__eyebrow,

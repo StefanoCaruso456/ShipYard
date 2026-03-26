@@ -368,11 +368,13 @@ test("live orchestration blocks execution when a delegated tool is outside the e
             skillId: context.instructionRuntime.skill.meta.id,
             completedAt: new Date().toISOString(),
             toolResult: {
-              rootDir: "/tmp",
-              path: "src/example.ts",
-              updatedAt: new Date().toISOString(),
-              validation: {
-                unchangedOutsideRegion: true
+              ok: true,
+              toolName: "read_file",
+              data: {
+                rootDir: "/tmp",
+                path: "src/example.ts",
+                content: "export const example = true;\n",
+                lineCount: 1
               }
             }
           };
