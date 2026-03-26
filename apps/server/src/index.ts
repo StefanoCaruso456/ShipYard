@@ -118,6 +118,7 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
 
   try {
     const {
+      workspaceRoot,
       runtimeService,
       contextAssembler,
       openAI,
@@ -151,7 +152,8 @@ async function bootRuntime(app: ReturnType<typeof express>, bootState: RuntimeBo
       contextAssembler,
       traceService,
       repoBranchService,
-      externalRecordSync
+      externalRecordSync,
+      workspaceRoot
     );
 
     console.log("Shipyard runtime boot complete.", {

@@ -1,6 +1,7 @@
 import type {
   ComposerAttachment,
   RuntimeAudioTranscriptionResponse,
+  RuntimeFactoryRunInput,
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
@@ -96,6 +97,7 @@ export function submitRuntimeTask(input: {
   attachments?: ComposerAttachment[];
   project?: WorkspaceProject;
   context?: RuntimeTaskSubmitContext;
+  factory?: RuntimeFactoryRunInput | null;
 }) {
   const attachments = input.attachments ?? [];
   const project = input.project ? serializeRuntimeProject(input.project) : undefined;
@@ -127,6 +129,10 @@ export function submitRuntimeTask(input: {
 
     if (input.context) {
       formData.append("context", JSON.stringify(input.context));
+    }
+
+    if (input.factory) {
+      formData.append("factory", JSON.stringify(input.factory));
     }
 
     for (const attachment of attachments) {

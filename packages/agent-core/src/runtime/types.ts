@@ -939,6 +939,98 @@ export type RebuildState = {
   updatedAt: string;
 };
 
+export type FactoryStackTemplateId =
+  | "nextjs_supabase_vercel"
+  | "nextjs_railway_postgres"
+  | "react_express_railway";
+
+export type FactoryRepositoryProviderId = "github";
+
+export type FactoryRepositoryVisibility = "private" | "public";
+
+export type FactoryDeploymentProviderId = "vercel" | "railway" | "manual";
+
+export type FactoryStageId = "intake" | "bootstrap" | "implementation" | "delivery";
+
+export type FactoryArtifactKind =
+  | "repository"
+  | "bootstrap_plan"
+  | "deployment_handoff"
+  | "delivery_summary";
+
+export type FactoryArtifactStatus = "planned" | "active" | "ready" | "completed";
+
+export type FactoryRunInput = {
+  appName: string;
+  stackTemplateId: FactoryStackTemplateId;
+  repository: {
+    provider?: FactoryRepositoryProviderId | null;
+    owner?: string | null;
+    name: string;
+    visibility?: FactoryRepositoryVisibility | null;
+    baseBranch?: string | null;
+  };
+  deployment: {
+    provider: FactoryDeploymentProviderId;
+    projectName?: string | null;
+    environment?: string | null;
+    url?: string | null;
+  };
+};
+
+export type FactoryStackSummary = {
+  templateId: FactoryStackTemplateId;
+  label: string;
+  frontend: string;
+  backend: string;
+  data: string;
+  deployment: string;
+};
+
+export type FactoryRepositoryState = {
+  provider: FactoryRepositoryProviderId;
+  owner: string | null;
+  name: string;
+  visibility: FactoryRepositoryVisibility;
+  baseBranch: string;
+  url: string | null;
+  localPath: string | null;
+};
+
+export type FactoryDeploymentState = {
+  provider: FactoryDeploymentProviderId;
+  projectName: string | null;
+  environment: string | null;
+  url: string | null;
+};
+
+export type FactoryArtifact = {
+  id: string;
+  kind: FactoryArtifactKind;
+  title: string;
+  summary: string;
+  status: FactoryArtifactStatus;
+  url: string | null;
+  path: string | null;
+  provider: string | null;
+  updatedAt: string;
+};
+
+export type FactoryRunState = {
+  version: 1;
+  mode: "factory";
+  appName: string;
+  productBrief: string;
+  stack: FactoryStackSummary;
+  repository: FactoryRepositoryState;
+  deployment: FactoryDeploymentState;
+  currentStage: FactoryStageId;
+  artifacts: FactoryArtifact[];
+  deliverySummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RollingSummary = {
   text: string;
   updatedAt: string;
@@ -949,7 +1041,7 @@ export type ExternalRecordProviderId = "file_mirror";
 
 export type ExternalRecordEntityKind = "run" | ControlPlaneEntityKind;
 
-export type ExternalRecordLinkKind = "pull_request" | "deployment";
+export type ExternalRecordLinkKind = "repository" | "pull_request" | "deployment";
 
 export type RunProjectLinkInput = {
   id?: string | null;
@@ -1097,6 +1189,7 @@ export type SubmitTaskInput = {
   context?: RunContextInput | null;
   phaseExecution?: PhaseExecutionInput | null;
   rebuild?: RebuildInput | null;
+  factory?: FactoryRunInput | null;
 };
 
 export type AgentRunFailure = {
@@ -1123,6 +1216,7 @@ export type AgentRunResult = {
   phaseExecution?: PhaseExecutionState | null;
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
+  factory?: FactoryRunState | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -1165,6 +1259,7 @@ export type AgentRunRecord = {
   phaseExecution?: PhaseExecutionState | null;
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
+  factory?: FactoryRunState | null;
   externalSync?: ExternalSyncState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];

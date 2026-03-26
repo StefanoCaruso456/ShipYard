@@ -4,10 +4,12 @@ import type {
   ComposerAttachment,
   ComposerMode,
   ProjectPayload,
+  RuntimeFactoryComposerDraft,
   RuntimeInstructionResponse,
   RuntimeRepoBranchSnapshot,
   RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
+  RuntimeWorkflowMode,
   SidebarNavItemId,
   WorkspaceProject,
   WorkspaceThread
@@ -26,6 +28,8 @@ type TaskWorkspaceProps = {
   runtimeRepoSwitchingBranchName: string | null;
   runtimeRepoError: string | null;
   instructions: RuntimeInstructionResponse | null;
+  workflowMode: RuntimeWorkflowMode;
+  factoryDraft: RuntimeFactoryComposerDraft;
   composerMode: ComposerMode;
   composerValue: string;
   composerAttachments: ComposerAttachment[];
@@ -37,6 +41,8 @@ type TaskWorkspaceProps = {
   onComposerModeChange: (mode: ComposerMode) => void;
   onComposerValueChange: (value: string) => void;
   onComposerAttachmentsChange: (attachments: ComposerAttachment[]) => void;
+  onWorkflowModeChange: (mode: RuntimeWorkflowMode) => void;
+  onFactoryDraftChange: (draft: RuntimeFactoryComposerDraft) => void;
   onVoiceCapture: (file: File) => Promise<void>;
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
@@ -64,6 +70,8 @@ export function TaskWorkspace({
   runtimeRepoSwitchingBranchName,
   runtimeRepoError,
   instructions,
+  workflowMode,
+  factoryDraft,
   composerMode,
   composerValue,
   composerAttachments,
@@ -75,6 +83,8 @@ export function TaskWorkspace({
   onComposerModeChange,
   onComposerValueChange,
   onComposerAttachmentsChange,
+  onWorkflowModeChange,
+  onFactoryDraftChange,
   onVoiceCapture,
   onVoiceCaptureError,
   onSelectSuggestion,
@@ -160,6 +170,9 @@ export function TaskWorkspace({
 
       <Composer
         project={project}
+        backendConnected={backendConnected}
+        workflowMode={workflowMode}
+        factoryDraft={factoryDraft}
         composerMode={composerMode}
         composerValue={composerValue}
         attachments={composerAttachments}
@@ -168,6 +181,8 @@ export function TaskWorkspace({
         feedback={feedback}
         submitting={submitting}
         transcribingAudio={transcribingAudio}
+        onWorkflowModeChange={onWorkflowModeChange}
+        onFactoryDraftChange={onFactoryDraftChange}
         onComposerModeChange={onComposerModeChange}
         onComposerValueChange={onComposerValueChange}
         onAttachmentsChange={onComposerAttachmentsChange}

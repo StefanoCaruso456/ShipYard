@@ -119,7 +119,12 @@ export function normalizeProjectLinks(
 
   return links
     .filter((link) => typeof link?.url === "string" && link.url.trim())
-    .filter((link) => link.kind === "pull_request" || link.kind === "deployment")
+    .filter(
+      (link) =>
+        link.kind === "repository" ||
+        link.kind === "pull_request" ||
+        link.kind === "deployment"
+    )
     .map((link) => {
       const url = link.url.trim();
       return {

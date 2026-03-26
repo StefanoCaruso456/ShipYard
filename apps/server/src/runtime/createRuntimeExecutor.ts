@@ -6,8 +6,9 @@ import type {
   RollbackResult,
   ValidationResult
 } from "@shipyard/agent-core";
-import { getActiveTraceScope } from "@shipyard/agent-core";
+import { createRepoToolset, getActiveTraceScope } from "@shipyard/agent-core";
 import { generateText } from "ai";
+import path from "node:path";
 
 import {
   createOpenAIExecutor,
@@ -25,6 +26,7 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
     config: options.openAI,
     generateTextImpl: options.generateTextImpl
   });
+  const repoToolsetsByRoot = new Map<string, RepoToolset>();
 
   return async (run, context) => {
     if (!run.toolRequest) {
@@ -51,7 +53,12 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       }
     });
 
-    const toolResult = await executeToolRequest(options.repoToolset, toolRequest).catch(
+    const repoToolset = resolveRepoToolsetForRun(
+      options.repoToolset,
+      repoToolsetsByRoot,
+      run
+    );
+    const toolResult = await executeToolRequest(repoToolset, toolRequest).catch(
       async (error) => {
         traceScope?.activeSpan.addEvent("tool_failed", {
           message: error instanceof Error ? error.message : String(error),
@@ -115,6 +122,34 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       toolResult
     };
   };
+}
+
+function resolveRepoToolsetForRun(
+  defaultToolset: RepoToolset,
+  cache: Map<string, RepoToolset>,
+  run: Parameters<ExecuteRun>[0]
+) {
+  const runtimeFolder =
+    run.project?.folder?.provider === "runtime" && run.project.folder.displayPath?.trim()
+      ? path.resolve(run.project.folder.displayPath.trim())
+      : null;
+
+  if (!runtimeFolder) {
+    return defaultToolset;
+  }
+
+  const cached = cache.get(runtimeFolder);
+
+  if (cached) {
+    return cached;
+  }
+
+  const toolset = createRepoToolset({
+    rootDir: runtimeFolder
+  });
+  cache.set(runtimeFolder, toolset);
+
+  return toolset;
 }
 
 function summarizeToolRequest(toolRequest: RepoToolRequest) {
