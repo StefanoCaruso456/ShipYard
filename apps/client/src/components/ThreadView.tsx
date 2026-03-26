@@ -1,4 +1,9 @@
-import type { RuntimeRepoBranchSnapshot, WorkspaceProject, WorkspaceThread } from "../types";
+import type {
+  RuntimeRepoBranchSnapshot,
+  RuntimeOperatorApprovalDecision,
+  WorkspaceProject,
+  WorkspaceThread
+} from "../types";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
@@ -26,6 +31,12 @@ type ThreadViewProps = {
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
+  onApprovalDecision: (
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) => Promise<void>;
 };
 
 export function ThreadView({
@@ -38,7 +49,8 @@ export function ThreadView({
   onReconnectProjectFolder,
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
-  onRequestSteer
+  onRequestSteer,
+  onApprovalDecision
 }: ThreadViewProps) {
   const isEmpty = !thread || thread.messages.length === 0;
   const projectNeedsAccess = project?.kind === "local" && project.folder?.status === "needs-access";
@@ -54,6 +66,8 @@ export function ThreadView({
       ? "Queued"
       : thread.status === "running"
         ? "Thinking"
+        : thread.status === "paused"
+          ? "Awaiting approval"
         : thread.status === "completed"
           ? "Completed"
           : thread.status === "failed"
@@ -136,7 +150,7 @@ export function ThreadView({
   if (
     thread.source === "live" &&
     thread.liveRuntime?.focusedRunId &&
-    (thread.status === "running" || thread.status === "pending")
+    (thread.status === "running" || thread.status === "pending" || thread.status === "paused")
   ) {
     hiddenMessageIds.add(`${thread.liveRuntime.focusedRunId}-user`);
   }
@@ -176,7 +190,11 @@ export function ThreadView({
         <AttachmentPreviewList attachments={thread.attachments} />
 
         {showLiveRuntimeStage ? (
-          <LiveRuntimeStage thread={thread} onRequestSteer={onRequestSteer} />
+          <LiveRuntimeStage
+            thread={thread}
+            onRequestSteer={onRequestSteer}
+            onApprovalDecision={onApprovalDecision}
+          />
         ) : null}
 
         {userMessages.map((message) => (

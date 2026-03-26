@@ -422,6 +422,223 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.ok(completedRun.events.some((event) => event.type === "task_completed"));
 });
 
+test("persistent runtime pauses at approval gates and resumes after approval", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Run the gated delivery plan.",
+    phaseExecution: {
+      phases: [
+        {
+          id: "phase-architecture",
+          name: "Architecture",
+          description: "Approve the architecture before work begins.",
+          approvalGate: {
+            id: "gate-architecture",
+            kind: "architecture",
+            instructions: "Review the architecture brief before implementation starts."
+          },
+          userStories: [
+            {
+              id: "story-architecture",
+              title: "Draft architecture",
+              description: "Draft the initial architecture plan.",
+              acceptanceCriteria: ["Draft the architecture plan."],
+              tasks: [
+                {
+                  id: "task-architecture",
+                  instruction: "Draft the architecture plan.",
+                  expectedOutcome: "Draft the architecture plan."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: "phase-implementation",
+          name: "Implementation",
+          description: "Implement the approved plan.",
+          userStories: [
+            {
+              id: "story-implementation",
+              title: "Ship implementation",
+              description: "Implement the approved plan.",
+              acceptanceCriteria: ["Implement the approved plan."],
+              tasks: [
+                {
+                  id: "task-implementation",
+                  instruction: "Implement the approved plan.",
+                  expectedOutcome: "Implement the approved plan."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  const pausedRun = await waitForRunStatus(runtimeService, run.id, "paused");
+
+  assert.deepEqual(startedInstructions, []);
+  assert.equal(pausedRun.phaseExecution?.status, "blocked");
+  assert.equal(pausedRun.phaseExecution?.activeApprovalGateId, "gate-architecture");
+  assert.equal(pausedRun.controlPlane?.activeApprovalGateId, "gate-architecture");
+  assert.equal(pausedRun.controlPlane?.approvalGates[0]?.status, "waiting");
+  assert.ok(pausedRun.events.some((event) => event.type === "approval_gate_waiting"));
+  assert.equal(runtimeService.getStatus().runsByStatus.paused, 1);
+
+  const resumedRun = await runtimeService.resolveApprovalGate({
+    runId: run.id,
+    gateId: "gate-architecture",
+    decision: "approve",
+    comment: "Architecture is approved."
+  });
+
+  assert.equal(resumedRun.status, "pending");
+  assert.equal(resumedRun.phaseExecution?.activeApprovalGateId, null);
+  assert.equal(resumedRun.controlPlane?.approvalGates[0]?.status, "approved");
+
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.deepEqual(startedInstructions, [
+    "Draft the architecture plan.",
+    "Implement the approved plan."
+  ]);
+  assert.ok(completedRun.events.some((event) => event.type === "approval_gate_approved"));
+  assert.equal(completedRun.phaseExecution?.status, "completed");
+});
+
+test("persistent runtime can reject and retry from an approval gate", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Run the implementation gate flow.",
+    phaseExecution: {
+      phases: [
+        {
+          id: "phase-foundation",
+          name: "Foundation",
+          description: "Lay down the initial foundation.",
+          userStories: [
+            {
+              id: "story-foundation",
+              title: "Build foundation",
+              description: "Complete the first pass.",
+              acceptanceCriteria: ["Complete the foundation pass."],
+              tasks: [
+                {
+                  id: "task-foundation",
+                  instruction: "Complete the foundation pass.",
+                  expectedOutcome: "Complete the foundation pass."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: "phase-implementation",
+          name: "Implementation",
+          description: "Pause before implementation starts.",
+          approvalGate: {
+            id: "gate-implementation",
+            kind: "implementation",
+            instructions: "Review the foundation output before implementation starts."
+          },
+          userStories: [
+            {
+              id: "story-implementation",
+              title: "Build implementation",
+              description: "Implement after approval.",
+              acceptanceCriteria: ["Implementation completed"],
+              tasks: [
+                {
+                  id: "task-implementation",
+                  instruction: "Ship the implementation pass.",
+                  expectedOutcome: "Ship the implementation pass."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  const pausedRun = await waitForRunStatus(runtimeService, run.id, "paused");
+
+  assert.deepEqual(startedInstructions, ["Complete the foundation pass."]);
+  assert.equal(pausedRun.controlPlane?.approvalGates[0]?.status, "waiting");
+
+  const rejectedRun = await runtimeService.resolveApprovalGate({
+    runId: run.id,
+    gateId: "gate-implementation",
+    decision: "reject",
+    comment: "Foundation pass needs another iteration."
+  });
+
+  assert.equal(rejectedRun.status, "paused");
+  assert.equal(rejectedRun.phaseExecution?.status, "blocked");
+  assert.equal(rejectedRun.controlPlane?.approvalGates[0]?.status, "rejected");
+  assert.ok(rejectedRun.events.some((event) => event.type === "approval_gate_rejected"));
+
+  const retriedRun = await runtimeService.resolveApprovalGate({
+    runId: run.id,
+    gateId: "gate-implementation",
+    decision: "request_retry",
+    comment: "Redo the foundation before implementation."
+  });
+
+  assert.equal(retriedRun.status, "pending");
+  assert.equal(retriedRun.phaseExecution?.phases[0]?.status, "pending");
+  assert.equal(retriedRun.phaseExecution?.phases[1]?.approvalGate?.status, "pending");
+
+  const pausedAgain = await waitForRunStatus(runtimeService, run.id, "paused");
+
+  assert.deepEqual(startedInstructions, [
+    "Complete the foundation pass.",
+    "Complete the foundation pass."
+  ]);
+  assert.equal(pausedAgain.phaseExecution?.phases[0]?.status, "completed");
+  assert.equal(pausedAgain.phaseExecution?.phases[1]?.approvalGate?.status, "waiting");
+  assert.ok(pausedAgain.events.some((event) => event.type === "approval_gate_retry_requested"));
+  assert.ok(
+    pausedAgain.context.externalContext?.some((entry) =>
+      entry.content.includes("Redo the foundation before implementation.")
+    )
+  );
+});
+
 test("persistent runtime retries task validation gates before failing the full run", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const attempts = new Map<string, number>();
@@ -595,7 +812,7 @@ async function createInstructionRuntimeForTests() {
 async function waitForRunStatus(
   runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
-  expectedStatus: "running" | "completed" | "failed"
+  expectedStatus: "running" | "paused" | "completed" | "failed"
 ) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const run = runtimeService.getRun(runId);

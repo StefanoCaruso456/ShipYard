@@ -25,7 +25,7 @@ import type {
 } from "../validation/types";
 import type { TraceService } from "../observability/types";
 
-export type AgentRunStatus = "pending" | "running" | "completed" | "failed";
+export type AgentRunStatus = "pending" | "running" | "paused" | "completed" | "failed";
 
 export type RuntimeWorkerState = "idle" | "running";
 
@@ -104,7 +104,7 @@ export type RepoInspectionToolResult =
 
 export type RepoToolResult = RepoInspectionToolResult | RepoMutationToolResult;
 
-export type PhaseStatus = "pending" | "in_progress" | "completed" | "failed";
+export type PhaseStatus = "pending" | "in_progress" | "blocked" | "completed" | "failed";
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
@@ -318,6 +318,7 @@ export type PhaseInput = {
   id: string;
   name: string;
   description: string;
+  approvalGate?: ApprovalGateInput | null;
   userStories: UserStoryInput[];
 };
 
@@ -330,6 +331,37 @@ export type PhaseExecutionRetryPolicy = {
 export type PhaseExecutionInput = {
   phases: PhaseInput[];
   retryPolicy?: Partial<PhaseExecutionRetryPolicy> | null;
+};
+
+export type ApprovalGateKind = "architecture" | "implementation" | "deployment";
+
+export type ApprovalDecision = "approve" | "reject" | "request_retry";
+
+export type ApprovalGateStatus = "pending" | "waiting" | "approved" | "rejected";
+
+export type ApprovalDecisionRecord = {
+  id: string;
+  decision: ApprovalDecision;
+  comment: string | null;
+  decidedAt: string;
+};
+
+export type ApprovalGateInput = {
+  id?: string;
+  kind: ApprovalGateKind;
+  title?: string | null;
+  instructions?: string | null;
+};
+
+export type ApprovalGateState = {
+  id: string;
+  kind: ApprovalGateKind;
+  title: string;
+  instructions: string | null;
+  status: ApprovalGateStatus;
+  waitingAt: string | null;
+  resolvedAt: string | null;
+  decisions: ApprovalDecisionRecord[];
 };
 
 export type Task = {
@@ -366,6 +398,7 @@ export type Phase = {
   id: string;
   name: string;
   description: string;
+  approvalGate: ApprovalGateState | null;
   status: PhaseStatus;
   userStories: UserStory[];
   failureReason: string | null;
@@ -390,6 +423,7 @@ export type PhaseExecutionPointer = {
 export type PhaseExecutionState = {
   status: PhaseStatus;
   phases: Phase[];
+  activeApprovalGateId: string | null;
   current: PhaseExecutionPointer;
   progress: PhaseExecutionProgress;
   retryPolicy: PhaseExecutionRetryPolicy;
@@ -417,6 +451,22 @@ export type ControlPlaneArtifactKind =
   | "failure_report";
 
 export type ControlPlaneHandoffStatus = "created" | "accepted" | "completed";
+
+export type ControlPlaneApprovalGate = {
+  id: string;
+  kind: ApprovalGateKind;
+  phaseId: string;
+  phaseName: string;
+  title: string;
+  instructions: string | null;
+  status: ApprovalGateStatus;
+  waitingAt: string | null;
+  resolvedAt: string | null;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  decisions: ApprovalDecisionRecord[];
+};
 
 export type ControlPlaneInterventionKind = "retry" | "replan" | "manual_review" | "rollback";
 
@@ -554,10 +604,12 @@ export type ControlPlaneState = {
   runOwnerId: string;
   agents: ControlPlaneAgent[];
   specialistAgentRegistry: SpecialistAgentRegistry;
+  activeApprovalGateId: string | null;
   current: PhaseExecutionPointer;
   progress: PhaseExecutionProgress;
   retryPolicy: PhaseExecutionRetryPolicy;
   phases: ControlPlanePhaseNode[];
+  approvalGates: ControlPlaneApprovalGate[];
   artifacts: ControlPlaneArtifact[];
   handoffs: ControlPlaneHandoff[];
   interventions: ControlPlaneIntervention[];
@@ -649,6 +701,20 @@ export type OperatorRunJournalEntry = {
   meta: string[];
 };
 
+export type OperatorRunApprovalGate = {
+  id: string;
+  kind: ApprovalGateKind;
+  phaseId: string;
+  phaseName: string;
+  title: string;
+  instructions: string | null;
+  status: ApprovalGateStatus;
+  waitingAt: string | null;
+  resolvedAt: string | null;
+  ownerLabel: string;
+  decisions: ApprovalDecisionRecord[];
+};
+
 export type OperatorRunView = {
   summary: string;
   stage: OperatorRunStage;
@@ -658,6 +724,11 @@ export type OperatorRunView = {
   nextAction: string | null;
   progress: OperatorRunProgress | null;
   retries: OperatorRunRetrySummary;
+  approval: {
+    activeGateId: string | null;
+    activeGate: OperatorRunApprovalGate | null;
+    gates: OperatorRunApprovalGate[];
+  } | null;
   blockers: OperatorRunBlocker[];
   journal: OperatorRunJournalEntry[];
 };
@@ -805,6 +876,13 @@ export type AgentRunResult = {
     estimatedCostUsd: number | null;
   } | null;
   toolResult?: RepoToolResult | null;
+  paused?: {
+    reason: "approval_gate";
+    gateId: string;
+    gateKind: ApprovalGateKind;
+    phaseId: string;
+    summary: string;
+  } | null;
 };
 
 export type AgentRunRecord = {
@@ -870,9 +948,17 @@ export type AgentRunStore = {
 export type PersistentAgentRuntimeService = {
   instructionRuntime: AgentInstructionRuntime;
   submitTask(input: SubmitTaskInput): Promise<AgentRunRecord>;
+  resolveApprovalGate(input: ResolveApprovalGateInput): Promise<AgentRunRecord>;
   getRun(id: string): AgentRunRecord | null;
   listRuns(): AgentRunRecord[];
   getStatus(): AgentRuntimeStatus;
+};
+
+export type ResolveApprovalGateInput = {
+  runId: string;
+  gateId: string;
+  decision: ApprovalDecision;
+  comment?: string | null;
 };
 
 export type RuntimeObservability = {

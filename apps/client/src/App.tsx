@@ -10,6 +10,7 @@ import {
   fetchRuntimeTrace,
   fetchRuntimeTasks,
   switchRuntimeBranch,
+  submitRuntimeApprovalDecision,
   submitRuntimeTask,
   transcribeRuntimeAudio
 } from "./api";
@@ -46,6 +47,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeRepoBranchSnapshot,
+  RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
@@ -114,7 +116,10 @@ function App() {
   const localFileApplicationsInFlightRef = useRef(new Set<string>());
   const projectPickerSupported = supportsProjectDirectoryPicker();
   const hasActiveRuntimeRuns = runtimeTasks.some(
-    (candidate) => candidate.status === "pending" || candidate.status === "running"
+    (candidate) =>
+      candidate.status === "pending" ||
+      candidate.status === "running" ||
+      candidate.status === "paused"
   );
   const backendConnected =
     runtimeStatus !== null || runtimeHealth?.status === "ok";
@@ -1009,6 +1014,52 @@ function App() {
     }
   }
 
+  async function handleRuntimeApprovalDecision(
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) {
+    setSubmissionFeedback({
+      tone: "info",
+      text:
+        decision === "approve"
+          ? "Approving the gate and resuming the run."
+          : decision === "reject"
+            ? "Rejecting the gate and keeping the run paused."
+            : "Requesting a retry before the gated phase resumes."
+    });
+
+    try {
+      const response = await submitRuntimeApprovalDecision(runId, {
+        gateId,
+        decision,
+        comment
+      });
+
+      setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
+      setSubmissionFeedback({
+        tone: "success",
+        text:
+          decision === "approve"
+            ? "Approval recorded and the run is back in the queue."
+            : decision === "reject"
+              ? "Rejection recorded. The run remains paused."
+              : "Retry requested and the run is back in the queue."
+      });
+
+      void loadRuntimeSnapshot();
+    } catch (error) {
+      setSubmissionFeedback({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Could not resolve the approval gate."
+      });
+    }
+  }
+
   async function handleDeleteProject(projectId: string) {
     const projectToDelete = visibleProjects.find((candidate) => candidate.id === projectId);
 
@@ -1124,6 +1175,7 @@ function App() {
           onRefreshRuntimeBranches={handleRefreshRuntimeBranches}
           onSwitchRuntimeBranch={handleSwitchRuntimeBranch}
           onRequestSteer={handleRequestSteer}
+          onApprovalDecision={handleRuntimeApprovalDecision}
           onSubmit={handleSubmitTask}
         />
       </main>

@@ -24,6 +24,10 @@ export type RollbackResult = {
 };
 
 export type RunEventType =
+  | "approval_gate_waiting"
+  | "approval_gate_approved"
+  | "approval_gate_rejected"
+  | "approval_gate_retry_requested"
   | "phase_started"
   | "phase_completed"
   | "phase_failed"

@@ -6,6 +6,7 @@ import type {
   ProjectPayload,
   RuntimeInstructionResponse,
   RuntimeRepoBranchSnapshot,
+  RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
   SidebarNavItemId,
   WorkspaceProject,
@@ -43,6 +44,12 @@ type TaskWorkspaceProps = {
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
+  onApprovalDecision: (
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) => Promise<void>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -75,6 +82,7 @@ export function TaskWorkspace({
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
   onRequestSteer,
+  onApprovalDecision,
   onSubmit
 }: TaskWorkspaceProps) {
   const runtimeState = backendConnected
@@ -145,6 +153,7 @@ export function TaskWorkspace({
             onRefreshRuntimeBranches={onRefreshRuntimeBranches}
             onSwitchRuntimeBranch={onSwitchRuntimeBranch}
             onRequestSteer={onRequestSteer}
+            onApprovalDecision={onApprovalDecision}
           />
         )}
       </div>

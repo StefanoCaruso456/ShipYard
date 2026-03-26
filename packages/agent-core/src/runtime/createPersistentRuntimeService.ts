@@ -5,12 +5,18 @@ import { getActiveTraceScope, runWithTraceScope } from "../observability/traceSc
 import type { TraceMetadata } from "../observability/types";
 import type { TraceService } from "../observability/types";
 import { executeOrchestrationLoop } from "./orchestration";
-import { createControlPlaneState, normalizeControlPlaneState } from "./controlPlane";
+import {
+  createControlPlaneState,
+  normalizeControlPlaneState,
+  recordApprovalGateDecision,
+  syncControlPlaneState
+} from "./controlPlane";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
   normalizePhaseExecutionInput,
-  normalizePhaseExecutionState
+  normalizePhaseExecutionState,
+  resolvePhaseExecutionApproval
 } from "./phaseExecution";
 import { createRebuildState, normalizeRebuildState } from "./rebuildState";
 import { normalizeRunContextInputValue } from "./schemas";
@@ -24,6 +30,7 @@ import {
   type AgentRuntimeStatus,
   type ExecuteRun,
   type PersistentAgentRuntimeService,
+  type ResolveApprovalGateInput,
   type RunProjectInput,
   type SubmitTaskInput
 } from "./types";
@@ -37,7 +44,7 @@ type CreatePersistentRuntimeServiceOptions = {
   traceService?: TraceService;
 };
 
-const runStatuses: AgentRunStatus[] = ["pending", "running", "completed", "failed"];
+const runStatuses: AgentRunStatus[] = ["pending", "running", "paused", "completed", "failed"];
 const MAX_VALIDATION_RETRIES = 1;
 
 export async function createPersistentRuntimeService(
@@ -182,6 +189,90 @@ export async function createPersistentRuntimeService(
     return cloneRunRecord(run);
   }
 
+  async function resolveApprovalGate(input: ResolveApprovalGateInput): Promise<AgentRunRecord> {
+    const storedRun = getStoredRun(input.runId);
+
+    if (!storedRun) {
+      throw new Error(`Run ${input.runId} was not found.`);
+    }
+
+    if (!storedRun.phaseExecution) {
+      throw new Error(`Run ${input.runId} does not have phase execution state.`);
+    }
+
+    const run = normalizeRunRecord(storedRun);
+    const phaseExecution = normalizePhaseExecutionState(run.phaseExecution);
+
+    if (!phaseExecution) {
+      throw new Error(`Run ${input.runId} phase execution could not be loaded.`);
+    }
+
+    const resolution = resolvePhaseExecutionApproval({
+      phaseExecution,
+      gateId: input.gateId,
+      decision: input.decision,
+      comment: input.comment
+    });
+    const controlPlane = syncControlPlaneState(
+      run.controlPlane ?? createControlPlaneState(phaseExecution),
+      phaseExecution
+    );
+
+    recordApprovalGateDecision(
+      controlPlane,
+      resolution.phase,
+      resolution.gate,
+      input.decision,
+      resolution.summary
+    );
+
+    const eventAt = new Date().toISOString();
+    const eventType =
+      input.decision === "approve"
+        ? "approval_gate_approved"
+        : input.decision === "reject"
+          ? "approval_gate_rejected"
+          : "approval_gate_retry_requested";
+    const nextStatus = resolution.outcome === "paused" ? "paused" : "pending";
+    const updatedRun = normalizeRunRecord({
+      ...run,
+      status: nextStatus,
+      completedAt: null,
+      error: null,
+      result: null,
+      context:
+        input.decision === "request_retry" && input.comment?.trim()
+          ? appendApprovalFeedbackContext(run.context, resolution, input.comment)
+          : run.context,
+      phaseExecution,
+      controlPlane,
+      rollingSummary: {
+        text: resolution.summary,
+        updatedAt: eventAt,
+        source: input.decision === "reject" ? "failure" : "result"
+      },
+      events: appendRunEvents(run, {
+        at: eventAt,
+        type: eventType,
+        phaseId: resolution.phase.id,
+        gateId: resolution.gate.id,
+        message: resolution.summary
+      })
+    });
+
+    await updateStoredRun(updatedRun);
+
+    if (nextStatus === "pending") {
+      if (!queue.includes(updatedRun.id)) {
+        enqueueRun(updatedRun);
+      }
+
+      scheduleProcessing();
+    }
+
+    return cloneRunRecord(updatedRun);
+  }
+
   function getRun(id: string): AgentRunRecord | null {
     const run = getStoredRun(id);
 
@@ -278,6 +369,10 @@ export async function createPersistentRuntimeService(
     for (const run of existingRuns) {
       if (run.status === "pending") {
         queue.push(run.id);
+        continue;
+      }
+
+      if (run.status === "paused") {
         continue;
       }
 
@@ -403,6 +498,40 @@ export async function createPersistentRuntimeService(
                   },
                   getRuntimeStatus: () => getStatus()
                 });
+            if (result.paused?.reason === "approval_gate") {
+              const latestStoredRun = normalizeRunRecord(getStoredRun(run.id) ?? runningRun);
+              const pausedRun = normalizeRunRecord({
+                ...latestStoredRun,
+                status: "paused",
+                completedAt: null,
+                error: null,
+                result: null,
+                phaseExecution: result.phaseExecution ?? latestStoredRun.phaseExecution,
+                controlPlane: result.controlPlane ?? latestStoredRun.controlPlane,
+                rebuild: result.rebuild ?? latestStoredRun.rebuild,
+                rollingSummary: {
+                  text: result.summary,
+                  updatedAt: new Date().toISOString(),
+                  source: "result"
+                }
+              });
+
+              await updateStoredRun(pausedRun);
+              rootTrace?.annotate({
+                ...buildRunTraceMetadata(pausedRun),
+                finalStatus: pausedRun.status
+              });
+              await rootTrace?.end({
+                status: "completed",
+                outputSummary: result.summary,
+                metadata: {
+                  pausedForApproval: true,
+                  gateId: result.paused.gateId,
+                  phaseId: result.paused.phaseId
+                }
+              });
+              return;
+            }
             const completedAt = new Date().toISOString();
             const validationResult = extractValidationResult(result);
             const latestStoredRun = normalizeRunRecord(getStoredRun(run.id) ?? runningRun);
@@ -522,6 +651,7 @@ export async function createPersistentRuntimeService(
   return {
     instructionRuntime: options.instructionRuntime,
     submitTask,
+    resolveApprovalGate,
     getRun,
     listRuns,
     getStatus
@@ -689,6 +819,36 @@ function normalizeRunContextInput(
   context: AgentRunRecord["context"] | SubmitTaskInput["context"]
 ): AgentRunRecord["context"] {
   return normalizeRunContextInputValue(context);
+}
+
+function appendApprovalFeedbackContext(
+  context: AgentRunRecord["context"],
+  resolution: {
+    phase: { id: string; name: string };
+    gate: { id: string; title: string };
+  },
+  comment: string
+): AgentRunRecord["context"] {
+  const normalizedComment = comment.trim();
+
+  if (!normalizedComment) {
+    return context;
+  }
+
+  return {
+    ...context,
+    externalContext: [
+      ...(context.externalContext ?? []),
+      {
+        id: `approval-feedback:${resolution.gate.id}:${Date.now()}`,
+        kind: "prior_output",
+        title: `${resolution.gate.title} feedback`,
+        content: `Before ${resolution.phase.name}, the operator requested another pass: ${normalizedComment}`,
+        source: "approval_gate",
+        format: "markdown"
+      }
+    ]
+  };
 }
 
 function normalizeRollingSummary(rollingSummary: AgentRunRecord["rollingSummary"]) {
