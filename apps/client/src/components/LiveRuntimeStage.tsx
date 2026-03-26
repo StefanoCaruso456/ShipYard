@@ -16,6 +16,14 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
 
   const queuedFollowUps = liveRuntime.queuedFollowUps;
   const canSteer = thread.status === "running" || thread.status === "pending";
+  const runtimeMetaLabel =
+    focusedRun.status === "running"
+      ? "Reasoning live"
+      : focusedRun.status === "pending"
+        ? "Accepted by runtime"
+        : focusedRun.status === "failed"
+          ? "Failed in runtime"
+          : "Completed in runtime";
   const activeHeading =
     thread.status === "running"
       ? "Reasoning through the current request"
@@ -63,7 +71,7 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
         <p className="live-runtime-stage__prompt">{focusedRun.instruction}</p>
 
         <div className="live-runtime-stage__meta">
-          <span>{focusedRun.status === "running" ? "Reasoning live" : "Accepted by runtime"}</span>
+          <span>{runtimeMetaLabel}</span>
           {focusedRun.attachmentsCount > 0 ? (
             <span>
               {focusedRun.attachmentsCount} attachment{focusedRun.attachmentsCount === 1 ? "" : "s"}

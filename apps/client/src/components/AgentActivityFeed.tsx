@@ -11,6 +11,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
   const liveStatusItem = buildLiveStatusItem(activity, status);
   const displayActivity = liveStatusItem ? [...activity, liveStatusItem] : activity;
   const isLive = status === "pending" || status === "running";
+  const heading = isLive ? "Working" : "Execution trace";
   const headerDetail = isLive
     ? status === "pending"
       ? "Queued in runtime"
@@ -24,7 +25,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
       <section className="agent-activity agent-activity--empty">
         <div className="agent-activity__header">
           <div className="agent-activity__header-main">
-            <strong>Working</strong>
+            <strong>{heading}</strong>
           </div>
           <span>No trace captured yet</span>
         </div>
@@ -37,7 +38,7 @@ export function AgentActivityFeed({ activity, status }: AgentActivityFeedProps) 
     <section className={`agent-activity ${isLive ? "agent-activity--live" : ""}`}>
       <div className="agent-activity__header">
         <div className="agent-activity__header-main">
-          <strong>Working</strong>
+          <strong>{heading}</strong>
           {isLive ? (
             <span className="agent-activity__live-pill">
               <span className="agent-activity__live-pill-dot" aria-hidden="true" />

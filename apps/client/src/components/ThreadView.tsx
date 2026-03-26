@@ -119,9 +119,7 @@ export function ThreadView({
   const filteredMessages = thread.messages.filter((message) => !hiddenMessageIds.has(message.id));
   const showLiveRuntimeStage = thread.source === "live" && Boolean(thread.liveRuntime?.focusedRun);
   const visibleMessages = hasActivity || showLiveRuntimeStage
-    ? filteredMessages.filter(
-        (message) => message.role !== "system" || message.label === "Local workspace"
-      )
+    ? filteredMessages.filter((message) => message.role !== "system")
     : filteredMessages;
   const userMessages = visibleMessages.filter((message) => message.role === "user");
   const responseMessages = visibleMessages.filter((message) => message.role !== "user");
