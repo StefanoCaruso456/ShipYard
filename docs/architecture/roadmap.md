@@ -14,7 +14,7 @@ It exists so implementation follows one sequence and does not drift across sessi
 | Basic tool calls | Complete | `read_file`, `read_file_range`, `search_repo`, and surgical edit tools are all routed through the live runtime task path. |
 | Surgical file editing | Complete | Anchor-based editing is implemented with validation and rollback. |
 | Context injection | Complete | External context is accepted at task submission, assembled per role, bounded by deterministic budgets, and exposed through traces/debug payloads. |
-| Multi-agent coordination | Partial | Planner/executor/verifier orchestration is real and specialist registry/skills now exist, but the broader orchestrator artifact and production-lead delegation flow is not fully implemented yet. |
+| Multi-agent coordination | Partial | Planner/executor/verifier orchestration, the typed control plane, specialist registry/skills, and production-lead delegation handoffs are real. True parallel specialist execution, broader orchestrator artifact routing, and later merge governance are still open. |
 | Observability | Complete for core tracing | LangSmith plus local logs exist, but richer operator-facing query and evaluation flows can improve. |
 | Ship rebuild | Missing | No first-class rebuild execution or intervention logging exists yet. |
 | Comparative analysis | Missing | No report generation pipeline exists yet. |
@@ -53,6 +53,10 @@ The runtime should not grow into a richer multi-agent system while the most basi
 - `read_file`, `read_file_range`, `search_repo`, and `edit_file` are all callable end-to-end through runtime APIs
 - tests prove the live path, not only library behavior
 - `PRESEARCH.md` and ADR-003 describe the same editing strategy
+
+### Status
+
+Complete
 
 ## Phase 9: External Context Injection
 
@@ -108,6 +112,10 @@ This is the foundation for objective coordination. Without it, the broader agent
 - runtime execution is backed by a typed control plan
 - ownership and handoffs are explicit state, not inferred from prompts
 - validation gates block progression objectively
+
+### Status
+
+Complete
 
 ## Phase 11: Specialist Agent Registry + Skills
 
@@ -166,6 +174,10 @@ Specialist agents exist after Phase 11, but the production lead still needs to g
 - specialist assignments are traceable and deterministic
 - merge/conflict decisions are explicit runtime state
 
+### Status
+
+Complete
+
 ## Phase 12.5: Memory and Context Hardening
 
 Detailed phase guide:
@@ -200,6 +212,9 @@ long-running rebuild workflow. This phase closes the highest-risk context and me
 ### Status
 
 In progress
+
+Core context budgeting, output caps, runtime schemas, and budget observability are already implemented.
+Episodic memory and role-based retrieval policy remain the open portion of this phase.
 
 ## Phase 13: Ship Rebuild Framework
 

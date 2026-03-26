@@ -286,6 +286,79 @@ This phase adds the missing live role orchestration on top of those foundations.
 
 Complete
 
+## Phase 8: End-to-End Tooling
+
+### What
+
+The runtime now exposes repo inspection and editing tools through the live task path, not just as library helpers.
+
+### Why
+
+Tooling is only valuable if the real runtime can use it end-to-end. This phase closed the gap between lower-level repo tooling and live execution.
+
+### How
+
+- route `list_files`, `read_file`, `read_file_range`, `search_repo`, and edit requests through the runtime task APIs
+- dispatch those tool requests through the live runtime executor
+- return structured tool results and failures through normal run records
+- add end-to-end tests that exercise the persistent runtime service, not only isolated tool helpers
+
+### Purpose
+
+Make repo tooling a real runtime capability instead of a library-only foundation.
+
+### Outcome
+
+The backend can now inspect and edit the repo through the same live task flow that future orchestration builds on.
+
+### Architecture
+
+- runtime route parsing lives in `apps/server/src/routes/runtime.ts`
+- live tool dispatch lives in `apps/server/src/runtime/createRuntimeExecutor.ts`
+- end-to-end proof lives in `apps/server/src/__tests__/runtimeExecutor.test.ts`
+
+### Status
+
+Complete
+
+## Phase 9: External Context Injection
+
+### What
+
+The runtime now accepts typed external context and feeds it into planner, executor, and verifier payloads during live execution.
+
+### Why
+
+High-quality execution depends on explicit context shaping. Specs, prior outputs, test results, and validation targets should be injected intentionally, not copied into prompts ad hoc.
+
+### How
+
+- accept external context at task submission
+- validate and normalize it at runtime boundaries
+- order it deterministically per role
+- apply token-aware truncation and omission rules
+- consume assembled role payloads in the live orchestration loop
+- record budget, truncation, and omission metadata in traces
+
+### Purpose
+
+Turn context injection into a typed, bounded runtime feature.
+
+### Outcome
+
+Runs can now carry structured external evidence that is actually consumed during planner, executor, and verifier execution.
+
+### Architecture
+
+- runtime schemas live in `packages/agent-core/src/runtime/schemas.ts`
+- role payload assembly lives in `packages/agent-core/src/context`
+- live orchestration consumes those payloads in `packages/agent-core/src/runtime/orchestration.ts`
+- `apps/server` traces context-budget signals for inspection
+
+### Status
+
+Complete
+
 ## Phase 10: Typed Agent Control Plane
 
 ### What
@@ -341,13 +414,120 @@ Structured runs can now answer:
 
 Complete
 
+## Phase 11: Specialist Agent Registry + Skills
+
+### What
+
+Specialist developers and their runtime skills are now first-class entities in the system.
+
+### Why
+
+Typed delegation only works if the runtime knows which specialist exists, what they are allowed to do, and which skill guidance should shape their work.
+
+### How
+
+- define a typed specialist registry
+- load team skill documents at runtime
+- attach specialist identity, skill ids, and tool scope to control-plane agents
+- inject specialist guidance into planner, executor, and verifier payloads
+- enforce delegated tool scope during execution
+
+### Purpose
+
+Ground specialist execution in typed runtime identity instead of naming conventions or prompt guesses.
+
+### Outcome
+
+Stories and tasks now resolve to explicit specialist ownership with the right runtime guidance and tool boundaries attached.
+
+### Architecture
+
+- specialist registry lives in `packages/agent-core/src/runtime/agentRegistry.ts`
+- runtime skill loading lives in `packages/agent-core/src/runtime/createAgentRuntime.ts`
+- context assembly and orchestration consume the specialist identity and skill guidance
+
+### Status
+
+Complete
+
+## Phase 12: Production Lead Delegation Flow
+
+### What
+
+The runtime now records explicit production-lead delegation briefs, handoffs, delivery artifacts, blockers, and interventions for structured runs.
+
+### Why
+
+Owning a phase in name is not enough. The production lead needs to hand work off explicitly, track acceptance, and leave clear runtime evidence behind when work moves across the agent team.
+
+### How
+
+- orchestrator hands phase coordination to the production lead
+- the control plane records typed delegation briefs for stories and tasks
+- specialists and execution subagents accept and complete those handoffs
+- result, validation, blocker, and retry artifacts are recorded as runtime state
+- phase execution keeps the control plane synchronized as work advances
+
+### Purpose
+
+Turn delegation into typed runtime truth instead of implied behavior inside prompts or event text.
+
+### Outcome
+
+Structured runs can now explain who assigned work, what depended on what, what was accepted, and what evidence closed each delivery boundary.
+
+### Architecture
+
+- control-plane lifecycle logic lives in `packages/agent-core/src/runtime/controlPlane.ts`
+- structured execution synchronizes delegation state in `packages/agent-core/src/runtime/phaseExecution.ts`
+- proof coverage lives in `packages/agent-core/src/__tests__/controlPlane.test.ts` and `packages/agent-core/src/__tests__/runtimeService.test.ts`
+
+### Status
+
+Complete
+
+## Phase 12.5: Memory and Context Hardening
+
+### What
+
+This phase hardens live context handling before the Ship rebuild by tightening budgets, output caps, runtime schemas, and budget observability.
+
+### Why
+
+Longer-running rebuild work needs bounded prompts and validated runtime boundary objects. That foundation has to be strong before deeper memory features are added.
+
+### How
+
+- add token-aware prompt budgets per role
+- add explicit max output token caps for model-backed roles
+- validate context, artifact, and handoff payloads with runtime schemas
+- record truncation, omission, and output-cap signals in traces
+- keep prompt context, durable runtime state, and future memory retrieval as separate layers
+
+### Purpose
+
+Make current runtime context safer and more observable before the memory model grows deeper.
+
+### Outcome
+
+The runtime now has stronger context boundaries and better observability, while episodic memory and role-based retrieval policy remain the still-open portion of this phase.
+
+### Architecture
+
+- budget policy lives in `packages/agent-core/src/context/policy.ts`
+- prompt assembly and budget enforcement live in `packages/agent-core/src/context/composeRoleContext.ts`
+- runtime schemas live in `packages/agent-core/src/runtime/schemas.ts`
+- model output caps are applied in `apps/server/src/runtime/createOpenAIExecutor.ts`
+- trace summaries capture these signals in `apps/server/src/observability/logger.ts`
+
+### Status
+
+In progress
+
+Core budgeting, caps, schemas, and budget observability are complete. Episodic memory and role-based retrieval policy remain open.
+
 ## What Comes Next
 
-The next major phase should build on these foundations instead of replacing them.
+The current active work is still `Phase 12.5: Memory and Context Hardening`.
 
-Likely next work:
-
-- richer prompt and context assembly
-- richer validation targets such as lint, typecheck, and targeted test execution
-- trace-level observability for edit attempts and recovery
-- approval and review flows around diffs and execution
+After that, the next major phase is `Phase 13: Ship Rebuild Framework`, which turns the Ship rebuild into the first-class integration test for the runtime.
