@@ -11,7 +11,13 @@ This phase creates the first clear operator workflow layer.
 
 ## What We Build
 
-- a stage model such as `Spec`, `Arch`, `Dev`, `QA`, and `Deploy`
+- an initial operator stage model:
+  - `Queued`
+  - `Coordination`
+  - `Execution`
+  - `Validation`
+  - `Rebuild`
+  - `Delivery`
 - an operator-facing run view that shows:
   - current stage
   - current owner
@@ -36,9 +42,14 @@ This phase adds a translation layer from runtime state into operator-facing conc
 
 - stage
 - handoff status
-- approval need
 - blocker reason
 - run summary
+- run journal
+
+These are intentionally generic runtime stages.
+
+Factory-specific stages such as `Spec`, `Arch`, `Dev`, `QA`, and `Deploy` belong in later phases
+once factory mode exists as a first-class workflow.
 
 The goal is not to invent a second workflow engine. The goal is to make the existing one visible.
 

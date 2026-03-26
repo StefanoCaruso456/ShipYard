@@ -12,7 +12,7 @@ import type {
   ValidationGate,
   ValidationGateKind
 } from "@shipyard/agent-core";
-import { safeParseRunContextInput } from "@shipyard/agent-core";
+import { deriveOperatorRunView, safeParseRunContextInput } from "@shipyard/agent-core";
 
 import type { OpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import { analyzeTaskAttachments } from "../runtime/analyzeTaskAttachments";
@@ -461,6 +461,7 @@ function serializeRun(run: AgentRunRecord) {
     rebuild: run.rebuild ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
+    operatorView: deriveOperatorRunView(run),
     error: run.error,
     result: run.result
   };

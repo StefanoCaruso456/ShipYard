@@ -1,5 +1,6 @@
 import type { WorkspaceThread } from "../types";
 import { AgentActivityFeed } from "./AgentActivityFeed";
+import { OperatorRunOverview } from "./OperatorRunOverview";
 
 type LiveRuntimeStageProps = {
   thread: WorkspaceThread;
@@ -9,6 +10,7 @@ type LiveRuntimeStageProps = {
 export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStageProps) {
   const liveRuntime = thread.liveRuntime;
   const focusedRun = liveRuntime?.focusedRun;
+  const operatorView = liveRuntime?.operatorView;
 
   if (!liveRuntime || !focusedRun) {
     return null;
@@ -84,6 +86,8 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
           ) : null}
         </div>
       </article>
+
+      {operatorView ? <OperatorRunOverview operatorView={operatorView} /> : null}
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 

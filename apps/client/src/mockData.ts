@@ -331,6 +331,7 @@ export function buildRuntimeThread(
       queuedRunIds: queuedRuns.map((run) => run.id),
       runIds: orderedRuns.map((run) => run.id),
       focusedRun: buildFocusedRunSummary(focusedRun),
+      operatorView: focusedRun.operatorView ?? null,
       queuedFollowUps,
       completedRunCount: orderedRuns.filter((run) => run.status === "completed").length
     }
