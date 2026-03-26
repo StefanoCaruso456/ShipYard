@@ -4,7 +4,6 @@ import type {
   WorkspaceProject,
   WorkspaceThread
 } from "../types";
-import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
 import { ThreadMessageCard } from "./ThreadMessageCard";
@@ -187,8 +186,6 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
-        <AttachmentPreviewList attachments={thread.attachments} />
-
         {showLiveRuntimeStage ? (
           <LiveRuntimeStage
             thread={thread}

@@ -4,20 +4,25 @@ import type { AttachmentCard } from "../types";
 type AttachmentPreviewListProps = {
   attachments: AttachmentCard[];
   onRemove?: (attachmentId: string) => void;
+  variant?: "default" | "compact";
 };
 
 export function AttachmentPreviewList({
   attachments,
-  onRemove
+  onRemove,
+  variant = "default"
 }: AttachmentPreviewListProps) {
   if (attachments.length === 0) {
     return null;
   }
 
   return (
-    <div className="attachment-preview-list">
+    <div className={`attachment-preview-list attachment-preview-list--${variant}`}>
       {attachments.map((attachment) => (
-        <article key={attachment.id} className="attachment-preview-card">
+        <article
+          key={attachment.id}
+          className={`attachment-preview-card attachment-preview-card--${variant}`}
+        >
           <div className="attachment-preview-card__media">
             {attachment.previewUrl ? (
               <img src={attachment.previewUrl} alt={attachment.name} className="attachment-preview-card__image" />
@@ -32,7 +37,7 @@ export function AttachmentPreviewList({
               <span>{formatAttachmentSize(attachment.size)}</span>
             </div>
             <p>{attachment.summary}</p>
-            {attachment.excerpt ? <pre>{attachment.excerpt}</pre> : null}
+            {attachment.excerpt && variant === "default" ? <pre>{attachment.excerpt}</pre> : null}
           </div>
 
           {onRemove ? (

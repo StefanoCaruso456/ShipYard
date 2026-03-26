@@ -2,6 +2,7 @@ import type {
   RuntimeOperatorApprovalDecision,
   WorkspaceThread
 } from "../types";
+import { AttachmentPreviewList } from "./AttachmentPreviewList";
 import { AgentActivityFeed } from "./AgentActivityFeed";
 import { OperatorRunOverview } from "./OperatorRunOverview";
 
@@ -95,6 +96,12 @@ export function LiveRuntimeStage({
         </div>
 
         <p className="live-runtime-stage__prompt">{focusedRun.instruction}</p>
+
+        {focusedRun.attachments.length > 0 ? (
+          <div className="live-runtime-stage__attachments">
+            <AttachmentPreviewList attachments={focusedRun.attachments} variant="compact" />
+          </div>
+        ) : null}
 
         <div className="live-runtime-stage__meta">
           <span>{runtimeMetaLabel}</span>

@@ -762,6 +762,7 @@ export type ThreadMessage = {
   body: string;
   timestamp: string;
   tone: "default" | "info" | "success" | "danger";
+  attachments?: AttachmentCard[];
 };
 
 export type ProgressEvent = {
@@ -779,6 +780,7 @@ export type RuntimeThreadFocusedRun = {
   createdAt: string;
   startedAt: string | null;
   attachmentsCount: number;
+  attachments: AttachmentCard[];
 };
 
 export type RuntimeThreadQueuedItem = {
