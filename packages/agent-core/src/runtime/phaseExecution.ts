@@ -34,6 +34,7 @@ import {
   recordTaskStarted,
   syncControlPlaneState
 } from "./controlPlane";
+import { normalizeRebuildState } from "./rebuildState";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import type { ContextAssembler } from "../context/types";
 import { getActiveTraceScope, runWithTraceScope } from "../observability/traceScope";
@@ -431,14 +432,20 @@ export async function executePhaseExecutionRun(
   await persist(options.persistRun, workingRun);
 
   return {
-    mode: "phase-execution",
+    mode: options.run.rebuild ? "ship-rebuild" : "phase-execution",
     summary: renderFinalSummary(phaseExecution),
     instructionEcho: options.run.instruction,
     skillId: options.instructionRuntime.skill.meta.id,
     completedAt: new Date().toISOString(),
     responseText: renderPhaseExecutionResponse(phaseExecution),
     phaseExecution,
-    controlPlane: workingRun.controlPlane ?? null
+    controlPlane: workingRun.controlPlane ?? null,
+    rebuild: normalizeRebuildState(workingRun.rebuild, {
+      phaseExecution,
+      controlPlane: workingRun.controlPlane ?? null,
+      runStatus: "completed",
+      validationStatus: "passed"
+    })
   };
 }
 

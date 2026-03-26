@@ -12,6 +12,7 @@ import {
   normalizePhaseExecutionInput,
   normalizePhaseExecutionState
 } from "./phaseExecution";
+import { createRebuildState, normalizeRebuildState } from "./rebuildState";
 import type { AgentInstructionRuntime } from "../instructions/types";
 import {
   cloneRunRecord,
@@ -137,6 +138,15 @@ export async function createPersistentRuntimeService(
     const threadId = input.threadId?.trim() ? input.threadId.trim() : runId;
     const parentRunId = input.parentRunId?.trim() ? input.parentRunId.trim() : null;
     const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
+    const controlPlane = phaseExecution ? createControlPlaneState(phaseExecution) : null;
+    const rebuild = input.rebuild
+      ? createRebuildState(input.rebuild, {
+          phaseExecution,
+          controlPlane,
+          runStatus: "pending",
+          validationStatus: "not_run"
+        })
+      : null;
 
     const run: AgentRunRecord = {
       id: runId,
@@ -158,7 +168,8 @@ export async function createPersistentRuntimeService(
       lastValidationResult: null,
       orchestration: null,
       phaseExecution,
-      controlPlane: phaseExecution ? createControlPlaneState(phaseExecution) : null,
+      controlPlane,
+      rebuild,
       rollingSummary: null,
       events: [],
       error: null,
@@ -341,7 +352,11 @@ export async function createPersistentRuntimeService(
           inputSummary: run.instruction,
           metadata: {
             runtimeVersion: "0.0.0",
-            roleFlow: run.phaseExecution ? "phase-execution" : "orchestration",
+            roleFlow: run.rebuild
+              ? "ship-rebuild"
+              : run.phaseExecution
+                ? "phase-execution"
+                : "orchestration",
             repoRoot: process.cwd(),
             workspaceIdentifier: options.instructionRuntime.skill.meta.id,
             queuedAt: run.createdAt,
@@ -587,6 +602,7 @@ function toRunFailure(error: unknown): NonNullable<AgentRunRecord["error"]> {
 
 function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   const phaseExecution = normalizePhaseExecutionState(run.phaseExecution);
+  const controlPlane = normalizeControlPlaneState(run.controlPlane, phaseExecution);
 
   return {
     ...run,
@@ -601,7 +617,15 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     lastValidationResult: run.lastValidationResult ?? null,
     orchestration: normalizeOrchestrationState(run.orchestration),
     phaseExecution,
-    controlPlane: normalizeControlPlaneState(run.controlPlane, phaseExecution),
+    controlPlane,
+    rebuild: normalizeRebuildState(run.rebuild, {
+      phaseExecution,
+      controlPlane,
+      runStatus: run.status,
+      validationStatus: run.validationStatus ?? "not_run",
+      updatedAt: controlPlane?.updatedAt ?? run.completedAt ?? run.startedAt ?? run.createdAt,
+      lastFailureReason: run.error?.message ?? null
+    }),
     rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
   };
@@ -950,7 +974,8 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     projectKind: run.project?.kind ?? null,
     projectFolderPath: run.project?.folder?.displayPath ?? null,
     ...buildOrchestrationTraceMetadata(run.orchestration),
-    ...buildPhaseExecutionTraceMetadata(run.phaseExecution)
+    ...buildPhaseExecutionTraceMetadata(run.phaseExecution),
+    ...buildRebuildTraceMetadata(run.rebuild)
   };
 }
 
@@ -1013,6 +1038,48 @@ function buildPhaseExecutionTraceMetadata(runPhaseExecution: AgentRunRecord["pha
     phaseExecutionMaxTaskRetries: runPhaseExecution.retryPolicy.maxTaskRetries,
     phaseExecutionMaxStoryRetries: runPhaseExecution.retryPolicy.maxStoryRetries,
     phaseExecutionMaxReplans: runPhaseExecution.retryPolicy.maxReplans
+  };
+}
+
+function buildRebuildTraceMetadata(runRebuild: AgentRunRecord["rebuild"]): TraceMetadata {
+  if (!runRebuild) {
+    return {
+      rebuildStatus: null,
+      rebuildScope: null,
+      rebuildShipId: null,
+      rebuildLabel: null,
+      rebuildObjective: null,
+      rebuildProjectId: null,
+      rebuildRootPath: null,
+      rebuildBaseBranch: null,
+      rebuildEntryPaths: [],
+      rebuildValidationStatus: null,
+      rebuildArtifactCount: null,
+      rebuildArtifactKinds: [],
+      rebuildInterventionCount: null,
+      rebuildInterventionKinds: [],
+      rebuildLastFailureReason: null
+    };
+  }
+
+  return {
+    rebuildStatus: runRebuild.status,
+    rebuildScope: runRebuild.target.scope,
+    rebuildShipId: runRebuild.target.shipId,
+    rebuildLabel: runRebuild.target.label,
+    rebuildObjective: runRebuild.target.objective,
+    rebuildProjectId: runRebuild.target.projectId,
+    rebuildRootPath: runRebuild.target.rootPath,
+    rebuildBaseBranch: runRebuild.target.baseBranch,
+    rebuildEntryPaths: runRebuild.target.entryPaths,
+    rebuildValidationStatus: runRebuild.validationStatus,
+    rebuildArtifactCount: runRebuild.artifactLog.length,
+    rebuildArtifactKinds: uniqueStrings(runRebuild.artifactLog.map((artifact) => artifact.kind)),
+    rebuildInterventionCount: runRebuild.interventionLog.length,
+    rebuildInterventionKinds: uniqueStrings(
+      runRebuild.interventionLog.map((intervention) => intervention.kind)
+    ),
+    rebuildLastFailureReason: runRebuild.lastFailureReason
   };
 }
 

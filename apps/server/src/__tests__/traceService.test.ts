@@ -372,6 +372,105 @@ test("runtime trace summary captures phase execution progress and retry policy",
   }
 });
 
+test("runtime trace summary captures rebuild targets and intervention evidence", async () => {
+  const { instructionRuntime, assembler } = await createHarness();
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-rebuild-trace-"));
+  const traceService = createTraceService({
+    logPath: path.join(tempDir, "traces.jsonl"),
+    env: {}
+  });
+  const attempts = new Map<string, number>();
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    contextAssembler: assembler,
+    traceService,
+    executeRun: async (run, context) => {
+      const currentAttempt = (attempts.get(run.instruction) ?? 0) + 1;
+      attempts.set(run.instruction, currentAttempt);
+
+      return {
+        mode: "placeholder-execution",
+        summary:
+          currentAttempt === 1
+            ? "Incomplete rebuild evidence"
+            : run.context.objective ?? run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Rebuild the Scopex ship workflow.",
+      rebuild: {
+        target: {
+          shipId: "ship-scopex",
+          label: "Scopex rebuild",
+          objective: "Restore the ship rebuild workflow.",
+          projectId: "project-scopex",
+          rootPath: "1st project",
+          baseBranch: "main",
+          entryPaths: ["client/src/App.tsx", "server/src/index.ts"],
+          acceptanceSummary: "Preserve rebuild evidence and intervention history."
+        }
+      },
+      phaseExecution: {
+        retryPolicy: {
+          maxTaskRetries: 1
+        },
+        phases: [
+          {
+            id: "phase-rebuild",
+            name: "Rebuild",
+            description: "Restore the ship rebuild path.",
+            userStories: [
+              {
+                id: "story-rebuild",
+                title: "Rebuild the ship",
+                description: "Rebuild the ship with tracked evidence.",
+                acceptanceCriteria: ["Restore the ship rebuild workflow."],
+                tasks: [
+                  {
+                    id: "task-rebuild",
+                    instruction: "Restore the ship rebuild workflow.",
+                    expectedOutcome: "Restore the ship rebuild workflow."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    await waitForRunStatus(runtimeService, run.id, "completed");
+    await waitForTraceFlush(traceService);
+    const trace = traceService.getRunTrace(run.id);
+
+    assert.equal(trace?.summary.roleFlow, "ship-rebuild");
+    assert.equal(trace?.summary.rebuild?.status, "completed");
+    assert.equal(trace?.summary.rebuild?.shipId, "ship-scopex");
+    assert.equal(trace?.summary.rebuild?.label, "Scopex rebuild");
+    assert.equal(trace?.summary.rebuild?.baseBranch, "main");
+    assert.deepEqual(trace?.summary.rebuild?.entryPaths, [
+      "client/src/App.tsx",
+      "server/src/index.ts"
+    ]);
+    assert.equal(trace?.summary.rebuild?.validationStatus, "passed");
+    assert.ok((trace?.summary.rebuild?.artifactCount ?? 0) >= 1);
+    assert.ok(trace?.summary.rebuild?.artifactKinds.includes("task_result"));
+    assert.ok(trace?.summary.rebuild?.artifactKinds.includes("validation_report"));
+    assert.equal(trace?.summary.rebuild?.interventionCount, 1);
+    assert.ok(trace?.summary.rebuild?.interventionKinds.includes("retry"));
+    assert.equal(trace?.summary.phaseExecution?.completedTasks, 1);
+  } finally {
+    await waitForTraceFlush(traceService);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime traces tool and validation spans for a repo edit", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-edit-trace-"));
   const filePath = path.join(tempDir, "src/example.ts");

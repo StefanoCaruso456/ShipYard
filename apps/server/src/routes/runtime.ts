@@ -333,6 +333,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     project?: unknown;
     context?: unknown;
     phaseExecution?: unknown;
+    rebuild?: unknown;
   };
 
   if (typeof body?.instruction !== "string" || !body.instruction.trim()) {
@@ -395,6 +396,12 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     return phaseExecution;
   }
 
+  const rebuild = parseRebuildInput(parseUnknownJson(body.rebuild));
+
+  if ("error" in rebuild) {
+    return rebuild;
+  }
+
   return {
     instruction: body.instruction,
     title: body.title,
@@ -414,7 +421,8 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     ),
     project: project.value,
     context: context.value,
-    phaseExecution: phaseExecution.value
+    phaseExecution: phaseExecution.value,
+    rebuild: rebuild.value
   };
 }
 
@@ -440,6 +448,7 @@ function serializeRun(run: AgentRunRecord) {
     orchestration: run.orchestration,
     phaseExecution: run.phaseExecution ?? null,
     controlPlane: run.controlPlane ?? null,
+    rebuild: run.rebuild ?? null,
     rollingSummary: run.rollingSummary,
     events: run.events,
     error: run.error,
@@ -578,6 +587,96 @@ function parseUnknownJson(value: unknown) {
   } catch {
     return value;
   }
+}
+
+function parseRebuildInput(
+  value: unknown
+): { value: SubmitTaskInput["rebuild"] } | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object") {
+    return {
+      error: "rebuild must be an object when provided."
+    };
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const target = candidate.target;
+
+  if (!target || typeof target !== "object") {
+    return {
+      error: "rebuild.target must be an object."
+    };
+  }
+
+  const normalizedTarget = target as Record<string, unknown>;
+
+  if (
+    typeof normalizedTarget.shipId !== "string" ||
+    !normalizedTarget.shipId.trim()
+  ) {
+    return {
+      error: "rebuild.target.shipId is required."
+    };
+  }
+
+  if (
+    normalizedTarget.entryPaths !== undefined &&
+    (!Array.isArray(normalizedTarget.entryPaths) ||
+      normalizedTarget.entryPaths.some(
+        (entry) => typeof entry !== "string" || entry.trim().length === 0
+      ))
+  ) {
+    return {
+      error: "rebuild.target.entryPaths must be an array of strings when provided."
+    };
+  }
+
+  return {
+    value: {
+      target: {
+        scope:
+          normalizedTarget.scope === "project" || normalizedTarget.scope === "workspace"
+            ? normalizedTarget.scope
+            : "ship",
+        shipId: normalizedTarget.shipId.trim(),
+        label:
+          typeof normalizedTarget.label === "string" && normalizedTarget.label.trim()
+            ? normalizedTarget.label.trim()
+            : null,
+        objective:
+          typeof normalizedTarget.objective === "string" && normalizedTarget.objective.trim()
+            ? normalizedTarget.objective.trim()
+            : null,
+        projectId:
+          typeof normalizedTarget.projectId === "string" && normalizedTarget.projectId.trim()
+            ? normalizedTarget.projectId.trim()
+            : null,
+        rootPath:
+          typeof normalizedTarget.rootPath === "string" && normalizedTarget.rootPath.trim()
+            ? normalizedTarget.rootPath.trim()
+            : null,
+        baseBranch:
+          typeof normalizedTarget.baseBranch === "string" && normalizedTarget.baseBranch.trim()
+            ? normalizedTarget.baseBranch.trim()
+            : null,
+        entryPaths: Array.isArray(normalizedTarget.entryPaths)
+          ? normalizedTarget.entryPaths
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+          : [],
+        acceptanceSummary:
+          typeof normalizedTarget.acceptanceSummary === "string" &&
+          normalizedTarget.acceptanceSummary.trim()
+            ? normalizedTarget.acceptanceSummary.trim()
+            : null
+      }
+    }
+  };
 }
 
 function looksLikeAudioFile(file: { originalname: string; mimetype: string }) {

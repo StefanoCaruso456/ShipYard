@@ -193,8 +193,50 @@ export type RuntimeTask = {
   error: {
     message: string;
   } | null;
+  rebuild?: {
+    status: "queued" | "rebuilding" | "completed" | "failed";
+    target: {
+      scope: "ship" | "project" | "workspace";
+      shipId: string;
+      label: string | null;
+      objective: string | null;
+      projectId: string | null;
+      rootPath: string | null;
+      baseBranch: string | null;
+      entryPaths: string[];
+      acceptanceSummary: string | null;
+    };
+    artifactLog: Array<{
+      id: string;
+      sourceArtifactId: string;
+      kind: string;
+      entityKind: string;
+      entityId: string;
+      summary: string;
+      createdAt: string;
+      path: string | null;
+    }>;
+    interventionLog: Array<{
+      id: string;
+      sourceInterventionId: string;
+      kind: string;
+      entityKind: string;
+      entityId: string;
+      summary: string;
+      createdAt: string;
+      resolvedAt: string | null;
+    }>;
+    validationStatus: string | null;
+    lastFailureReason: string | null;
+    updatedAt: string;
+  } | null;
   result: {
-    mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool";
+    mode:
+      | "placeholder-execution"
+      | "ai-sdk-openai"
+      | "repo-tool"
+      | "phase-execution"
+      | "ship-rebuild";
     summary: string;
     instructionEcho: string;
     skillId: string;
@@ -329,6 +371,23 @@ export type RuntimeTraceRunLog = {
       maxTaskRetries: number | null;
       maxStoryRetries: number | null;
       maxReplans: number | null;
+    } | null;
+    rebuild: {
+      status: string | null;
+      scope: string | null;
+      shipId: string | null;
+      label: string | null;
+      objective: string | null;
+      projectId: string | null;
+      rootPath: string | null;
+      baseBranch: string | null;
+      entryPaths: string[];
+      validationStatus: string | null;
+      artifactCount: number;
+      artifactKinds: string[];
+      interventionCount: number;
+      interventionKinds: string[];
+      lastFailureReason: string | null;
     } | null;
   };
   spans: RuntimeTraceSpan[];

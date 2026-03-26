@@ -84,6 +84,10 @@ export {
   normalizePhaseExecutionInput,
   normalizePhaseExecutionState
 } from "./runtime/phaseExecution";
+export {
+  createRebuildState,
+  normalizeRebuildState
+} from "./runtime/rebuildState";
 export { createRepoToolset } from "./tools/repo/createRepoToolset";
 export type {
   AgentExecutionStatus,
@@ -181,6 +185,14 @@ export type {
   PlannerStepResult,
   PersistentAgentRuntimeService,
   RelevantFileContext,
+  RebuildArtifactRecord,
+  RebuildInput,
+  RebuildInterventionRecord,
+  RebuildScope,
+  RebuildState,
+  RebuildStatus,
+  RebuildTarget,
+  RebuildTargetInput,
   RunAttachment,
   RunAttachmentKind,
   RepoInspectionToolRequest,

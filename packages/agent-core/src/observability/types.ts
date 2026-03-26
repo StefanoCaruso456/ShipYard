@@ -222,6 +222,23 @@ export type TraceRunSummary = {
     maxStoryRetries: number | null;
     maxReplans: number | null;
   } | null;
+  rebuild: {
+    status: string | null;
+    scope: string | null;
+    shipId: string | null;
+    label: string | null;
+    objective: string | null;
+    projectId: string | null;
+    rootPath: string | null;
+    baseBranch: string | null;
+    entryPaths: string[];
+    validationStatus: string | null;
+    artifactCount: number;
+    artifactKinds: string[];
+    interventionCount: number;
+    interventionKinds: string[];
+    lastFailureReason: string | null;
+  } | null;
 };
 
 export type TraceRunLog = {

@@ -501,6 +501,80 @@ export type ControlPlaneState = {
   updatedAt: string;
 };
 
+export type RebuildScope = "ship" | "project" | "workspace";
+
+export type RebuildTargetInput = {
+  scope?: RebuildScope | null;
+  shipId: string;
+  label?: string | null;
+  objective?: string | null;
+  projectId?: string | null;
+  rootPath?: string | null;
+  baseBranch?: string | null;
+  entryPaths?: string[] | null;
+  acceptanceSummary?: string | null;
+};
+
+export type RebuildTarget = {
+  scope: RebuildScope;
+  shipId: string;
+  label: string | null;
+  objective: string | null;
+  projectId: string | null;
+  rootPath: string | null;
+  baseBranch: string | null;
+  entryPaths: string[];
+  acceptanceSummary: string | null;
+};
+
+export type RebuildStatus = "queued" | "rebuilding" | "completed" | "failed";
+
+export type RebuildArtifactRecord = {
+  id: string;
+  sourceArtifactId: string;
+  kind: ControlPlaneArtifactKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  producerRole: ControlPlaneRole;
+  producerId: string;
+  path: string | null;
+};
+
+export type RebuildInterventionRecord = {
+  id: string;
+  sourceInterventionId: string;
+  kind: ControlPlaneInterventionKind;
+  entityKind: ControlPlaneEntityKind;
+  entityId: string;
+  summary: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  ownerRole: ControlPlaneRole;
+  ownerId: string;
+};
+
+export type RebuildInput = {
+  target: RebuildTargetInput;
+};
+
+export type RebuildState = {
+  version: 1;
+  status: RebuildStatus;
+  target: RebuildTarget;
+  current: PhaseExecutionPointer;
+  progress: PhaseExecutionProgress | null;
+  retryPolicy: PhaseExecutionRetryPolicy | null;
+  artifactLog: RebuildArtifactRecord[];
+  interventionLog: RebuildInterventionRecord[];
+  validationStatus: ValidationStatus | null;
+  lastArtifactAt: string | null;
+  lastInterventionAt: string | null;
+  lastFailureReason: string | null;
+  updatedAt: string;
+};
+
 export type RollingSummary = {
   text: string;
   updatedAt: string;
@@ -532,6 +606,7 @@ export type SubmitTaskInput = {
   project?: RunProjectInput | null;
   context?: RunContextInput | null;
   phaseExecution?: PhaseExecutionInput | null;
+  rebuild?: RebuildInput | null;
 };
 
 export type AgentRunFailure = {
@@ -544,7 +619,12 @@ export type AgentRunFailure = {
 };
 
 export type AgentRunResult = {
-  mode: "placeholder-execution" | "ai-sdk-openai" | "repo-tool" | "phase-execution";
+  mode:
+    | "placeholder-execution"
+    | "ai-sdk-openai"
+    | "repo-tool"
+    | "phase-execution"
+    | "ship-rebuild";
   summary: string;
   instructionEcho: string;
   skillId: string;
@@ -552,6 +632,7 @@ export type AgentRunResult = {
   orchestration?: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
   controlPlane?: ControlPlaneState | null;
+  rebuild?: RebuildState | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -586,6 +667,7 @@ export type AgentRunRecord = {
   orchestration: OrchestrationState | null;
   phaseExecution?: PhaseExecutionState | null;
   controlPlane?: ControlPlaneState | null;
+  rebuild?: RebuildState | null;
   rollingSummary: RollingSummary | null;
   events: RunEvent[];
   error: AgentRunFailure | null;
