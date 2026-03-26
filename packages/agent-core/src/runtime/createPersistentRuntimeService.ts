@@ -5,6 +5,7 @@ import { getActiveTraceScope, runWithTraceScope } from "../observability/traceSc
 import type { TraceMetadata } from "../observability/types";
 import type { TraceService } from "../observability/types";
 import { executeOrchestrationLoop } from "./orchestration";
+import { createControlPlaneState, normalizeControlPlaneState } from "./controlPlane";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
@@ -25,6 +26,8 @@ import {
   type SubmitTaskInput
 } from "./types";
 import type { RunEvent, ValidationResult } from "../validation/types";
+
+type ExternalContextItem = NonNullable<AgentRunRecord["context"]["externalContext"]>[number];
 
 type CreatePersistentRuntimeServiceOptions = {
   instructionRuntime: AgentInstructionRuntime;
@@ -133,6 +136,7 @@ export async function createPersistentRuntimeService(
     const runId = randomUUID();
     const threadId = input.threadId?.trim() ? input.threadId.trim() : runId;
     const parentRunId = input.parentRunId?.trim() ? input.parentRunId.trim() : null;
+    const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
 
     const run: AgentRunRecord = {
       id: runId,
@@ -153,7 +157,8 @@ export async function createPersistentRuntimeService(
       validationStatus: "not_run",
       lastValidationResult: null,
       orchestration: null,
-      phaseExecution: normalizePhaseExecutionInput(input.phaseExecution),
+      phaseExecution,
+      controlPlane: phaseExecution ? createControlPlaneState(phaseExecution) : null,
       rollingSummary: null,
       events: [],
       error: null,
@@ -581,6 +586,8 @@ function toRunFailure(error: unknown): NonNullable<AgentRunRecord["error"]> {
 }
 
 function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
+  const phaseExecution = normalizePhaseExecutionState(run.phaseExecution);
+
   return {
     ...run,
     threadId: run.threadId?.trim() ? run.threadId.trim() : run.id,
@@ -593,7 +600,8 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     validationStatus: run.validationStatus ?? "not_run",
     lastValidationResult: run.lastValidationResult ?? null,
     orchestration: normalizeOrchestrationState(run.orchestration),
-    phaseExecution: normalizePhaseExecutionState(run.phaseExecution),
+    phaseExecution,
+    controlPlane: normalizeControlPlaneState(run.controlPlane, phaseExecution),
     rollingSummary: normalizeRollingSummary(run.rollingSummary),
     events: Array.isArray(run.events) ? run.events : []
   };
@@ -674,10 +682,47 @@ function normalizeRunContextInput(
             reason: file.reason?.trim() ? file.reason.trim() : null
           }))
       : [],
+    externalContext: Array.isArray(context?.externalContext)
+      ? context.externalContext
+          .filter(
+            (item) =>
+              typeof item?.id === "string" &&
+              item.id.trim() &&
+              typeof item.kind === "string" &&
+              typeof item.title === "string" &&
+              item.title.trim() &&
+              typeof item.content === "string" &&
+              item.content.trim()
+          )
+          .map((item) => ({
+            id: item.id.trim(),
+            kind: normalizeExternalContextKind(item.kind),
+            title: item.title.trim(),
+            content: item.content.trim(),
+            source: item.source?.trim() ? item.source.trim() : null,
+            format: normalizeExternalContextFormat(item.format)
+          }))
+      : [],
     validationTargets: Array.isArray(context?.validationTargets)
       ? context.validationTargets.map((target) => target.trim()).filter(Boolean)
       : []
   };
+}
+
+function normalizeExternalContextKind(kind: string): ExternalContextItem["kind"] {
+  return kind === "schema" ||
+    kind === "prior_output" ||
+    kind === "test_result" ||
+    kind === "diff_summary" ||
+    kind === "validation_target"
+    ? kind
+    : "spec";
+}
+
+function normalizeExternalContextFormat(
+  format: string | null | undefined
+): ExternalContextItem["format"] {
+  return format === "markdown" || format === "json" ? format : "text";
 }
 
 function normalizeRollingSummary(rollingSummary: AgentRunRecord["rollingSummary"]) {

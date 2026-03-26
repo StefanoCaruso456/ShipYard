@@ -104,8 +104,13 @@ test("trace summary rolls up model tool and context insights", async () => {
         role: "planner",
         sectionIds: ["task-objective", "constraints"],
         omittedSectionIds: ["known-failures"],
+        truncatedSectionIds: ["external-context:spec"],
+        omittedForBudgetSectionIds: ["external-context:tests"],
+        maxPromptChars: 16000,
+        usedPromptChars: 15000,
         promptLength: 128,
         rollingSummarySource: "result",
+        externalContextKinds: ["spec", "test_result"],
         selectedFiles: [
           {
             path: "src/runtime.ts",
@@ -182,6 +187,9 @@ test("trace summary rolls up model tool and context insights", async () => {
     assert.equal(trace?.summary.context.roleCount, 1);
     assert.equal(trace?.summary.context.roles[0]?.role, "planner");
     assert.equal(trace?.summary.context.roles[0]?.sectionCount, 2);
+    assert.equal(trace?.summary.context.roles[0]?.truncatedSectionCount, 1);
+    assert.equal(trace?.summary.context.roles[0]?.omittedForBudgetSectionCount, 1);
+    assert.equal(trace?.summary.context.roles[0]?.externalContextKinds[0], "spec");
     assert.equal(trace?.summary.files.selectedBySource[0]?.source, "repo_tool");
   } finally {
     await waitForTraceFlush(traceService);
@@ -219,6 +227,16 @@ test("runtime traces planner executor verifier and context spans for a successfu
           {
             path: "src/runtime.ts",
             reason: "Current runtime entrypoint."
+          }
+        ],
+        externalContext: [
+          {
+            id: "spec",
+            kind: "spec",
+            title: "Runtime summary spec",
+            content: "S".repeat(8_000),
+            source: "docs/runtime-spec.md",
+            format: "markdown"
           }
         ],
         validationTargets: ["pnpm --filter @shipyard/server typecheck"]
@@ -265,6 +283,9 @@ test("runtime traces planner executor verifier and context spans for a successfu
     assert.deepEqual(
       trace?.summary.context.roles.map((role) => role.role).sort(),
       ["executor", "planner", "verifier"]
+    );
+    assert.ok(
+      trace?.summary.context.roles.every((role) => role.externalContextKinds.includes("spec"))
     );
     assert.equal(trace?.summary.files.selectedCount, 1);
     assert.equal(trace?.summary.validation.status, "not_run");

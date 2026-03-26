@@ -141,6 +141,20 @@ export type RuntimeTaskContext = {
     source?: string | null;
     reason?: string | null;
   }>;
+  externalContext: Array<{
+    id: string;
+    kind:
+      | "spec"
+      | "schema"
+      | "prior_output"
+      | "test_result"
+      | "diff_summary"
+      | "validation_target";
+    title: string;
+    content: string;
+    source?: string | null;
+    format?: "text" | "markdown" | "json" | null;
+  }>;
   validationTargets: string[];
 };
 

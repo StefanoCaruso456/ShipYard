@@ -692,7 +692,12 @@ async function buildRolePayload(
       sectionIds: payload.sections.map((section) => section.id),
       omittedSectionIds: payload.omittedSections.map((section) => section.id),
       promptLength: payload.prompt.length,
+      maxPromptChars: payload.budget.maxPromptChars,
+      usedPromptChars: payload.budget.usedPromptChars,
+      truncatedSectionIds: payload.budget.truncatedSectionIds,
+      omittedForBudgetSectionIds: payload.budget.omittedForBudgetSectionIds,
       rollingSummarySource: run.rollingSummary?.source ?? null,
+      externalContextKinds: (run.context.externalContext ?? []).map((item) => item.kind),
       selectedFiles: run.context.relevantFiles.map((file) => ({
         path: file.path,
         source: file.source ?? null,
@@ -1305,7 +1310,14 @@ function selectConsumedSectionIds(payload: RoleContextPayload | null, preferredI
   }
 
   const available = new Set(payload.sections.map((section) => section.id));
-  return preferredIds.filter((id) => available.has(id));
+  const externalContextIds = payload.sections
+    .map((section) => section.id)
+    .filter((id) => id.startsWith("external-context:"));
+
+  return uniqueStrings([
+    ...preferredIds.filter((id) => available.has(id)),
+    ...externalContextIds
+  ]);
 }
 
 function cloneOrchestrationState(state: OrchestrationState) {

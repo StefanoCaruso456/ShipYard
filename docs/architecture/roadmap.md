@@ -11,9 +11,9 @@ It exists so implementation follows one sequence and does not drift across sessi
 | Requirement | Status | Notes |
 |---|---|---|
 | Continuous operation | Complete | Persistent runtime loop exists and accepts work without restart. |
-| Basic tool calls | Partial | `edit_file` is end-to-end; `read_file`, `read_file_range`, and `search_repo` are not yet fully routed through the runtime task path. |
+| Basic tool calls | Complete | `read_file`, `read_file_range`, `search_repo`, and surgical edit tools are all routed through the live runtime task path. |
 | Surgical file editing | Complete | Anchor-based editing is implemented with validation and rollback. |
-| Context injection | Partial | Role-scoped context assembly exists, but external runtime context and stronger budget/truncation policy still need work. |
+| Context injection | Complete | External context is accepted at task submission, assembled per role, bounded by deterministic budgets, and exposed through traces/debug payloads. |
 | Multi-agent coordination | Partial | Planner/executor/verifier orchestration is real, but the broader orchestrator -> production lead -> specialist dev model is not yet implemented. |
 | Observability | Complete for core tracing | LangSmith plus local logs exist, but richer operator-facing query and evaluation flows can improve. |
 | Ship rebuild | Missing | No first-class rebuild execution or intervention logging exists yet. |
@@ -77,6 +77,10 @@ Role execution quality depends on good context shaping. This should be hardened 
 - runtime accepts external context without prompt hacks
 - all role invocations consume the assembled payloads
 - context omission and truncation are deterministic and inspectable
+
+### Status
+
+Complete
 
 ## Phase 10: Typed Runtime Control Plane
 

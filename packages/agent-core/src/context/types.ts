@@ -2,6 +2,7 @@ import type { AgentRole, RoleSkillView } from "../instructions/types";
 import type {
   AgentRunRecord,
   AgentRuntimeStatus,
+  ExternalContextInput,
   RelevantFileContext,
   RepoToolResult
 } from "../runtime/types";
@@ -40,6 +41,13 @@ export type OmittedContextSection = {
   reason: string;
 };
 
+export type RoleContextBudget = {
+  maxPromptChars: number;
+  usedPromptChars: number;
+  truncatedSectionIds: string[];
+  omittedForBudgetSectionIds: string[];
+};
+
 export type RoleContextPayload = {
   role: AgentRole;
   runId: string;
@@ -47,6 +55,7 @@ export type RoleContextPayload = {
   precedence: readonly RuntimeContextPrecedenceLayer[];
   sections: ContextPayloadSection[];
   omittedSections: OmittedContextSection[];
+  budget: RoleContextBudget;
   prompt: string;
 };
 
@@ -70,6 +79,7 @@ export type SharedRoleContext = {
   taskObjective: string;
   constraints: string[];
   relevantFiles: RelevantFileContext[];
+  externalContext: ExternalContextInput[];
   recentToolResults: RepoToolResult[];
   validationTargets: string[];
   knownFailures: string[];
