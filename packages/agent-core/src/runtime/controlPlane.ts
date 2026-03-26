@@ -1,6 +1,9 @@
 import type {
+  ApprovalDecision,
+  ApprovalGateState,
   AgentRunResult,
   ControlPlaneAgent,
+  ControlPlaneApprovalGate,
   ControlPlaneArtifact,
   ControlPlaneBlocker,
   ControlPlaneEntityKind,
@@ -51,6 +54,7 @@ export function createControlPlaneState(phaseExecution: PhaseExecutionState): Co
     runOwnerId: ORCHESTRATOR_ID,
     agents: buildAgents(phaseExecution, specialistAgentRegistry),
     specialistAgentRegistry,
+    activeApprovalGateId: phaseExecution.activeApprovalGateId,
     current: {
       ...phaseExecution.current
     },
@@ -63,6 +67,7 @@ export function createControlPlaneState(phaseExecution: PhaseExecutionState): Co
     phases: phaseExecution.phases.map((phase) =>
       createPhaseNode(phase, updatedAt, specialistAgentRegistry)
     ),
+    approvalGates: buildApprovalGates(phaseExecution),
     artifacts: [],
     handoffs: [],
     interventions: [],
@@ -100,6 +105,7 @@ export function normalizeControlPlaneState(
   normalized.runOwnerId = normalized.runOwnerId || ORCHESTRATOR_ID;
   normalized.specialistAgentRegistry =
     normalized.specialistAgentRegistry ?? createSpecialistAgentRegistry();
+  normalized.activeApprovalGateId = normalized.activeApprovalGateId ?? null;
   normalized.agents = Array.isArray(normalized.agents)
     ? normalized.agents.map((agent) => ({
         ...agent,
@@ -142,6 +148,16 @@ export function normalizeControlPlaneState(
     : [];
   normalized.blockers = Array.isArray(normalized.blockers) ? normalized.blockers : [];
   normalized.phases = Array.isArray(normalized.phases) ? normalized.phases : [];
+  normalized.approvalGates = Array.isArray(normalized.approvalGates)
+    ? normalized.approvalGates.map((gate) => ({
+        ...gate,
+        instructions: gate.instructions ?? null,
+        waitingAt: gate.waitingAt ?? null,
+        resolvedAt: gate.resolvedAt ?? null,
+        ownerAgentTypeId: gate.ownerAgentTypeId ?? inferAgentTypeId(gate.ownerId),
+        decisions: Array.isArray(gate.decisions) ? gate.decisions : []
+      }))
+    : [];
 
   if (phaseExecution) {
     return syncControlPlaneState(normalized, phaseExecution);
@@ -159,6 +175,7 @@ export function syncControlPlaneState(
   const updatedAt = new Date().toISOString();
 
   next.status = mapStatus(phaseExecution.status);
+  next.activeApprovalGateId = phaseExecution.activeApprovalGateId;
   next.current = {
     ...phaseExecution.current
   };
@@ -172,6 +189,7 @@ export function syncControlPlaneState(
   next.updatedAt = updatedAt;
 
   ensureNodes(next, phaseExecution, updatedAt);
+  next.approvalGates = buildApprovalGates(phaseExecution);
 
   for (const phase of phaseExecution.phases) {
     const phaseNode = findPhaseNode(next, phase.id);
@@ -231,6 +249,62 @@ export function syncControlPlaneState(
 
   updateAgentStatuses(next);
   return next;
+}
+
+export function recordApprovalGateWaiting(
+  controlPlane: ControlPlaneState | null,
+  phase: Phase,
+  gate: ApprovalGateState
+) {
+  if (!controlPlane) {
+    return;
+  }
+
+  upsertIntervention(controlPlane, {
+    id: approvalInterventionId(gate.id),
+    kind: "manual_review",
+    entityKind: "phase",
+    entityId: phase.id,
+    summary: `Waiting for ${gate.title.toLowerCase()} before ${phase.name}.`,
+    ownerRole: "production_lead",
+    ownerId: PRODUCTION_LEAD_ID
+  });
+}
+
+export function recordApprovalGateDecision(
+  controlPlane: ControlPlaneState | null,
+  phase: Phase,
+  gate: ApprovalGateState,
+  decision: ApprovalDecision,
+  summary: string
+) {
+  if (!controlPlane) {
+    return;
+  }
+
+  if (decision === "reject") {
+    upsertIntervention(controlPlane, {
+      id: approvalInterventionId(gate.id),
+      kind: "manual_review",
+      entityKind: "phase",
+      entityId: phase.id,
+      summary,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID
+    });
+    upsertBlocker(controlPlane, {
+      id: approvalBlockerId(gate.id),
+      entityKind: "phase",
+      entityId: phase.id,
+      summary,
+      ownerRole: "production_lead",
+      ownerId: PRODUCTION_LEAD_ID
+    });
+    return;
+  }
+
+  resolveBlockerById(controlPlane, approvalBlockerId(gate.id));
+  resolveInterventionById(controlPlane, approvalInterventionId(gate.id));
 }
 
 export function recordPhaseStarted(controlPlane: ControlPlaneState | null, phase: Phase) {
@@ -735,6 +809,30 @@ function buildAgents(
   return agents;
 }
 
+function buildApprovalGates(phaseExecution: PhaseExecutionState): ControlPlaneApprovalGate[] {
+  return phaseExecution.phases.flatMap((phase) =>
+    phase.approvalGate
+      ? [
+          {
+            id: phase.approvalGate.id,
+            kind: phase.approvalGate.kind,
+            phaseId: phase.id,
+            phaseName: phase.name,
+            title: phase.approvalGate.title,
+            instructions: phase.approvalGate.instructions,
+            status: phase.approvalGate.status,
+            waitingAt: phase.approvalGate.waitingAt,
+            resolvedAt: phase.approvalGate.resolvedAt,
+            ownerRole: "production_lead" as const,
+            ownerId: PRODUCTION_LEAD_ID,
+            ownerAgentTypeId: "production_lead" as const,
+            decisions: phase.approvalGate.decisions.map((decision) => ({ ...decision }))
+          }
+        ]
+      : []
+  );
+}
+
 function prepareStoryDelegation(controlPlane: ControlPlaneState, story: UserStory) {
   const storyNode = findStoryNode(controlPlane, story.id);
 
@@ -1054,6 +1152,7 @@ function mapStatus(
 
   return status === "pending" ||
     status === "in_progress" ||
+    status === "blocked" ||
     status === "completed" ||
     status === "failed"
     ? status
@@ -1144,7 +1243,15 @@ function upsertIntervention(
     ownerAgentTypeId?: TeamSkillId | null;
   }
 ) {
-  if (controlPlane.interventions.some((candidate) => candidate.id === intervention.id)) {
+  const existing = controlPlane.interventions.find((candidate) => candidate.id === intervention.id);
+
+  if (existing) {
+    existing.summary = intervention.summary;
+    existing.ownerRole = intervention.ownerRole;
+    existing.ownerId = intervention.ownerId;
+    existing.ownerAgentTypeId =
+      intervention.ownerAgentTypeId ?? resolveAgentTypeId(controlPlane, intervention.ownerId);
+    existing.resolvedAt = null;
     return;
   }
 
@@ -1227,6 +1334,25 @@ function resolveInterventions(
   }
 }
 
+function resolveInterventionById(controlPlane: ControlPlaneState, interventionId: string) {
+  const resolvedAt = new Date().toISOString();
+  const intervention = controlPlane.interventions.find((candidate) => candidate.id === interventionId);
+
+  if (intervention) {
+    intervention.resolvedAt = resolvedAt;
+  }
+}
+
+function resolveBlockerById(controlPlane: ControlPlaneState, blockerId: string) {
+  const resolvedAt = new Date().toISOString();
+  const blocker = controlPlane.blockers.find((candidate) => candidate.id === blockerId);
+
+  if (blocker && blocker.status === "open") {
+    blocker.status = "resolved";
+    blocker.resolvedAt = resolvedAt;
+  }
+}
+
 function attachEntityId(
   controlPlane: ControlPlaneState,
   entityKind: ControlPlaneEntityKind,
@@ -1304,6 +1430,14 @@ function taskOwnerId(agentTypeId: TeamSkillId, taskId: string) {
 
 function correlationId(entityKind: ControlPlaneEntityKind, entityId: string) {
   return `corr:${entityKind}:${entityId}`;
+}
+
+function approvalInterventionId(gateId: string) {
+  return `intervention:approval-gate:${gateId}`;
+}
+
+function approvalBlockerId(gateId: string) {
+  return `blocker:approval-gate:${gateId}`;
 }
 
 function deriveStoryValidationTargets(story: UserStory) {

@@ -244,6 +244,7 @@ test("executor payload reflects the active phase execution task", async () => {
       instruction: "Top-level execution plan",
       phaseExecution: {
         status: "in_progress",
+        activeApprovalGateId: null,
         current: {
           phaseId: "phase-a",
           storyId: "story-a",
@@ -268,6 +269,7 @@ test("executor payload reflects the active phase execution task", async () => {
             id: "phase-a",
             name: "Phase A",
             description: "Phase A description",
+            approvalGate: null,
             status: "in_progress",
             failureReason: null,
             lastValidationResults: null,
@@ -480,6 +482,7 @@ function createRuntimeStatus(): AgentRuntimeStatus {
     runsByStatus: {
       pending: 0,
       running: 0,
+      paused: 0,
       completed: 1,
       failed: 0
     },

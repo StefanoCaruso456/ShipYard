@@ -5,6 +5,7 @@ import type {
   ComposerMode,
   ProjectPayload,
   RuntimeInstructionResponse,
+  RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
   SidebarNavItemId,
   WorkspaceProject,
@@ -36,6 +37,12 @@ type TaskWorkspaceProps = {
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
   onRequestSteer: () => void;
+  onApprovalDecision: (
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) => Promise<void>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -62,6 +69,7 @@ export function TaskWorkspace({
   onSelectSuggestion,
   onReconnectProjectFolder,
   onRequestSteer,
+  onApprovalDecision,
   onSubmit
 }: TaskWorkspaceProps) {
   const runtimeState = backendConnected
@@ -124,6 +132,7 @@ export function TaskWorkspace({
             onSelectSuggestion={onSelectSuggestion}
             onReconnectProjectFolder={onReconnectProjectFolder}
             onRequestSteer={onRequestSteer}
+            onApprovalDecision={onApprovalDecision}
           />
         )}
       </div>

@@ -160,6 +160,12 @@ export type {
   ValidationType
 } from "./validation/types";
 export type {
+  ApprovalDecision,
+  ApprovalDecisionRecord,
+  ApprovalGateInput,
+  ApprovalGateKind,
+  ApprovalGateState,
+  ApprovalGateStatus,
   AgentRunRecord,
   AgentRunResult,
   AgentRunStatus,
@@ -167,6 +173,7 @@ export type {
   AgentRuntimeStatus,
   ControlPlaneAgent,
   ControlPlaneAgentStatus,
+  ControlPlaneApprovalGate,
   ControlPlaneArtifact,
   ControlPlaneArtifactKind,
   ControlPlaneBlocker,
@@ -193,6 +200,7 @@ export type {
   OrchestrationStatus,
   OperatorJournalTone,
   OperatorRunBlocker,
+  OperatorRunApprovalGate,
   OperatorRunCurrentWork,
   OperatorRunJournalEntry,
   OperatorRunOwner,
@@ -230,6 +238,7 @@ export type {
   RepoMutationToolResult,
   RepoToolRequest,
   RepoToolResult,
+  ResolveApprovalGateInput,
   RollingSummary,
   RuntimeObservability,
   RunContextInput,

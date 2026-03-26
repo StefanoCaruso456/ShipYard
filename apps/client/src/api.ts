@@ -4,6 +4,7 @@ import type {
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
   RuntimeTaskSubmitContext,
   RuntimeTraceResponse,
@@ -139,6 +140,20 @@ export function transcribeRuntimeAudio(input: {
   return requestJson<RuntimeAudioTranscriptionResponse>("/api/runtime/audio/transcriptions", {
     method: "POST",
     body: formData
+  });
+}
+
+export function submitRuntimeApprovalDecision(
+  taskId: string,
+  input: {
+    gateId: string;
+    decision: RuntimeOperatorApprovalDecision;
+    comment?: string;
+  }
+) {
+  return requestJson<RuntimeTaskResponse>(`/api/runtime/tasks/${taskId}/approval`, {
+    method: "POST",
+    body: JSON.stringify(input)
   });
 }
 

@@ -27,14 +27,16 @@ Without them, the runtime may be technically capable but operationally unsafe.
 
 ## How It Works
 
-The control plane records gate objects and their status.
+The runtime now carries typed approval gates directly on phases.
 
 When a run reaches a gate:
 
-- the runtime pauses progression
-- the operator sees what is waiting for review
-- an explicit decision is recorded
-- the run either resumes, retries, or moves to blocked
+- the run moves into a real `paused` status
+- phase execution moves into `blocked`
+- the control plane mirrors the active gate, blocker, and intervention state
+- the operator view shows the active gate and action buttons
+- a decision is recorded as `approve`, `reject`, or `request_retry`
+- the run either resumes, stays paused, or resets earlier phases before retrying
 
 ## Outcome
 
@@ -55,3 +57,4 @@ It only adds the gating and approval mechanics needed to govern those artifacts 
 - the runtime pauses at the defined gates
 - approval and rejection are preserved as typed records
 - operators can resume or reject work with clear consequences
+- approval decisions are exposed through the runtime API and operator UI

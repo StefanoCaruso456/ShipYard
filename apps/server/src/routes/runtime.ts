@@ -26,6 +26,8 @@ type RuntimeTaskRequest = Request & {
   files?: Express.Multer.File[];
 };
 
+type ApprovalDecision = "approve" | "reject" | "request_retry";
+
 const attachmentUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -161,6 +163,33 @@ export function registerRuntimeRoutes(
     response.json({
       task: serializeRun(task)
     });
+  });
+
+  app.post("/api/runtime/tasks/:id/approval", async (request, response) => {
+    const resolution = parseApprovalResolution(request.body);
+
+    if ("error" in resolution) {
+      response.status(400).json(resolution);
+      return;
+    }
+
+    try {
+      const task = await runtimeService.resolveApprovalGate({
+        runId: request.params.id,
+        ...resolution.value
+      });
+
+      response.status(200).json({
+        task: serializeRun(task)
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to resolve the approval gate.";
+
+      response.status(message.includes("was not found") ? 404 : 400).json({
+        error: message
+      });
+    }
   });
 
   app.get("/api/runtime/tasks", (_request, response) => {
@@ -989,6 +1018,7 @@ function parsePhaseExecutionInput(
       id?: unknown;
       name?: unknown;
       description?: unknown;
+      approvalGate?: unknown;
       userStories?: unknown;
     };
 
@@ -1006,6 +1036,12 @@ function parsePhaseExecutionInput(
       return {
         error: `phaseExecution.phases[${phaseIndex}].userStories must be a non-empty array.`
       };
+    }
+
+    const approvalGate = parseApprovalGateInput(phase.approvalGate);
+
+    if ("error" in approvalGate) {
+      return approvalGate;
     }
 
     const userStories: NonNullable<
@@ -1171,6 +1207,7 @@ function parsePhaseExecutionInput(
       id: phase.id,
       name: phase.name,
       description: phase.description,
+      approvalGate: approvalGate.value,
       userStories
     });
   }
@@ -1185,6 +1222,129 @@ function parsePhaseExecutionInput(
     value: {
       phases,
       retryPolicy: retryPolicy.value
+    }
+  };
+}
+
+function parseApprovalResolution(
+  value: unknown
+): { value: { gateId: string; decision: ApprovalDecision; comment: string | null } } | { error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      error: "Approval resolution must be an object."
+    };
+  }
+
+  const candidate = value as {
+    gateId?: unknown;
+    decision?: unknown;
+    comment?: unknown;
+  };
+  const decision = parseApprovalDecision(candidate.decision);
+
+  if (typeof candidate.gateId !== "string" || !candidate.gateId.trim()) {
+    return {
+      error: "gateId is required."
+    };
+  }
+
+  if (!decision) {
+    return {
+      error: "decision must be approve, reject, or request_retry."
+    };
+  }
+
+  if (
+    candidate.comment !== undefined &&
+    candidate.comment !== null &&
+    typeof candidate.comment !== "string"
+  ) {
+    return {
+      error: "comment must be a string when provided."
+    };
+  }
+
+  return {
+    value: {
+      gateId: candidate.gateId.trim(),
+      decision,
+      comment: candidate.comment?.trim() ? candidate.comment.trim() : null
+    }
+  };
+}
+
+function parseApprovalDecision(value: unknown): ApprovalDecision | null {
+  return value === "approve" || value === "reject" || value === "request_retry"
+    ? value
+    : null;
+}
+
+function parseApprovalGateInput(
+  value: unknown
+):
+  | { value: NonNullable<NonNullable<SubmitTaskInput["phaseExecution"]>["phases"][number]["approvalGate"]> | null }
+  | { error: string } {
+  if (value === undefined || value === null) {
+    return {
+      value: null
+    };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      error: "phase approvalGate must be an object when provided."
+    };
+  }
+
+  const candidate = value as {
+    id?: unknown;
+    kind?: unknown;
+    title?: unknown;
+    instructions?: unknown;
+  };
+
+  if (
+    candidate.kind !== "architecture" &&
+    candidate.kind !== "implementation" &&
+    candidate.kind !== "deployment"
+  ) {
+    return {
+      error: "approvalGate.kind must be architecture, implementation, or deployment."
+    };
+  }
+
+  if (candidate.id !== undefined && typeof candidate.id !== "string") {
+    return {
+      error: "approvalGate.id must be a string when provided."
+    };
+  }
+
+  if (
+    candidate.title !== undefined &&
+    candidate.title !== null &&
+    typeof candidate.title !== "string"
+  ) {
+    return {
+      error: "approvalGate.title must be a string when provided."
+    };
+  }
+
+  if (
+    candidate.instructions !== undefined &&
+    candidate.instructions !== null &&
+    typeof candidate.instructions !== "string"
+  ) {
+    return {
+      error: "approvalGate.instructions must be a string when provided."
+    };
+  }
+
+  return {
+    value: {
+      id: candidate.id,
+      kind: candidate.kind,
+      title: candidate.title ?? null,
+      instructions: candidate.instructions ?? null
     }
   };
 }

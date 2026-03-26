@@ -1,13 +1,26 @@
-import type { WorkspaceThread } from "../types";
+import type {
+  RuntimeOperatorApprovalDecision,
+  WorkspaceThread
+} from "../types";
 import { AgentActivityFeed } from "./AgentActivityFeed";
 import { OperatorRunOverview } from "./OperatorRunOverview";
 
 type LiveRuntimeStageProps = {
   thread: WorkspaceThread;
   onRequestSteer: () => void;
+  onApprovalDecision: (
+    runId: string,
+    gateId: string,
+    decision: RuntimeOperatorApprovalDecision,
+    comment: string
+  ) => Promise<void>;
 };
 
-export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStageProps) {
+export function LiveRuntimeStage({
+  thread,
+  onRequestSteer,
+  onApprovalDecision
+}: LiveRuntimeStageProps) {
   const liveRuntime = thread.liveRuntime;
   const focusedRun = liveRuntime?.focusedRun;
   const operatorView = liveRuntime?.operatorView;
@@ -23,6 +36,8 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
       ? "Reasoning live"
       : focusedRun.status === "pending"
         ? "Accepted by runtime"
+        : focusedRun.status === "paused"
+          ? "Waiting for approval"
         : focusedRun.status === "failed"
           ? "Failed in runtime"
           : "Completed in runtime";
@@ -31,6 +46,8 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
       ? "Reasoning through the current request"
       : thread.status === "pending"
         ? "Current request is queued"
+        : thread.status === "paused"
+          ? "Current request is paused for approval"
         : "Latest request";
   const activeDetail =
     thread.status === "running"
@@ -41,6 +58,10 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
         ? queuedFollowUps.length > 0
           ? `${queuedFollowUps.length} follow-up${queuedFollowUps.length === 1 ? "" : "s"} are already lined up on this thread.`
           : "The worker has accepted this request and will start the reasoning path shortly."
+        : thread.status === "paused"
+          ? operatorView?.approval?.activeGate
+            ? `${operatorView.approval.activeGate.title} is waiting for a human decision before the run can continue.`
+            : "The run is paused until the next approval decision is recorded."
         : liveRuntime.completedRunCount > 1
           ? `${liveRuntime.completedRunCount} requests have completed on this thread.`
           : "The latest runtime request has finished.";
@@ -87,7 +108,13 @@ export function LiveRuntimeStage({ thread, onRequestSteer }: LiveRuntimeStagePro
         </div>
       </article>
 
-      {operatorView ? <OperatorRunOverview operatorView={operatorView} /> : null}
+      {operatorView ? (
+        <OperatorRunOverview
+          runId={focusedRun.id}
+          operatorView={operatorView}
+          onApprovalDecision={onApprovalDecision}
+        />
+      ) : null}
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 

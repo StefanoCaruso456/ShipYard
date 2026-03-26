@@ -543,6 +543,7 @@ a {
 
 .operator-overview__header div,
 .operator-overview__card,
+.operator-overview__approval-card,
 .operator-overview__blocker,
 .operator-overview__journal-item {
   display: grid;
@@ -571,6 +572,7 @@ a {
 
 .operator-overview__header p,
 .operator-overview__card p,
+.operator-overview__approval-card p,
 .operator-overview__blocker p,
 .operator-overview__journal-item p {
   margin: 0;
@@ -591,6 +593,7 @@ a {
 
 .operator-overview__stage,
 .operator-overview__card,
+.operator-overview__approval-card,
 .operator-overview__blocker,
 .operator-overview__journal-item {
   padding: 0.85rem 0.92rem;
@@ -601,6 +604,7 @@ a {
 
 .operator-overview__stage span,
 .operator-overview__card strong,
+.operator-overview__approval-card strong,
 .operator-overview__blocker strong,
 .operator-overview__journal-head strong {
   font-size: 0.9rem;
@@ -654,6 +658,61 @@ a {
 .operator-overview__meta {
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.operator-overview__approval-card {
+  border-color: rgba(176, 143, 80, 0.28);
+  background: rgba(176, 143, 80, 0.08);
+}
+
+.operator-overview__approval-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.operator-overview__approval-comment {
+  width: 100%;
+  resize: vertical;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 14, 18, 0.72);
+  color: #ecece7;
+  padding: 0.72rem 0.8rem;
+  font: inherit;
+}
+
+.operator-overview__approval-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.operator-overview__approval-button {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f2f2ec;
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.operator-overview__approval-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.operator-overview__approval-button--approve {
+  border-color: rgba(116, 153, 124, 0.32);
+}
+
+.operator-overview__approval-button--retry {
+  border-color: rgba(176, 143, 80, 0.32);
+}
+
+.operator-overview__approval-button--reject {
+  border-color: rgba(154, 96, 96, 0.32);
 }
 
 .operator-overview__journal-item--success {

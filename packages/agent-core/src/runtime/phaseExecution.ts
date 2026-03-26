@@ -1,4 +1,7 @@
 import {
+  type ApprovalDecision,
+  type ApprovalGateInput,
+  type ApprovalGateState,
   cloneRunRecord,
   type AgentRunRecord,
   type AgentRunResult,
@@ -24,6 +27,8 @@ import {
   createControlPlaneState,
   recordPhaseCompleted,
   recordPhaseFailed,
+  recordApprovalGateDecision,
+  recordApprovalGateWaiting,
   recordPhaseStarted,
   recordStoryCompleted,
   recordStoryFailed,
@@ -72,6 +77,7 @@ export function normalizePhaseExecutionInput(
       id: phase.id.trim(),
       name: phase.name.trim(),
       description: phase.description.trim(),
+      approvalGate: normalizeApprovalGate(phase.approvalGate, phase.id.trim(), phase.name.trim()),
       status: "pending" as const,
       userStories: phase.userStories
         .filter((story) => story && typeof story.id === "string" && story.id.trim())
@@ -118,6 +124,7 @@ export function normalizePhaseExecutionInput(
   return {
     status: "pending",
     phases,
+    activeApprovalGateId: null,
     current: {
       phaseId: null,
       storyId: null,
@@ -140,6 +147,7 @@ export function normalizePhaseExecutionState(
     id: phase.id.trim(),
     name: phase.name.trim(),
     description: phase.description.trim(),
+    approvalGate: normalizeApprovalGateState(phase.approvalGate, phase.id.trim(), phase.name.trim()),
     status: normalizePhaseStatus(phase.status),
     userStories: phase.userStories.map((story) => ({
       id: story.id.trim(),
@@ -175,6 +183,10 @@ export function normalizePhaseExecutionState(
   return {
     status: normalizePhaseStatus(value.status),
     phases,
+    activeApprovalGateId:
+      typeof value.activeApprovalGateId === "string" && value.activeApprovalGateId.trim()
+        ? value.activeApprovalGateId.trim()
+        : findActiveApprovalGate(phases)?.gate.id ?? null,
     current: normalizeCurrentPointer(value, phases),
     progress: computeProgress(phases),
     retryPolicy: normalizeRetryPolicy(value.retryPolicy),
@@ -200,6 +212,18 @@ export async function executePhaseExecutionRun(
   for (const phase of phaseExecution.phases) {
     if (phase.status === "completed") {
       continue;
+    }
+
+    const pauseResult = await maybePauseForApprovalGate({
+      run: workingRun,
+      phaseExecution,
+      phase,
+      instructionRuntime: options.instructionRuntime,
+      persistRun: options.persistRun
+    });
+
+    if (pauseResult) {
+      return pauseResult;
     }
 
     beginPhase(workingRun, phaseExecution, phase);
@@ -455,6 +479,79 @@ export async function executePhaseExecutionRun(
   };
 }
 
+export function resolvePhaseExecutionApproval(options: {
+  phaseExecution: PhaseExecutionState;
+  gateId: string;
+  decision: ApprovalDecision;
+  comment?: string | null;
+}) {
+  const match = findApprovalGateById(options.phaseExecution.phases, options.gateId);
+
+  if (!match) {
+    throw new Error(`Approval gate ${options.gateId} was not found.`);
+  }
+
+  const { phase, phaseIndex, gate } = match;
+  const decidedAt = new Date().toISOString();
+  const comment = options.comment?.trim() ? options.comment.trim() : null;
+
+  gate.decisions.push({
+    id: `approval-decision:${gate.id}:${gate.decisions.length + 1}`,
+    decision: options.decision,
+    comment,
+    decidedAt
+  });
+
+  if (options.decision === "approve") {
+    gate.status = "approved";
+    gate.resolvedAt = decidedAt;
+    options.phaseExecution.activeApprovalGateId = null;
+    options.phaseExecution.status = "pending";
+    options.phaseExecution.lastFailureReason = null;
+
+    return {
+      phase,
+      gate,
+      outcome: "resume" as const,
+      summary: `Approved ${gate.title} for ${phase.name}.`
+    };
+  }
+
+  if (options.decision === "reject") {
+    gate.status = "rejected";
+    gate.resolvedAt = decidedAt;
+    options.phaseExecution.activeApprovalGateId = gate.id;
+    options.phaseExecution.status = "blocked";
+    options.phaseExecution.lastFailureReason = comment ?? `Approval rejected for ${phase.name}.`;
+
+    return {
+      phase,
+      gate,
+      outcome: "paused" as const,
+      summary: comment ?? `Approval rejected for ${phase.name}.`
+    };
+  }
+
+  if (phaseIndex === 0) {
+    throw new Error("Cannot request a retry before the first gated phase.");
+  }
+
+  gate.status = "pending";
+  gate.waitingAt = null;
+  gate.resolvedAt = null;
+  options.phaseExecution.activeApprovalGateId = null;
+  options.phaseExecution.status = "pending";
+  options.phaseExecution.lastFailureReason = null;
+  resetPhasesForApprovalRetry(options.phaseExecution.phases, phaseIndex - 1, phaseIndex);
+
+  return {
+    phase,
+    gate,
+    outcome: "retry_requested" as const,
+    summary: comment ?? `Retry requested before ${phase.name}.`
+  };
+}
+
 function beginPhase(run: AgentRunRecord, phaseExecution: PhaseExecutionState, phase: Phase) {
   phase.status = "in_progress";
   phase.failureReason = null;
@@ -473,6 +570,83 @@ function beginPhase(run: AgentRunRecord, phaseExecution: PhaseExecutionState, ph
     taskId: null,
     message: `Phase ${phase.name} started.`
   });
+}
+
+async function maybePauseForApprovalGate(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  instructionRuntime: AgentInstructionRuntime;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+}) {
+  const gate = options.phase.approvalGate;
+
+  if (!gate) {
+    return null;
+  }
+
+  if (gate.status === "approved") {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const summary =
+    gate.status === "rejected"
+      ? latestApprovalComment(gate) ?? `Approval rejected for ${options.phase.name}.`
+      : `Waiting for approval before ${options.phase.name}.`;
+
+  if (gate.status === "pending") {
+    gate.status = "waiting";
+    gate.waitingAt = now;
+    gate.resolvedAt = null;
+    recordApprovalGateWaiting(options.run.controlPlane ?? null, options.phase, gate);
+    appendRunEvents(options.run, {
+      at: now,
+      type: "approval_gate_waiting",
+      phaseId: options.phase.id,
+      gateId: gate.id,
+      message: summary
+    });
+  }
+
+  options.phaseExecution.status = "blocked";
+  options.phaseExecution.activeApprovalGateId = gate.id;
+  options.phaseExecution.current = {
+    phaseId: options.phase.id,
+    storyId: null,
+    taskId: null
+  };
+  options.phaseExecution.lastFailureReason = gate.status === "rejected" ? summary : null;
+  updateProgress(options.phaseExecution);
+  options.run.rollingSummary = {
+    text: summary,
+    updatedAt: now,
+    source: gate.status === "rejected" ? "failure" : "result"
+  };
+  await persist(options.persistRun, options.run);
+
+  return {
+    mode: options.run.rebuild ? "ship-rebuild" : "phase-execution",
+    summary,
+    instructionEcho: options.run.instruction,
+    skillId: options.instructionRuntime.skill.meta.id,
+    completedAt: now,
+    phaseExecution: options.phaseExecution,
+    controlPlane: options.run.controlPlane ?? null,
+    rebuild: normalizeRebuildState(options.run.rebuild, {
+      phaseExecution: options.phaseExecution,
+      controlPlane: options.run.controlPlane ?? null,
+      runStatus: "paused",
+      validationStatus: options.run.validationStatus
+    }),
+    paused: {
+      reason: "approval_gate",
+      gateId: gate.id,
+      gateKind: gate.kind,
+      phaseId: options.phase.id,
+      summary
+    }
+  } satisfies AgentRunResult;
 }
 
 function beginStory(
@@ -1139,6 +1313,96 @@ function normalizeValidationGates(value: ValidationGate[] | null | undefined) {
     : [];
 }
 
+function normalizeApprovalGate(
+  value: ApprovalGateInput | ApprovalGateState | null | undefined,
+  phaseId: string,
+  phaseName: string
+): ApprovalGateState | null {
+  if (!value || typeof value.kind !== "string") {
+    return null;
+  }
+
+  const kind =
+    value.kind === "architecture" ||
+    value.kind === "implementation" ||
+    value.kind === "deployment"
+      ? value.kind
+      : null;
+
+  if (!kind) {
+    return null;
+  }
+
+  const title =
+    typeof value.title === "string" && value.title.trim()
+      ? value.title.trim()
+      : defaultApprovalGateTitle(kind);
+  const instructions =
+    typeof value.instructions === "string" && value.instructions.trim()
+      ? value.instructions.trim()
+      : null;
+  const status =
+    "status" in value &&
+    (value.status === "waiting" ||
+      value.status === "approved" ||
+      value.status === "rejected" ||
+      value.status === "pending")
+      ? value.status
+      : "pending";
+  const decisions =
+    "decisions" in value && Array.isArray(value.decisions)
+      ? value.decisions
+          .filter(
+            (decision) =>
+              decision &&
+              (decision.decision === "approve" ||
+                decision.decision === "reject" ||
+                decision.decision === "request_retry") &&
+              typeof decision.decidedAt === "string"
+          )
+          .map((decision, index) => ({
+            id:
+              typeof decision.id === "string" && decision.id.trim()
+                ? decision.id.trim()
+                : `approval-decision:${phaseId}:${index + 1}`,
+            decision: decision.decision,
+            comment:
+              typeof decision.comment === "string" && decision.comment.trim()
+                ? decision.comment.trim()
+                : null,
+            decidedAt: decision.decidedAt
+          }))
+      : [];
+
+  return {
+    id:
+      typeof value.id === "string" && value.id.trim()
+        ? value.id.trim()
+        : `approval:${phaseId}:${kind}`,
+    kind,
+    title,
+    instructions,
+    status,
+    waitingAt:
+      "waitingAt" in value && typeof value.waitingAt === "string" && value.waitingAt.trim()
+        ? value.waitingAt
+        : null,
+    resolvedAt:
+      "resolvedAt" in value && typeof value.resolvedAt === "string" && value.resolvedAt.trim()
+        ? value.resolvedAt
+        : null,
+    decisions
+  };
+}
+
+function normalizeApprovalGateState(
+  value: ApprovalGateState | ApprovalGateInput | null | undefined,
+  phaseId: string,
+  phaseName: string
+) {
+  return normalizeApprovalGate(value, phaseId, phaseName);
+}
+
 function normalizeGateKind(value: ValidationGateKind) {
   return value;
 }
@@ -1189,7 +1453,10 @@ function mergeExternalContext(
 }
 
 function normalizePhaseStatus(value: string): PhaseStatus {
-  return value === "in_progress" || value === "completed" || value === "failed"
+  return value === "in_progress" ||
+    value === "blocked" ||
+    value === "completed" ||
+    value === "failed"
     ? value
     : "pending";
 }
@@ -1202,11 +1469,13 @@ function normalizeCurrentPointer(value: PhaseExecutionState, phases: PhaseExecut
   const currentPhase =
     phases.find((phase) => phase.id === value.current.phaseId) ??
     phases.find((phase) => phase.status === "in_progress") ??
+    phases.find((phase) => phase.status === "blocked") ??
     phases.find((phase) => phase.status !== "completed") ??
     null;
   const currentStory =
     currentPhase?.userStories.find((story) => story.id === value.current.storyId) ??
     currentPhase?.userStories.find((story) => story.status === "in_progress") ??
+    currentPhase?.userStories.find((story) => story.status === "blocked") ??
     currentPhase?.userStories.find((story) => story.status !== "completed") ??
     null;
   const currentTask =
@@ -1229,6 +1498,85 @@ function resetStoryTasks(story: UserStory) {
     task.lastValidationResults = null;
     task.result = null;
   }
+}
+
+function resetPhasesForApprovalRetry(
+  phases: Phase[],
+  startIndex: number,
+  retryGatePhaseIndex: number
+) {
+  for (let phaseIndex = startIndex; phaseIndex < phases.length; phaseIndex += 1) {
+    const phase = phases[phaseIndex];
+
+    if (!phase) {
+      continue;
+    }
+
+    phase.status = "pending";
+    phase.failureReason = null;
+    phase.lastValidationResults = null;
+
+    if (phase.approvalGate && phaseIndex >= retryGatePhaseIndex) {
+      phase.approvalGate.status = "pending";
+      phase.approvalGate.waitingAt = null;
+      phase.approvalGate.resolvedAt = null;
+    }
+
+    for (const story of phase.userStories) {
+      story.status = "pending";
+      story.failureReason = null;
+      story.lastValidationResults = null;
+      resetStoryTasks(story);
+    }
+  }
+}
+
+function findApprovalGateById(phases: Phase[], gateId: string) {
+  for (const [phaseIndex, phase] of phases.entries()) {
+    if (phase.approvalGate?.id === gateId) {
+      return {
+        phase,
+        phaseIndex,
+        gate: phase.approvalGate
+      };
+    }
+  }
+
+  return null;
+}
+
+function findActiveApprovalGate(phases: Phase[]) {
+  return (
+    phases
+      .map((phase) => ({ phase, gate: phase.approvalGate }))
+      .find(
+        (entry): entry is { phase: Phase; gate: ApprovalGateState } =>
+          Boolean(entry.gate && (entry.gate.status === "waiting" || entry.gate.status === "rejected"))
+      ) ?? null
+  );
+}
+
+function defaultApprovalGateTitle(kind: ApprovalGateState["kind"]) {
+  switch (kind) {
+    case "architecture":
+      return "Architecture approval";
+    case "implementation":
+      return "Implementation approval";
+    case "deployment":
+      return "Deployment approval";
+  }
+}
+
+function latestApprovalComment(gate: ApprovalGateState) {
+  for (let index = gate.decisions.length - 1; index >= 0; index -= 1) {
+    const comment = gate.decisions[index]?.comment?.trim();
+
+    if (comment) {
+      return comment;
+    }
+  }
+
+  return null;
 }
 
 function uniqueStrings(values: string[]) {
