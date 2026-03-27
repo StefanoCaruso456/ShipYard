@@ -875,10 +875,15 @@ function App() {
       workflowMode === "factory"
         ? buildFactorySubmission(factoryDraft)
         : null;
+    const submissionProject =
+      workflowMode === "factory" ? runtimeProject ?? activeProject : activeProject;
+    const reusesActiveDraftThread =
+      workflowMode !== "factory" && activeThread?.source === "draft";
 
     const submittedAttachments = composerAttachments;
     const canSendToRuntime = backendConnected;
     const isLiveThreadFollowUp =
+      workflowMode !== "factory" &&
       canSendToRuntime &&
       activeThread?.source === "live" &&
       Boolean(activeThread.liveRuntime?.threadId);
@@ -971,10 +976,10 @@ function App() {
         return;
       }
 
-      if (activeProject.kind !== "live") {
+      if (!runtimeProject) {
         setSubmissionFeedback({
           tone: "danger",
-          text: "Factory Mode runs through the live runtime project. Switch back to Shipyard Runtime first."
+          text: "Factory Mode is unavailable until the Shipyard Runtime workspace is ready."
         });
         return;
       }
@@ -988,9 +993,9 @@ function App() {
       }
     }
 
-    const draftId = activeThread?.source === "draft" ? activeThread.id : createDraftId();
+    const draftId = reusesActiveDraftThread ? activeThread.id : createDraftId();
     const optimisticThread = buildDraftSubmissionThread({
-      existingThread: activeThread?.source === "draft" ? activeThread : null,
+      existingThread: reusesActiveDraftThread ? activeThread : null,
       threadId: draftId,
       titleOverride: factoryInput ? `Factory · ${factoryInput.appName}` : null,
       instruction,
@@ -999,19 +1004,20 @@ function App() {
       workflowMode
     });
 
-    rememberWorkflowMode(activeProject.id, draftId, workflowMode);
+    rememberWorkflowMode(submissionProject.id, draftId, workflowMode);
 
     setDraftThreadsByProject((current) => ({
       ...current,
-      [activeProject.id]: [
+      [submissionProject.id]: [
         optimisticThread,
-        ...(current[activeProject.id] ?? []).filter((candidate) => candidate.id !== draftId)
+        ...(current[submissionProject.id] ?? []).filter((candidate) => candidate.id !== draftId)
       ]
     }));
     setSelectedThreadIds((current) => ({
       ...current,
-      [activeProject.id]: draftId
+      [submissionProject.id]: draftId
     }));
+    setSelectedProjectId(submissionProject.id);
     setActiveNav("projects");
     setComposerValue("");
     setComposerAttachments([]);
@@ -1030,7 +1036,7 @@ function App() {
 
     try {
       const runtimeContext = buildRuntimeContextForProject(
-        activeProject,
+        submissionProject,
         runtimeTasks,
         localFileEffectsByTaskId
       );
@@ -1040,12 +1046,12 @@ function App() {
         toolRequest,
         operatingMode: workflowMode,
         attachments: submittedAttachments,
-        project: activeProject,
+        project: submissionProject,
         context: factoryInput ? undefined : runtimeContext,
         factory: factoryInput
       });
 
-      rememberWorkflowMode(activeProject.id, response.task.threadId, workflowMode);
+      rememberWorkflowMode(submissionProject.id, response.task.threadId, workflowMode);
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
       if (submittedAttachments.length > 0) {
@@ -1057,15 +1063,23 @@ function App() {
 
       setDraftThreadsByProject((current) => ({
         ...current,
-        [activeProject.id]: (current[activeProject.id] ?? []).filter(
+        [submissionProject.id]: (current[submissionProject.id] ?? []).filter(
           (candidate) => candidate.id !== draftId
         )
       }));
       setSelectedThreadIds((current) => ({
         ...current,
-        [activeProject.id]: response.task.threadId
+        [submissionProject.id]: response.task.threadId
       }));
-      setSubmissionFeedback(null);
+      setSelectedProjectId(submissionProject.id);
+      setSubmissionFeedback(
+        workflowMode === "factory"
+          ? {
+              tone: "success",
+              text: `Factory run started in ${submissionProject.name}.`
+            }
+          : null
+      );
 
       void loadRuntimeSnapshot();
     } catch (error) {
@@ -1076,7 +1090,7 @@ function App() {
 
       setDraftThreadsByProject((current) => ({
         ...current,
-        [activeProject.id]: (current[activeProject.id] ?? []).map((candidate) =>
+        [submissionProject.id]: (current[submissionProject.id] ?? []).map((candidate) =>
           candidate.id === draftId ? markDraftThreadFailed(candidate, message) : candidate
         )
       }));
