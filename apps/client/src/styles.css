@@ -246,6 +246,13 @@ a {
   backdrop-filter: blur(18px);
 }
 
+.thread-group__menu-panel--portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 200;
+}
+
 .thread-group__menu-item {
   width: 100%;
   display: inline-flex;
