@@ -825,6 +825,7 @@ export type RuntimeOperatorDelegationPacket = {
     | {
         version: 1;
         sourceArtifactIds: string[];
+        flowArtifactIds: string[];
         scopeSummary: string;
         constraints: string[];
         fileTargets: string[];

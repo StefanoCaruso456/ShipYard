@@ -12,6 +12,8 @@ not on loosely interpreted text.
 
 - typed requirements artifacts
 - typed architecture-decision artifacts
+- typed user-flow artifacts
+- typed data-flow artifacts
 - typed subtask breakdown artifacts
 - explicit acceptance criteria and validation targets per delegated work packet
 - a deterministic decomposition contract for specialist routing
@@ -32,12 +34,15 @@ The control plane now records typed artifacts for:
 - plan
 - phase requirements
 - story architecture decisions
+- story user-flow specs
+- story data-flow specs
 - story subtask breakdowns
 - delegation briefs
 
 Each handoff also carries a structured work packet that includes:
 
 - source artifact ids
+- flow artifact ids
 - scope summary
 - constraints
 - file targets
@@ -59,6 +64,7 @@ After this phase:
 
 - orchestrator output becomes inspectable runtime data
 - specialist delegation can reference concrete artifacts
+- every story handoff can point directly to user-flow and data-flow specs
 - decomposition becomes more deterministic and easier to audit
 - planning artifacts and delegation packets are visible in LangSmith metadata and the operator UI
 
@@ -73,4 +79,5 @@ It only hardens the planning and handoff contract.
 - orchestrator outputs are stored as typed artifacts
 - decomposition produces structured work packets
 - production-lead delegation references artifacts directly
+- user-flow and data-flow specs are attached before specialist and execution handoffs proceed
 - runtime tests prove the new artifacts and work packets are created deterministically

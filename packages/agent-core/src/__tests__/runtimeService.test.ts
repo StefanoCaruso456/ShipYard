@@ -399,11 +399,23 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.equal(taskHandoff?.status, "completed");
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime-shape"));
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-architecture:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-user-flow:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-data-flow:story-runtime-shape"));
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
   assert.deepEqual(taskHandoff?.dependencyIds, ["task-1"]);
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-user-flow:story-runtime-shape"));
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-data-flow:story-runtime-shape"));
   assert.ok(taskHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
   assert.ok(taskHandoff?.artifactIds.includes("artifact:task-delegation:task-2"));
   assert.equal(storyHandoff?.workPacket?.ownerAgentTypeId, "backend_dev");
+  assert.deepEqual(storyHandoff?.workPacket?.flowArtifactIds, [
+    "artifact:story-user-flow:story-runtime-shape",
+    "artifact:story-data-flow:story-runtime-shape"
+  ]);
+  assert.deepEqual(taskHandoff?.workPacket?.flowArtifactIds, [
+    "artifact:story-user-flow:story-runtime-shape",
+    "artifact:story-data-flow:story-runtime-shape"
+  ]);
   assert.deepEqual(taskHandoff?.workPacket?.taskIds, ["task-2"]);
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
@@ -413,6 +425,16 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
       (artifact) => artifact.kind === "architecture_decision" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "user_flow_spec" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "data_flow_spec" && artifact.entityKind === "story"
     )
   );
   assert.ok(
