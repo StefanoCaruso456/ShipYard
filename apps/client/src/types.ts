@@ -219,6 +219,15 @@ export type RuntimeTaskProject = {
   kind: WorkspaceProjectKind;
   environment: string | null;
   description: string | null;
+  links: Array<{
+    id?: string | null;
+    kind: "repository" | "pull_request" | "deployment";
+    url: string;
+    title?: string | null;
+    provider?: string | null;
+    entityKind?: "run" | "phase" | "story" | "task" | null;
+    entityId?: string | null;
+  }>;
   folder: {
     name: string | null;
     displayPath: string | null;
@@ -760,6 +769,30 @@ export type RuntimeOperatorEvaluation = {
   failurePatterns: string[];
 };
 
+export type RuntimeOperatorComparativeAnalysisSectionId =
+  | "executive_summary"
+  | "delivery_and_outputs"
+  | "validation_and_quality"
+  | "interventions_and_retries"
+  | "blockers_and_conflicts"
+  | "risks_and_follow_ups"
+  | "recommended_improvements";
+
+export type RuntimeOperatorComparativeAnalysisSection = {
+  id: RuntimeOperatorComparativeAnalysisSectionId;
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type RuntimeOperatorComparativeAnalysis = {
+  status: "completed" | "failed";
+  headline: string;
+  sections: RuntimeOperatorComparativeAnalysisSection[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
 export type RuntimeOperatorPlanningArtifact = {
   id: string;
   kind: string;
@@ -861,6 +894,7 @@ export type RuntimeOperatorView = {
   mergeDecisions: RuntimeOperatorMergeDecision[];
   delivery: RuntimeOperatorDeliverySummary | null;
   evaluation: RuntimeOperatorEvaluation | null;
+  comparativeAnalysis: RuntimeOperatorComparativeAnalysis | null;
   planningArtifacts: RuntimeOperatorPlanningArtifact[];
   delegationPackets: RuntimeOperatorDelegationPacket[];
   journal: RuntimeOperatorJournalEntry[];
@@ -878,6 +912,19 @@ export type WorkspaceProjectFolder = {
   lastConnectedAt: string | null;
 };
 
+export type WorkspaceProjectRepositoryProvider = "github" | "git";
+
+export type WorkspaceProjectRepository = {
+  provider: WorkspaceProjectRepositoryProvider;
+  remoteName: string | null;
+  url: string | null;
+  label: string;
+  owner: string | null;
+  repo: string | null;
+  currentBranch: string | null;
+  source: "git-config" | "git-head";
+};
+
 export type WorkspaceProject = {
   id: string;
   name: string;
@@ -888,6 +935,7 @@ export type WorkspaceProject = {
   region: string;
   branchLabel: string | null;
   folder: WorkspaceProjectFolder | null;
+  repository: WorkspaceProjectRepository | null;
   removable: boolean;
 };
 

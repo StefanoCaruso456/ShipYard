@@ -192,12 +192,25 @@ export function submitRuntimeApprovalDecision(
 }
 
 function serializeRuntimeProject(project: WorkspaceProject) {
+  const repositoryLink =
+    project.repository?.url && project.repository.url.trim()
+      ? [
+          {
+            kind: "repository" as const,
+            url: project.repository.url.trim(),
+            title: project.repository.label,
+            provider: project.repository.provider
+          }
+        ]
+      : [];
+
   return {
     id: project.id,
     name: project.name,
     kind: project.kind,
     environment: project.environment,
     description: project.description,
+    links: repositoryLink,
     folder: project.folder
       ? {
           name: project.folder.name,

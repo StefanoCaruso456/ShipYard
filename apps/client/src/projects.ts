@@ -1,4 +1,8 @@
-import type { WorkspaceProject, WorkspaceProjectFolderStatus } from "./types";
+import type {
+  WorkspaceProject,
+  WorkspaceProjectFolderStatus,
+  WorkspaceProjectRepository
+} from "./types";
 
 const LOCAL_PROJECTS_STORAGE_KEY = "shipyard.local-projects.v1";
 const DIRECTORY_HANDLE_DB = "shipyard-project-handles";
@@ -13,6 +17,7 @@ export type BrowserWritableFileStream = {
 
 export type BrowserFileHandle = {
   createWritable: () => Promise<BrowserWritableFileStream>;
+  getFile: () => Promise<File>;
 };
 
 export type BrowserDirectoryHandle = {
@@ -51,6 +56,7 @@ export function createRuntimeProject(): WorkspaceProject {
     region: "Railway / Vercel",
     branchLabel: "main",
     folder: null,
+    repository: null,
     removable: false
   };
 }
@@ -168,11 +174,13 @@ export async function resolveStoredProjectFolderStatus(
 export function createLocalProject({
   projectId = `project-${crypto.randomUUID()}`,
   name,
-  folderName
+  folderName,
+  repository = null
 }: {
   projectId?: string;
   name: string;
   folderName: string;
+  repository?: WorkspaceProjectRepository | null;
 }): WorkspaceProject {
   const trimmedName = name.trim();
   const resolvedName = trimmedName || prettifyFolderName(folderName);
@@ -186,7 +194,7 @@ export function createLocalProject({
     description: "Connected in this browser through the File System Access API.",
     kind: "local",
     region: "Browser workspace",
-    branchLabel: null,
+    branchLabel: repository?.currentBranch ?? null,
     folder: {
       name: folderName,
       displayPath: folderName,
@@ -194,6 +202,7 @@ export function createLocalProject({
       provider: "browser-file-system-access",
       lastConnectedAt: now
     },
+    repository,
     removable: true
   };
 }
@@ -201,7 +210,8 @@ export function createLocalProject({
 export function updateLocalProjectFolder(
   project: WorkspaceProject,
   folderName: string,
-  status: WorkspaceProjectFolderStatus
+  status: WorkspaceProjectFolderStatus,
+  repository?: WorkspaceProjectRepository | null
 ): WorkspaceProject {
   if (project.kind !== "local") {
     return project;
@@ -209,13 +219,30 @@ export function updateLocalProjectFolder(
 
   return {
     ...project,
+    branchLabel: repository?.currentBranch ?? project.branchLabel,
     folder: {
       name: folderName,
       displayPath: folderName,
       status,
       provider: "browser-file-system-access",
       lastConnectedAt: new Date().toISOString()
-    }
+    },
+    repository: repository === undefined ? project.repository : repository
+  };
+}
+
+export function updateLocalProjectRepository(
+  project: WorkspaceProject,
+  repository: WorkspaceProjectRepository | null
+): WorkspaceProject {
+  if (project.kind !== "local") {
+    return project;
+  }
+
+  return {
+    ...project,
+    branchLabel: repository?.currentBranch ?? null,
+    repository
   };
 }
 
@@ -272,7 +299,39 @@ function isStoredLocalProject(value: unknown): value is StoredLocalProject {
     typeof candidate.environment === "string" &&
     typeof candidate.description === "string" &&
     typeof candidate.region === "string" &&
+    isStoredRepository(candidate.repository) &&
     typeof candidate.removable === "boolean"
+  );
+}
+
+function isStoredRepository(value: unknown) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Partial<WorkspaceProjectRepository>;
+
+  return (
+    (candidate.provider === "github" || candidate.provider === "git") &&
+    typeof candidate.label === "string" &&
+    (candidate.remoteName === undefined ||
+      candidate.remoteName === null ||
+      typeof candidate.remoteName === "string") &&
+    (candidate.url === undefined || candidate.url === null || typeof candidate.url === "string") &&
+    (candidate.owner === undefined ||
+      candidate.owner === null ||
+      typeof candidate.owner === "string") &&
+    (candidate.repo === undefined || candidate.repo === null || typeof candidate.repo === "string") &&
+    (candidate.currentBranch === undefined ||
+      candidate.currentBranch === null ||
+      typeof candidate.currentBranch === "string") &&
+    (candidate.source === undefined ||
+      candidate.source === "git-config" ||
+      candidate.source === "git-head")
   );
 }
 
