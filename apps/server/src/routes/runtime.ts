@@ -1415,9 +1415,54 @@ function parseToolRequest(
     };
   }
 
+  if (candidate.toolName === "run_terminal_command") {
+    const input = candidate.input as {
+      commandLine?: unknown;
+      cwd?: unknown;
+      timeoutMs?: unknown;
+      category?: unknown;
+    };
+
+    if (
+      typeof input?.commandLine !== "string" ||
+      (input.cwd !== undefined && typeof input.cwd !== "string") ||
+      (input.timeoutMs !== undefined &&
+        (typeof input.timeoutMs !== "number" || !Number.isFinite(input.timeoutMs))) ||
+      (input.category !== undefined &&
+        input.category !== null &&
+        input.category !== "shell" &&
+        input.category !== "git" &&
+        input.category !== "ci" &&
+        input.category !== "browser")
+    ) {
+      return {
+        error:
+          "run_terminal_command requires string commandLine and optional string cwd, numeric timeoutMs, and category of shell, git, ci, or browser."
+      };
+    }
+
+    return {
+      value: {
+        toolName: "run_terminal_command",
+        input: {
+          commandLine: input.commandLine,
+          cwd: typeof input.cwd === "string" ? input.cwd : undefined,
+          timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
+          category:
+            input.category === "shell" ||
+            input.category === "git" ||
+            input.category === "ci" ||
+            input.category === "browser"
+              ? input.category
+              : undefined
+        }
+      }
+    };
+  }
+
   return {
     error:
-      "toolRequest.toolName must be list_files, read_file, read_file_range, search_repo, edit_file_region, create_file, or delete_file."
+      "toolRequest.toolName must be list_files, read_file, read_file_range, search_repo, edit_file_region, create_file, delete_file, or run_terminal_command."
   };
 }
 

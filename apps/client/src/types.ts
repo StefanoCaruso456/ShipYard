@@ -266,6 +266,18 @@ export type RuntimeTaskContext = {
 
 export type RuntimeTaskSubmitContext = RuntimeTaskContext;
 
+export type RuntimeTerminalToolRequest = {
+  toolName: "run_terminal_command";
+  input: {
+    commandLine: string;
+    cwd?: string;
+    timeoutMs?: number;
+    category?: "shell" | "git" | "ci" | "browser" | null;
+  };
+};
+
+export type RuntimeTaskToolRequest = RuntimeTerminalToolRequest;
+
 export type RuntimeTask = {
   id: string;
   threadId: string;
@@ -949,7 +961,7 @@ export type SidebarNavItem = {
 
 export type ModeOption = "local" | "worktree" | "cloud";
 
-export type ComposerMode = "text" | "image" | "voice";
+export type ComposerMode = "text" | "image" | "voice" | "terminal";
 
 export type ComposerAttachment = {
   id: string;
@@ -1006,6 +1018,30 @@ export type ThreadMessage = {
     runId: string;
     status: RuntimeTaskStatus;
     items: AgentActivityItem[];
+  };
+};
+
+export type RuntimeTerminalCommandEntry = {
+  id: string;
+  runId: string;
+  label: string;
+  commandLine: string;
+  command: string;
+  args: string[];
+  category: "shell" | "git" | "ci" | "browser";
+  cwd: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: "running" | "completed" | "failed";
+  exitCode: number | null;
+  durationMs: number | null;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  truncated: {
+    stdout: boolean;
+    stderr: boolean;
+    combined: boolean;
   };
 };
 
@@ -1067,6 +1103,7 @@ export type WorkspaceThread = {
     runIds: string[];
     focusedRun: RuntimeThreadFocusedRun | null;
     operatorView: RuntimeOperatorView | null;
+    terminal: RuntimeTerminalCommandEntry[];
     queuedFollowUps: RuntimeThreadQueuedItem[];
     completedRunCount: number;
   };

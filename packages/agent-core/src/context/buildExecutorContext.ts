@@ -142,7 +142,7 @@ export function buildExecutorContext(shared: SharedRoleContext): RoleContextPayl
       id: "relevant-files",
       title: "Relevant files and excerpts",
       precedence: "live execution context",
-      source: "run.context.relevantFiles | derived tool path",
+      source: "run.context.relevantFiles | derived tool path | repo intelligence",
       format: "text",
       content: shared.relevantFiles
         .map((file) => {
@@ -171,7 +171,7 @@ export function buildExecutorContext(shared: SharedRoleContext): RoleContextPayl
       id: "relevant-files",
       title: "Relevant files and excerpts",
       precedence: "live execution context",
-      source: "run.context.relevantFiles | derived tool path",
+      source: "run.context.relevantFiles | derived tool path | repo intelligence",
       reason: "No relevant files or excerpts were attached."
     });
   }

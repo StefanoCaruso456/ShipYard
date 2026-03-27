@@ -121,6 +121,12 @@ export {
   normalizeRebuildState
 } from "./runtime/rebuildState";
 export {
+  buildRepoIntelligenceIndex,
+  clearRepoIntelligenceCache,
+  resolveRelevantFilesForRun,
+  suggestRelevantFilesFromRepo
+} from "./runtime/repoIntelligence";
+export {
   controlPlaneArtifactSchema,
   controlPlaneConflictSchema,
   controlPlaneHandoffSchema,
@@ -174,6 +180,13 @@ export type {
   RuntimeContextPrecedenceLayer,
   SharedRoleContext
 } from "./context/types";
+export type {
+  RepoIntelligenceIndexedFile,
+  RepoIntelligenceSnapshot,
+  RepoIntelligenceSymbol,
+  RepoIntelligenceSymbolKind,
+  RepoRelevantFileSuggestion
+} from "./runtime/repoIntelligence";
 export type {
   RollbackResult,
   RunEvent,
@@ -364,6 +377,9 @@ export type {
   RepoToolName,
   RepoToolset,
   RepoToolSuccess,
+  RunTerminalCommandInput,
+  RunTerminalCommandResult,
   SearchRepoInput,
-  SearchRepoResult
+  SearchRepoResult,
+  TerminalCommandCategory
 } from "./tools/repo/types";

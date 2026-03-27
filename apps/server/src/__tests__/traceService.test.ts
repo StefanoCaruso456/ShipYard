@@ -580,6 +580,60 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
   }
 });
 
+test("runtime traces terminal execution spans and command transcript metadata", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-terminal-trace-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const traceService = createTraceService({
+    logPath: path.join(tempDir, "traces.jsonl"),
+    env: {}
+  });
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    traceService,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Initialize the repo.",
+      toolRequest: {
+        toolName: "run_terminal_command",
+        input: {
+          commandLine: "git init -b main",
+          category: "git"
+        }
+      }
+    });
+
+    await waitForRunStatus(runtimeService, run.id, "completed");
+    await waitForTraceFlush(traceService);
+    const trace = traceService.getRunTrace(run.id);
+    const toolSpan = trace?.spans.find((span) => span.name.startsWith("tool:run_terminal_command"));
+
+    assert.ok(toolSpan);
+    assert.equal(toolSpan?.spanType, "tool");
+    assert.equal(toolSpan?.metadata.toolName, "run_terminal_command");
+    assert.equal(toolSpan?.metadata.toolCategory, "git");
+    assert.equal(toolSpan?.metadata.commandLine, "git init -b main");
+    assert.ok(
+      toolSpan?.events.some((event) => event.name === "terminal_command_started")
+    );
+    assert.ok(
+      toolSpan?.events.some((event) => event.name === "terminal_command_completed")
+    );
+    assert.equal(trace?.summary.tools.names[0], "run_terminal_command");
+    assert.equal(trace?.summary.tools.categories[0], "git");
+    assert.equal(trace?.summary.tools.byTool[0]?.successCount, 1);
+  } finally {
+    await waitForTraceFlush(traceService);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime traces retry and rollback events on failed validation", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-retry-trace-"));
   const instructionRuntime = await createInstructionRuntimeForTests();

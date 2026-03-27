@@ -14,6 +14,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTerminalCommandEntry,
   RuntimeTraceRunLog,
   RuntimeTraceSpan,
   RuntimeTraceSpanEvent,
@@ -323,6 +324,7 @@ export function buildRuntimeThread(
       runIds: orderedRuns.map((run) => run.id),
       focusedRun: buildFocusedRunSummary(focusedRun, runtimeAttachmentPreviewsByTaskId),
       operatorView: focusedRun.operatorView ?? null,
+      terminal: buildRuntimeTerminalEntries(orderedRuns, runtimeTracesByTaskId),
       queuedFollowUps,
       completedRunCount: orderedRuns.filter((run) => run.status === "completed").length
     }
@@ -567,6 +569,10 @@ function deriveRuntimeSystemMessage(run: RuntimeTask, focusedRun: RuntimeTask) {
 
   if (run.status === "failed") {
     return "Run failed inside the runtime execution path.";
+  }
+
+  if (run.result?.mode === "repo-tool" && isTerminalToolResult(run.result.toolResult)) {
+    return "Run completed through the terminal execution lane.";
   }
 
   return run.result?.mode === "ai-sdk-openai"
@@ -1014,6 +1020,66 @@ function buildThreadActivity(
   );
 }
 
+function buildRuntimeTerminalEntries(
+  runs: RuntimeTask[],
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>
+) {
+  const entries: RuntimeTerminalCommandEntry[] = [];
+
+  for (const run of runs) {
+    const trace = runtimeTracesByTaskId[run.id] ?? null;
+
+    if (!trace) {
+      continue;
+    }
+
+    const spans = [...trace.spans].sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+
+    for (const span of spans) {
+      const toolName = readString(span.metadata.toolName) ?? trimTracePrefix(span.name);
+
+      if (toolName !== "run_terminal_command") {
+        continue;
+      }
+
+      const stdout = readString(span.metadata.stdout) ?? "";
+      const stderr = readString(span.metadata.stderr) ?? "";
+      const combinedOutput =
+        readString(span.metadata.combinedOutput) ?? buildCombinedTerminalOutput(stdout, stderr);
+      const truncatedMetadata = readObject(span.metadata.truncated);
+
+      entries.push({
+        id: span.id,
+        runId: run.id,
+        label: buildTerminalEntryLabel(
+          readString(span.metadata.toolCategory) ?? "shell",
+          readString(span.metadata.commandLine) ?? trimTracePrefix(span.name)
+        ),
+        commandLine: readString(span.metadata.commandLine) ?? trimTracePrefix(span.name),
+        command: readString(span.metadata.command) ?? "",
+        args: readStringArray(span.metadata.args),
+        category: normalizeTerminalCategory(readString(span.metadata.toolCategory)),
+        cwd: readString(span.metadata.cwd) ?? ".",
+        startedAt: span.startedAt,
+        endedAt: span.endedAt,
+        status: span.status,
+        exitCode: readNumber(span.metadata.exitCode),
+        durationMs: span.durationMs,
+        stdout,
+        stderr,
+        combinedOutput,
+        truncated: {
+          stdout: readBoolean(truncatedMetadata?.stdout),
+          stderr: readBoolean(truncatedMetadata?.stderr),
+          combined: readBoolean(truncatedMetadata?.combined)
+        }
+      });
+    }
+  }
+
+  return entries.sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+}
+
 function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | null): AgentActivityItem | null {
   const traceSummary = trace?.summary ?? null;
   const timestamp = formatDateTime(task.completedAt ?? task.startedAt ?? task.createdAt);
@@ -1271,7 +1337,9 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
     case "context":
       return "Context";
     case "tool":
-      return "Tool";
+      return readString(span.metadata.toolName) === "run_terminal_command"
+        ? humanizeTerminalCategory(readString(span.metadata.toolCategory))
+        : "Tool";
     case "model":
       return "Model";
     case "validation":
@@ -1304,7 +1372,9 @@ function deriveSpanLabel(span: RuntimeTraceSpan) {
     case "context":
       return `Built ${readString(span.metadata.role) ?? "runtime"} context`;
     case "tool":
-      return `Used ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
+      return readString(span.metadata.toolName) === "run_terminal_command"
+        ? `Ran ${readString(span.metadata.commandLine) ?? "terminal command"}`
+        : `Used ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
     case "model":
       return `Used ${readString(span.metadata.modelId) ?? trimTracePrefix(span.name)}`;
     case "phase":
@@ -1345,6 +1415,10 @@ function deriveSpanDetail(span: RuntimeTraceSpan) {
 
   if (span.spanType === "model") {
     return "Generated the response draft for the active step.";
+  }
+
+  if (span.spanType === "tool" && readString(span.metadata.toolName) === "run_terminal_command") {
+    return span.outputSummary?.trim() || "Executed a workspace terminal command.";
   }
 
   if (span.spanType === "context") {
@@ -1396,6 +1470,10 @@ function deriveSpanSurface(span: RuntimeTraceSpan): AgentActivityItem["surface"]
 }
 
 function deriveEventBadge(eventName: string) {
+  if (eventName.includes("terminal")) {
+    return "Terminal";
+  }
+
   if (eventName.includes("validation")) {
     return "Validation";
   }
@@ -1489,6 +1567,12 @@ function deriveEventLabel(eventName: string) {
       return "Merge conflict recorded";
     case "control_plane_merge_decision_recorded":
       return "Merge decision recorded";
+    case "terminal_command_started":
+      return "Started terminal command";
+    case "terminal_command_completed":
+      return "Completed terminal command";
+    case "terminal_command_failed":
+      return "Terminal command failed";
     case "state_merged":
       return "State updated";
     case "state_merge_failed":
@@ -1531,6 +1615,8 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const path = readString(span.metadata.path);
   const modelId = readString(span.metadata.modelId);
   const toolName = readString(span.metadata.toolName);
+  const commandLine = readString(span.metadata.commandLine);
+  const cwd = readString(span.metadata.cwd);
   const validationStatus = readString(span.metadata.validationStatus);
   const sectionIds = readStringArray(span.metadata.sectionIds);
   const truncatedSectionIds = readStringArray(span.metadata.truncatedSectionIds);
@@ -1548,8 +1634,16 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     meta.push(toolName);
   }
 
+  if (commandLine && span.spanType === "tool") {
+    meta.push(commandLine);
+  }
+
   if (path) {
     meta.push(path);
+  }
+
+  if (cwd && span.spanType === "tool" && toolName === "run_terminal_command") {
+    meta.push(`cwd ${cwd}`);
   }
 
   if (modelId && span.spanType !== "model") {
@@ -1610,6 +1704,12 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     meta.push(`${span.durationMs} ms`);
   }
 
+  const exitCode = readNumber(span.metadata.exitCode);
+
+  if (span.spanType === "tool" && toolName === "run_terminal_command" && typeof exitCode === "number") {
+    meta.push(`exit ${exitCode}`);
+  }
+
   return meta;
 }
 
@@ -1617,6 +1717,9 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const meta: string[] = [];
   const path = readString(event.metadata?.path);
   const toolName = readString(event.metadata?.toolName);
+  const commandLine = readString(event.metadata?.commandLine);
+  const cwd = readString(event.metadata?.cwd);
+  const exitCode = readNumber(event.metadata?.exitCode);
   const gateId = readString(event.metadata?.gateId);
   const artifactKind = readString(event.metadata?.artifactKind);
   const conflictKind = readString(event.metadata?.conflictKind);
@@ -1630,8 +1733,20 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
     meta.push(toolName);
   }
 
+  if (commandLine) {
+    meta.push(commandLine);
+  }
+
   if (path) {
     meta.push(path);
+  }
+
+  if (cwd) {
+    meta.push(`cwd ${cwd}`);
+  }
+
+  if (typeof exitCode === "number") {
+    meta.push(`exit ${exitCode}`);
   }
 
   if (gateId) {
@@ -1760,6 +1875,10 @@ function deriveRoleDetail(span: RuntimeTraceSpan) {
         ? `Bounded the next move to a scoped ${toolName} action.`
         : "Bounded the next move to the current request without expanding scope.";
     case "executor":
+      if (toolName === "run_terminal_command") {
+        return "Executed the planned workspace command and captured the terminal transcript.";
+      }
+
       return toolName
         ? `Executed the planned ${toolName} step and kept the change on the intended target.`
         : "Executed the planned step and captured the current result.";
@@ -1768,6 +1887,58 @@ function deriveRoleDetail(span: RuntimeTraceSpan) {
     default:
       return span.outputSummary?.trim() || span.inputSummary?.trim() || "Runtime role step recorded.";
   }
+}
+
+function normalizeTerminalCategory(value: string | null | undefined): RuntimeTerminalCommandEntry["category"] {
+  switch (value) {
+    case "git":
+    case "ci":
+    case "browser":
+      return value;
+    default:
+      return "shell";
+  }
+}
+
+function humanizeTerminalCategory(value: string | null | undefined) {
+  switch (value) {
+    case "git":
+      return "Git";
+    case "ci":
+      return "CI";
+    case "browser":
+      return "Browser";
+    default:
+      return "Terminal";
+  }
+}
+
+function buildTerminalEntryLabel(category: string, commandLine: string) {
+  return `${humanizeTerminalCategory(category)} · ${commandLine}`;
+}
+
+function buildCombinedTerminalOutput(stdout: string, stderr: string) {
+  if (stdout.trim() && stderr.trim()) {
+    return [`$ stdout`, stdout.trimEnd(), "", `$ stderr`, stderr.trimEnd()].join("\n");
+  }
+
+  if (stdout.trim()) {
+    return stdout.trimEnd();
+  }
+
+  if (stderr.trim()) {
+    return [`$ stderr`, stderr.trimEnd()].join("\n");
+  }
+
+  return "(no output)";
+}
+
+function isTerminalToolResult(value: unknown) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    (value as { toolName?: unknown }).toolName === "run_terminal_command"
+  );
 }
 
 function parseRoleFromSpanName(name: string) {
@@ -1813,8 +1984,18 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function readBoolean(value: unknown) {
+  return value === true;
+}
+
 function readNumber(value: unknown) {
   return typeof value === "number" ? value : null;
+}
+
+function readObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function readStringArray(value: unknown) {
