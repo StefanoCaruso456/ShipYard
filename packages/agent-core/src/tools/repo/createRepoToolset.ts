@@ -930,6 +930,8 @@ function summarizeRepoToolResult(result: { ok: boolean; toolName: RepoToolName }
       return `Created ${typeof data.path === "string" ? data.path : "file"}.`;
     case "delete_file":
       return `Deleted ${typeof data.path === "string" ? data.path : "file"}.`;
+    case "run_terminal_command":
+      return `Ran ${typeof data.commandLine === "string" ? data.commandLine : "terminal command"}.`;
   }
 }
 
@@ -944,6 +946,8 @@ function classifyRepoTool(toolName: RepoToolName) {
     case "create_file":
     case "delete_file":
       return "mutation";
+    case "run_terminal_command":
+      return "execution";
   }
 }
 

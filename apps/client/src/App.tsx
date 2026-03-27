@@ -56,6 +56,7 @@ import type {
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
   RuntimeTask,
+  RuntimeTaskToolRequest,
   RuntimeTaskSubmitContext,
   RuntimeWorkflowMode,
   SidebarNavItemId,
@@ -677,6 +678,40 @@ function App() {
     return "";
   }
 
+  function buildTerminalToolRequest(): RuntimeTaskToolRequest | null {
+    const commandLine = composerValue.trim();
+
+    if (!commandLine) {
+      return null;
+    }
+
+    return {
+      toolName: "run_terminal_command",
+      input: {
+        commandLine,
+        category: inferTerminalCategory(commandLine)
+      }
+    };
+  }
+
+  function buildSubmissionPayload() {
+    if (composerMode === "terminal") {
+      const toolRequest = buildTerminalToolRequest();
+
+      return {
+        instruction: toolRequest
+          ? `Run terminal command: ${toolRequest.input.commandLine}`
+          : "",
+        toolRequest
+      };
+    }
+
+    return {
+      instruction: buildInstructionPayload(),
+      toolRequest: null
+    };
+  }
+
   function handleOpenProjectDialog() {
     setProjectDialogOpen(true);
     setProjectDialogName("");
@@ -823,12 +858,15 @@ function App() {
       return;
     }
 
-    const instruction = buildInstructionPayload();
+    const { instruction, toolRequest } = buildSubmissionPayload();
 
     if (!instruction) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Write a prompt or attach a file before sending the thread."
+        text:
+          composerMode === "terminal"
+            ? "Enter a terminal command before sending the run."
+            : "Write a prompt or attach a file before sending the thread."
       });
       return;
     }
@@ -875,6 +913,7 @@ function App() {
           title: activeThread.title,
           threadId,
           parentRunId: activeThread.liveRuntime.latestRunId,
+          toolRequest,
           operatingMode: workflowMode,
           attachments: submittedAttachments,
           project: activeProject,
@@ -998,6 +1037,7 @@ function App() {
       const response = await submitRuntimeTask({
         instruction,
         title: optimisticThread.title,
+        toolRequest,
         operatingMode: workflowMode,
         attachments: submittedAttachments,
         project: activeProject,
@@ -1447,6 +1487,42 @@ function App() {
       />
     </>
   );
+}
+
+function inferTerminalCategory(commandLine: string): RuntimeTaskToolRequest["input"]["category"] {
+  const normalized = commandLine.trim().toLowerCase();
+
+  if (!normalized) {
+    return "shell";
+  }
+
+  if (normalized.startsWith("git ") || normalized === "git" || normalized.startsWith("gh ")) {
+    return "git";
+  }
+
+  if (
+    normalized.includes("playwright") ||
+    normalized.includes("cypress") ||
+    normalized.includes("storybook")
+  ) {
+    return "browser";
+  }
+
+  if (
+    normalized.startsWith("pnpm ") ||
+    normalized.startsWith("npm ") ||
+    normalized.startsWith("yarn ") ||
+    normalized.startsWith("npx ") ||
+    normalized.startsWith("vitest") ||
+    normalized.startsWith("jest") ||
+    normalized.startsWith("pytest") ||
+    normalized.startsWith("tsc") ||
+    normalized.startsWith("pyright")
+  ) {
+    return "ci";
+  }
+
+  return "shell";
 }
 
 function buildThreadsForProject(

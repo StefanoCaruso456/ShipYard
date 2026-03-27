@@ -9,6 +9,7 @@ import type {
   RuntimeRepoBranchResponse,
   RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
+  RuntimeTaskToolRequest,
   RuntimeTaskSubmitContext,
   RuntimeTraceResponse,
   RuntimeTaskListResponse,
@@ -96,6 +97,7 @@ export function submitRuntimeTask(input: {
   parentRunId?: string | null;
   operatingMode?: RuntimeRequestedOperatingMode | null;
   simulateFailure?: boolean;
+  toolRequest?: RuntimeTaskToolRequest | null;
   attachments?: ComposerAttachment[];
   project?: WorkspaceProject;
   context?: RuntimeTaskSubmitContext;
@@ -127,6 +129,10 @@ export function submitRuntimeTask(input: {
 
     if (input.simulateFailure !== undefined) {
       formData.append("simulateFailure", String(input.simulateFailure));
+    }
+
+    if (input.toolRequest) {
+      formData.append("toolRequest", JSON.stringify(input.toolRequest));
     }
 
     if (project) {

@@ -12,6 +12,8 @@ import type {
   ReadFileRangeInput,
   ReadFileRangeResult,
   ReadFileResult,
+  RunTerminalCommandInput,
+  RunTerminalCommandResult,
   RepoToolErrorCode,
   RepoToolName,
   SearchRepoInput,
@@ -81,6 +83,11 @@ export type RepoMutationToolRequest =
       input: DeleteFileInput;
     };
 
+export type RepoExecutionToolRequest = {
+  toolName: "run_terminal_command";
+  input: RunTerminalCommandInput;
+};
+
 export type RepoInspectionToolRequest =
   | {
       toolName: "list_files";
@@ -99,7 +106,10 @@ export type RepoInspectionToolRequest =
       input: SearchRepoInput;
     };
 
-export type RepoToolRequest = RepoInspectionToolRequest | RepoMutationToolRequest;
+export type RepoToolRequest =
+  | RepoInspectionToolRequest
+  | RepoMutationToolRequest
+  | RepoExecutionToolRequest;
 
 export type RepoMutationToolResult =
   | EditFileRegionResult
@@ -112,7 +122,10 @@ export type RepoInspectionToolResult =
   | ReadFileRangeResult
   | SearchRepoResult;
 
-export type RepoToolResult = RepoInspectionToolResult | RepoMutationToolResult;
+export type RepoToolResult =
+  | RepoInspectionToolResult
+  | RepoMutationToolResult
+  | RunTerminalCommandResult;
 
 export type PhaseStatus = "pending" | "in_progress" | "blocked" | "completed" | "failed";
 

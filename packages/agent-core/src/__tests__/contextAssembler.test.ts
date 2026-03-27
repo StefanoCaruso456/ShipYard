@@ -153,6 +153,32 @@ test("planner payload assembly includes external context in deterministic role o
   assert.equal(specSection?.metadata?.contextKind, "spec");
 });
 
+test("planner payload derives relevant files from repo intelligence when none are provided", async () => {
+  const assembler = await createAssemblerForTests();
+  const payload = assembler.buildRolePayload("planner", {
+    run: createRunRecord({
+      instruction: "Update createPersistentRuntimeService queue handling.",
+      toolRequest: null,
+      context: {
+        objective: "Improve the persistent runtime queue flow.",
+        constraints: [],
+        relevantFiles: [],
+        externalContext: [],
+        validationTargets: []
+      }
+    }),
+    runtimeStatus: createRuntimeStatus()
+  });
+
+  const relevantFiles = payload.sections.find((section) => section.id === "relevant-files");
+
+  assert.ok(relevantFiles);
+  assert.match(
+    relevantFiles?.content ?? "",
+    /packages\/agent-core\/src\/runtime\/createPersistentRuntimeService\.ts/
+  );
+});
+
 test("executor payload truncates oversized external context and records budget metadata", async () => {
   const assembler = await createAssemblerForTests();
   const payload = assembler.buildRolePayload("executor", {
@@ -388,7 +414,8 @@ async function createAssemblerForTests() {
       sourcePath: "/tmp/project-rules.md",
       loadedAt: "2026-03-24T12:00:00.000Z",
       content: "# Project Rules\n\n- Keep changes minimal.\n- Validate every meaningful edit."
-    }
+    },
+    rootDir: path.dirname(skillPath)
   });
 }
 
@@ -427,15 +454,18 @@ function createRunRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecor
       overrides.instruction ??
       "Build the context assembler and expose it through a debug route.",
     simulateFailure: overrides.simulateFailure ?? false,
-    toolRequest: overrides.toolRequest ?? {
-      toolName: "edit_file_region",
-      input: {
-        path: "src/example.ts",
-        anchor: "export function greet",
-        currentText: "before",
-        replacementText: "after"
-      }
-    },
+    toolRequest:
+      "toolRequest" in overrides
+        ? overrides.toolRequest ?? null
+        : {
+            toolName: "edit_file_region",
+            input: {
+              path: "src/example.ts",
+              anchor: "export function greet",
+              currentText: "before",
+              replacementText: "after"
+            }
+          },
     attachments: overrides.attachments ?? [],
     context: overrides.context ?? baseContext,
     status: overrides.status ?? "completed",

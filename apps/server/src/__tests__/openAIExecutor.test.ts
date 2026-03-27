@@ -231,6 +231,57 @@ test("createOpenAIExecutor uses a local file plan summary when the response is p
   assert.equal(result.summary, "Prepared a local file plan for the connected workspace.");
 });
 
+test("createOpenAIExecutor injects repo-intelligence relevant files when none are attached", async () => {
+  let capturedPrompt = "";
+  const skillPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../../../../skill.md"
+  );
+  const repoRoot = path.dirname(skillPath);
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    repoRoot,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Focused on the runtime service.",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18
+        },
+        totalUsage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  await executor(
+    createRun("Update createPersistentRuntimeService queue handling."),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Relevant files:/);
+  assert.match(
+    capturedPrompt,
+    /packages\/agent-core\/src\/runtime\/createPersistentRuntimeService\.ts/
+  );
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),

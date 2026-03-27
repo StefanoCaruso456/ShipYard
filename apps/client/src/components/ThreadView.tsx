@@ -7,6 +7,7 @@ import type {
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
 import { ProjectRepositoryButton } from "./ProjectRepositoryButton";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
+import { TerminalPanel } from "./TerminalPanel";
 import { ThreadMessageCard } from "./ThreadMessageCard";
 
 type SuggestionCard = {
@@ -185,6 +186,7 @@ export function ThreadView({
       ? filteredMessages.filter((message) => message.role !== "system")
       : filteredMessages;
   const hasInlineTrace = visibleMessages.some((message) => (message.trace?.items.length ?? 0) > 0);
+  const terminalEntries = thread.liveRuntime?.terminal ?? [];
 
   return (
     <section className="thread-view">
@@ -245,6 +247,8 @@ export function ThreadView({
             ))
           : null}
       </div>
+
+      {terminalEntries.length > 0 ? <TerminalPanel entries={terminalEntries} /> : null}
     </section>
   );
 }

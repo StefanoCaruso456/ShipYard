@@ -85,7 +85,11 @@ export function Composer({
   const steerEnabled = Boolean(steerMode);
   const factoryModeSupported =
     !steerEnabled && backendConnected && project?.kind === "live";
-  const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
+  const terminalModeEnabled = !steerEnabled && workflowMode !== "factory";
+  const hasDraftContent =
+    composerMode === "terminal"
+      ? composerValue.trim().length > 0
+      : composerValue.trim().length > 0 || attachments.length > 0;
   const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
     recordingState === "recording"
@@ -96,6 +100,8 @@ export function Composer({
           ? "Ask for follow-up changes"
         : workflowMode === "factory"
           ? "Describe the application you want Factory Mode to build..."
+        : composerMode === "terminal"
+          ? "Run a workspace command, for example: git status"
         : workflowMode === "review"
           ? "Ask for a review, audit, or findings-first assessment..."
         : workflowMode === "debug"
@@ -151,6 +157,12 @@ export function Composer({
       setSteerDrawerOpen(true);
     }
   }, [hasDraftContent, steerEnabled]);
+
+  useEffect(() => {
+    if (composerMode === "terminal" && !terminalModeEnabled) {
+      onComposerModeChange("text");
+    }
+  }, [composerMode, onComposerModeChange, terminalModeEnabled]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
@@ -287,6 +299,14 @@ export function Composer({
 
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
+  }
+
+  function handleSelectComposerMode(mode: ComposerMode) {
+    if (mode === "terminal") {
+      onWorkflowModeChange("auto");
+    }
+
+    onComposerModeChange(mode);
   }
 
   return (
@@ -562,6 +582,11 @@ export function Composer({
               placeholder={placeholder}
               rows={4}
             />
+            {composerMode === "terminal" ? (
+              <p className="composer__terminal-note">
+                Runs one allowed workspace command inside the connected runtime folder and captures the transcript in the execution trace.
+              </p>
+            ) : null}
             <div className="composer__toolbar">
               <div className="composer__tools">
                 <button
@@ -569,6 +594,7 @@ export function Composer({
                   className="composer__tool-button composer__tool-button--icon"
                   aria-label="Upload files"
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={composerMode === "terminal"}
                 >
                   <PlusIcon />
                 </button>
@@ -576,7 +602,7 @@ export function Composer({
                   type="button"
                   className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
                   onClick={() => void handleMicClick()}
-                  disabled={transcribingAudio}
+                  disabled={transcribingAudio || composerMode === "terminal"}
                 >
                   <MicIcon />
                     <span>
@@ -585,8 +611,25 @@ export function Composer({
                         : transcribingAudio
                           ? "Transcribing"
                           : "Mic"}
-                    </span>
+                      </span>
                 </button>
+                <div className="composer__mode-buttons" role="tablist" aria-label="Composer mode">
+                  <button
+                    type="button"
+                    className={`composer__mode-button ${composerMode !== "terminal" ? "is-active" : ""}`}
+                    onClick={() => handleSelectComposerMode("text")}
+                  >
+                    Prompt
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer__mode-button ${composerMode === "terminal" ? "is-active" : ""}`}
+                    disabled={!terminalModeEnabled}
+                    onClick={() => handleSelectComposerMode("terminal")}
+                  >
+                    Terminal
+                  </button>
+                </div>
                 <div className="composer__mode-control">
                   <label className="composer__mode-label" htmlFor={modeSelectId}>
                     Mode

@@ -11,7 +11,8 @@ import {
   getOperatingModePolicy,
   getRoleContextPolicy,
   normalizeRequestedOperatingMode,
-  resolveOperatingMode
+  resolveOperatingMode,
+  resolveRelevantFilesForRun
 } from "@shipyard/agent-core";
 import { generateText } from "ai";
 
@@ -28,6 +29,7 @@ export type OpenAIExecutorConfig = {
 type CreateOpenAIExecutorOptions = {
   config: OpenAIExecutorConfig;
   generateTextImpl?: typeof generateText;
+  repoRoot?: string;
 };
 
 export function resolveOpenAIExecutorConfig(
@@ -90,9 +92,11 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     const traceScope = getActiveTraceScope();
     const startedAtMs = Date.now();
     const systemPrompt = buildSystemPrompt(context.instructionRuntime, operatingMode);
+    const relevantFiles = resolveRelevantFilesForRun(run, options.repoRoot);
     const prompt = buildTaskPrompt(run, {
       roleContextPrompt: context.roleContextPrompt ?? null,
       plannedStep: context.plannedStep ?? null,
+      relevantFiles,
       requestedOperatingMode,
       operatingMode
     });
@@ -234,6 +238,7 @@ function buildSystemPrompt(
 function buildTaskPrompt(
   run: AgentRunRecord,
   input: {
+    relevantFiles: AgentRunRecord["context"]["relevantFiles"];
     roleContextPrompt: string | null;
     requestedOperatingMode: ReturnType<typeof normalizeRequestedOperatingMode>;
     operatingMode: ReturnType<typeof resolveOperatingMode>;
@@ -275,7 +280,7 @@ function buildTaskPrompt(
     renderProjectContext(run),
     renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
-    renderRunContext(run),
+    renderRunContext(run, input.relevantFiles),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     renderLocalFilePlanInstructions(run),
     [
@@ -410,14 +415,17 @@ function renderAttachmentContext(run: AgentRunRecord) {
   ].join("\n\n");
 }
 
-function renderRunContext(run: AgentRunRecord) {
+function renderRunContext(
+  run: AgentRunRecord,
+  relevantFiles: AgentRunRecord["context"]["relevantFiles"]
+) {
   const contextParts = [
     run.context.objective ? `Objective: ${run.context.objective}` : null,
     run.context.constraints.length > 0
       ? `Constraints:\n${run.context.constraints.map((constraint) => `- ${constraint}`).join("\n")}`
       : null,
-    run.context.relevantFiles.length > 0
-      ? `Relevant files:\n${run.context.relevantFiles
+    relevantFiles.length > 0
+      ? `Relevant files:\n${relevantFiles
           .map((file) => `- ${file.path}${file.reason ? ` (${file.reason})` : ""}`)
           .join("\n")}`
       : null,
