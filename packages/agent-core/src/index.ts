@@ -98,6 +98,14 @@ export {
   syncFactoryStagePlans
 } from "./runtime/factoryBacklog";
 export {
+  buildFactoryTaskDelegationRuntimeContext,
+  findFactoryDelegationBrief,
+  findFactoryDependencyGraph,
+  findFactoryOwnershipPlan,
+  findFactoryPhaseContract,
+  syncFactoryDelegationState
+} from "./runtime/factoryDelegation";
+export {
   applyFactoryStageExpansion,
   detectFactoryStageMissingWork
 } from "./runtime/factoryPlanner";
@@ -250,10 +258,18 @@ export type {
   FactoryBacklogItem,
   FactoryBacklogItemSource,
   FactoryBacklogItemStatus,
+  FactoryDelegationBrief,
+  FactoryDelegationPath,
+  FactoryDelegationStatus,
   FactoryDeploymentState,
   FactoryDeploymentProviderId,
+  FactoryDependencyGraph,
+  FactoryDependencyGraphEdge,
+  FactoryDependencyGraphNode,
   FactoryExpansionDecision,
   FactoryExpansionDecisionOutcome,
+  FactoryOwnershipAssignment,
+  FactoryOwnershipPlan,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,

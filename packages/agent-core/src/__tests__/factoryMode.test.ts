@@ -105,9 +105,27 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.equal(state.completionContract.definitionOfDone.completionCriteria.length, 4);
   assert.equal(state.completionContract.phases.length, 4);
   assert.equal(state.stagePlans.length, 4);
+  assert.equal(state.ownershipPlans.length, 4);
+  assert.equal(state.dependencyGraphs.length, 4);
+  assert.ok(state.delegationBriefs.length > 0);
   assert.equal(
     state.stagePlans.find((plan) => plan.stageId === "implementation")?.backlog.length,
     2
+  );
+  assert.equal(
+    state.ownershipPlans.find((plan) => plan.stageId === "implementation")?.storyAssignments[0]
+      ?.ownerRole,
+    "specialist_dev"
+  );
+  assert.equal(
+    state.ownershipPlans.find((plan) => plan.stageId === "implementation")?.taskAssignments[0]
+      ?.ownerRole,
+    "execution_subagent"
+  );
+  assert.deepEqual(
+    state.delegationBriefs.find((brief) => brief.entityKind === "task" && brief.entityId === "task-nextjs-shell")
+      ?.acceptanceTargetIds,
+    ["factory-implementation:app-shell"]
   );
   assert.deepEqual(state.expansionDecisions, []);
   assert.deepEqual(

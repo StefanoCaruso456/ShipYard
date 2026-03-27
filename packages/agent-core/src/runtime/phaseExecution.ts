@@ -24,6 +24,8 @@ import {
 import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
 import { applyFactoryStageExpansion } from "./factoryPlanner";
+import { buildFactoryTaskDelegationRuntimeContext } from "./factoryDelegation";
+import { syncFactoryRunState } from "./factoryMode";
 import {
   createControlPlaneState,
   recordPhaseCompleted,
@@ -396,11 +398,21 @@ export async function executePhaseExecutionRun(
       if (factoryExpansion) {
         workingRun.factory = factoryExpansion.factory;
         workingRun.phaseExecution = factoryExpansion.phaseExecution;
-        workingRun.controlPlane = syncControlPlaneState(
-          workingRun.controlPlane ?? createControlPlaneState(factoryExpansion.phaseExecution),
-          factoryExpansion.phaseExecution
-        );
-        updateProgress(factoryExpansion.phaseExecution);
+          workingRun.controlPlane = syncControlPlaneState(
+            workingRun.controlPlane ?? createControlPlaneState(factoryExpansion.phaseExecution),
+            factoryExpansion.phaseExecution
+          );
+          workingRun.factory =
+            syncFactoryRunState({
+              factory: factoryExpansion.factory,
+              phaseExecution: factoryExpansion.phaseExecution,
+              controlPlane: workingRun.controlPlane,
+              status: workingRun.status,
+              rollingSummary: workingRun.rollingSummary,
+              resultSummary: workingRun.result?.summary ?? null,
+              updatedAt: factoryExpansion.decision?.decidedAt ?? options.run.createdAt
+            }) ?? factoryExpansion.factory;
+          updateProgress(factoryExpansion.phaseExecution);
 
         if (factoryExpansion.expanded && factoryExpansion.decision) {
           workingRun.rollingSummary = {
@@ -601,7 +613,7 @@ function beginPhase(run: AgentRunRecord, phaseExecution: PhaseExecutionState, ph
     taskId: null
   };
   updateProgress(phaseExecution);
-  recordPhaseStarted(run.controlPlane ?? null, phase);
+  recordPhaseStarted(run.controlPlane ?? null, phase, run.factory ?? null);
   appendRunEvents(run, {
     at: new Date().toISOString(),
     type: "phase_started",
@@ -703,7 +715,7 @@ function beginStory(
     taskId: null
   };
   updateProgress(phaseExecution);
-  recordStoryStarted(run.controlPlane ?? null, story);
+  recordStoryStarted(run.controlPlane ?? null, story, run.factory ?? null);
   appendRunEvents(run, {
     at: new Date().toISOString(),
     type: "story_started",
@@ -736,7 +748,7 @@ async function executeTask(options: {
     taskId: task.id
   };
   updateProgress(phaseExecution);
-  recordTaskStarted(run.controlPlane ?? null, story, task);
+  recordTaskStarted(run.controlPlane ?? null, story, task, run.factory ?? null);
   run.rollingSummary = {
     text: `Executing ${phase.name} -> ${story.title} -> ${task.id}`,
     updatedAt: new Date().toISOString(),
@@ -1124,11 +1136,17 @@ function createTaskScopedRun(
   task: Task
 ): AgentRunRecord {
   const scopedRun = cloneRunRecord(run);
+  const factoryDelegationContext = buildFactoryTaskDelegationRuntimeContext({
+    factory: run.factory ?? null,
+    phase,
+    story,
+    task
+  });
 
   scopedRun.instruction = task.instruction;
   scopedRun.title = `${phase.name} / ${story.title} / ${task.id}`;
   scopedRun.toolRequest = task.toolRequest;
-  scopedRun.context = mergeContexts(run.context, task.context, {
+  const mergedContext = mergeContexts(run.context, task.context, {
     objective: task.expectedOutcome || story.title || phase.name,
     constraints: story.acceptanceCriteria.map((criterion) => `Acceptance criterion: ${criterion}`),
     specialistAgentTypeId:
@@ -1138,6 +1156,25 @@ function createTaskScopedRun(
       run.context.specialistAgentTypeId ??
       null
   });
+  scopedRun.context = {
+    ...mergedContext,
+    constraints: uniqueStrings([
+      ...mergedContext.constraints,
+      ...factoryDelegationContext.constraints
+    ]),
+    externalContext: mergeExternalContext(
+      mergedContext.externalContext,
+      factoryDelegationContext.externalContext ?? []
+    ),
+    validationTargets: uniqueStrings([
+      ...mergedContext.validationTargets,
+      ...factoryDelegationContext.validationTargets
+    ]),
+    specialistAgentTypeId:
+      mergedContext.specialistAgentTypeId ??
+      factoryDelegationContext.specialistAgentTypeId ??
+      null
+  };
   scopedRun.orchestration = null;
   scopedRun.phaseExecution = phaseExecution;
 
