@@ -19,16 +19,36 @@ type OperatorRunOverviewProps = {
   ) => Promise<void>;
 };
 
+type OperatorRunComparativeAnalysis = {
+  status: "completed" | "failed";
+  headline: string;
+  sections: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    highlights: string[];
+  }>;
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+type OperatorRunViewWithComparativeAnalysis = RuntimeOperatorView & {
+  comparativeAnalysis?: OperatorRunComparativeAnalysis | null;
+};
+
 export function OperatorRunOverview({
   runId,
   operatorView,
   onApprovalDecision
 }: OperatorRunOverviewProps) {
+  const comparativeAnalysis =
+    (operatorView as OperatorRunViewWithComparativeAnalysis).comparativeAnalysis ?? null;
   const visibleJournal = operatorView.journal.slice(0, 8);
   const visiblePlanningArtifacts = operatorView.planningArtifacts.slice(0, 6);
   const visibleDelegationPackets = operatorView.delegationPackets.slice(0, 6);
   const visibleConflicts = operatorView.conflicts.slice(0, 6);
   const visibleMergeDecisions = operatorView.mergeDecisions.slice(0, 6);
+  const visibleComparativeSections = comparativeAnalysis?.sections.slice(0, 7) ?? [];
   const activeGate = operatorView.approval?.activeGate ?? null;
   const [comment, setComment] = useState("");
   const [submittingDecision, setSubmittingDecision] =
@@ -311,6 +331,46 @@ export function OperatorRunOverview({
         </section>
       ) : null}
 
+      {comparativeAnalysis ? (
+        <section className="operator-overview__comparison">
+          <div className="operator-overview__section-head">
+            <strong>Comparative analysis</strong>
+            <span>{humanizeDeliveryStatus(comparativeAnalysis.status)}</span>
+          </div>
+
+          <div className="operator-overview__detail-list">
+            <article className="operator-overview__detail-card">
+              <div className="operator-overview__journal-head">
+                <strong>{comparativeAnalysis.headline}</strong>
+                <span>
+                  {comparativeAnalysis.updatedAt
+                    ? formatDateTime(comparativeAnalysis.updatedAt)
+                    : "Pending"}
+                </span>
+              </div>
+              <div className="operator-overview__meta">
+                <span>{visibleComparativeSections.length} sections</span>
+                <span>{comparativeAnalysis.sourceArtifactIds.length} evidence artifacts</span>
+              </div>
+            </article>
+
+            {visibleComparativeSections.map((section) => (
+              <article key={section.id} className="operator-overview__detail-card">
+                <span className="operator-overview__eyebrow">{section.title}</span>
+                <strong>{section.summary}</strong>
+                {section.highlights.length > 0 ? (
+                  <div className="operator-overview__meta">
+                    {section.highlights.map((highlight) => (
+                      <span key={`${section.id}:${highlight}`}>{highlight}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {operatorView.planningArtifacts.length > 0 ? (
         <section className="operator-overview__planning">
           <div className="operator-overview__section-head">
@@ -366,6 +426,10 @@ export function OperatorRunOverview({
                 <p>{packet.workPacket?.scopeSummary || packet.purpose}</p>
                 <div className="operator-overview__meta">
                   <span>{packet.artifactIds.length} artifacts</span>
+                  <span>
+                    {packet.workPacket?.flowArtifactIds.length ?? 0} flow spec
+                    {(packet.workPacket?.flowArtifactIds.length ?? 0) === 1 ? "" : "s"}
+                  </span>
                   <span>{packet.validationTargets.length} validation targets</span>
                   <span>{packet.dependencyIds.length} dependencies</span>
                   {packet.workPacket?.ownerLabel ? <span>{packet.workPacket.ownerLabel}</span> : null}

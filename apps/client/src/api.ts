@@ -5,9 +5,11 @@ import type {
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeRequestedOperatingMode,
   RuntimeRepoBranchResponse,
   RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
+  RuntimeTaskToolRequest,
   RuntimeTaskSubmitContext,
   RuntimeTraceResponse,
   RuntimeTaskListResponse,
@@ -93,7 +95,9 @@ export function submitRuntimeTask(input: {
   title?: string;
   threadId?: string;
   parentRunId?: string | null;
+  operatingMode?: RuntimeRequestedOperatingMode | null;
   simulateFailure?: boolean;
+  toolRequest?: RuntimeTaskToolRequest | null;
   attachments?: ComposerAttachment[];
   project?: WorkspaceProject;
   context?: RuntimeTaskSubmitContext;
@@ -119,8 +123,16 @@ export function submitRuntimeTask(input: {
       formData.append("parentRunId", input.parentRunId);
     }
 
+    if (input.operatingMode) {
+      formData.append("operatingMode", input.operatingMode);
+    }
+
     if (input.simulateFailure !== undefined) {
       formData.append("simulateFailure", String(input.simulateFailure));
+    }
+
+    if (input.toolRequest) {
+      formData.append("toolRequest", JSON.stringify(input.toolRequest));
     }
 
     if (project) {
@@ -192,12 +204,25 @@ export function submitRuntimeApprovalDecision(
 }
 
 function serializeRuntimeProject(project: WorkspaceProject) {
+  const repositoryLink =
+    project.repository?.url && project.repository.url.trim()
+      ? [
+          {
+            kind: "repository" as const,
+            url: project.repository.url.trim(),
+            title: project.repository.label,
+            provider: project.repository.provider
+          }
+        ]
+      : [];
+
   return {
     id: project.id,
     name: project.name,
     kind: project.kind,
     environment: project.environment,
     description: project.description,
+    links: repositoryLink,
     folder: project.folder
       ? {
           name: project.folder.name,

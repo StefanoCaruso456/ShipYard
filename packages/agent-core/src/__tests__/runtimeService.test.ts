@@ -169,6 +169,35 @@ test("persistent runtime preserves project ownership metadata on queued runs", a
   assert.equal(storedRun?.project?.folder?.displayPath, "analytics-dashboard");
 });
 
+test("persistent runtime resolves auto operating mode from review-style instructions", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Review the runtime API implementation for bugs and risks."
+  });
+
+  const storedRun = runtimeService.getRun(run.id);
+
+  assert.equal(storedRun?.requestedOperatingMode, "auto");
+  assert.equal(storedRun?.operatingMode, "review");
+});
+
+test("persistent runtime preserves explicit operating mode selections", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Clean up the runtime state handling without changing behavior.",
+    operatingMode: "refactor"
+  });
+
+  const storedRun = runtimeService.getRun(run.id);
+
+  assert.equal(storedRun?.requestedOperatingMode, "refactor");
+  assert.equal(storedRun?.operatingMode, "refactor");
+});
+
 test("persistent runtime runs active-thread follow-ups before unrelated queued work", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const firstGate = createDeferred<AgentRunResult>();
@@ -400,11 +429,23 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.equal(taskHandoff?.status, "completed");
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-delegation:story-runtime-shape"));
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-architecture:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-user-flow:story-runtime-shape"));
+  assert.ok(storyHandoff?.artifactIds.includes("artifact:story-data-flow:story-runtime-shape"));
   assert.ok(storyHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
   assert.deepEqual(taskHandoff?.dependencyIds, ["task-1"]);
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-user-flow:story-runtime-shape"));
+  assert.ok(taskHandoff?.artifactIds.includes("artifact:story-data-flow:story-runtime-shape"));
   assert.ok(taskHandoff?.artifactIds.includes("artifact:story-breakdown:story-runtime-shape"));
   assert.ok(taskHandoff?.artifactIds.includes("artifact:task-delegation:task-2"));
   assert.equal(storyHandoff?.workPacket?.ownerAgentTypeId, "backend_dev");
+  assert.deepEqual(storyHandoff?.workPacket?.flowArtifactIds, [
+    "artifact:story-user-flow:story-runtime-shape",
+    "artifact:story-data-flow:story-runtime-shape"
+  ]);
+  assert.deepEqual(taskHandoff?.workPacket?.flowArtifactIds, [
+    "artifact:story-user-flow:story-runtime-shape",
+    "artifact:story-data-flow:story-runtime-shape"
+  ]);
   assert.deepEqual(taskHandoff?.workPacket?.taskIds, ["task-2"]);
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
@@ -414,6 +455,16 @@ test("persistent runtime executes phases, stories, and tasks sequentially", asyn
   assert.ok(
     completedRun.controlPlane?.artifacts.some(
       (artifact) => artifact.kind === "architecture_decision" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "user_flow_spec" && artifact.entityKind === "story"
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.artifacts.some(
+      (artifact) => artifact.kind === "data_flow_spec" && artifact.entityKind === "story"
     )
   );
   assert.ok(
@@ -808,6 +859,104 @@ test("persistent runtime expands factory implementation backlog until contract s
         instruction.includes("Onboarding workflow implemented.") ||
         instruction.includes("Operations workspace implemented.")
     )
+  );
+});
+
+test("persistent runtime injects factory delegation context into live task execution", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const seenContextIds = new Map<string, string[]>();
+  const seenConstraints = new Map<string, string[]>();
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      const taskId = run.phaseExecution?.current.taskId;
+
+      if (taskId) {
+        seenContextIds.set(
+          taskId,
+          (run.context.externalContext ?? []).map((item) => item.id)
+        );
+        seenConstraints.set(taskId, [...run.context.constraints]);
+      }
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  submission.phaseExecution?.phases.forEach((phase) => {
+    delete phase.approvalGate;
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes(
+      "factory-delegation-brief:story:story-nextjs-shell"
+    )
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes(
+      "factory-delegation-brief:task:task-nextjs-shell"
+    )
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes("factory-ownership-plan:implementation")
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes("factory-dependency-graph:implementation")
+  );
+  assert.ok(
+    seenConstraints
+      .get("task-nextjs-shell")
+      ?.some((constraint) =>
+        constraint.includes("production_lead -> specialist_dev -> execution_subagent")
+      )
+  );
+  assert.equal(
+    completedRun.factory?.delegationBriefs.find(
+      (brief) => brief.entityKind === "task" && brief.entityId === "task-nextjs-shell"
+    )?.status,
+    "completed"
+  );
+  assert.deepEqual(
+    completedRun.controlPlane?.handoffs.find(
+      (handoff) => handoff.id === "handoff:task:task-nextjs-shell"
+    )?.acceptanceTargetIds,
+    ["factory-implementation:app-shell"]
   );
 });
 

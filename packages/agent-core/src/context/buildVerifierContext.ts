@@ -189,7 +189,7 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
       id: "relevant-files",
       title: "Relevant files",
       precedence: "live execution context",
-      source: "run.context.relevantFiles | derived tool path",
+      source: "run.context.relevantFiles | derived tool path | repo intelligence",
       format: "text",
       content: shared.relevantFiles
         .map((file) => {
@@ -206,7 +206,7 @@ export function buildVerifierContext(shared: SharedRoleContext): RoleContextPayl
       id: "relevant-files",
       title: "Relevant files",
       precedence: "live execution context",
-      source: "run.context.relevantFiles | derived tool path",
+      source: "run.context.relevantFiles | derived tool path | repo intelligence",
       reason: "No relevant files were attached to this verifier payload."
     });
   }

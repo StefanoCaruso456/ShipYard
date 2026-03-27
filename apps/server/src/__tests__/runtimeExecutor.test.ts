@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -225,6 +225,58 @@ test("runtime executor can process a search_repo task through the persistent run
     assert.equal(completedRun.validationStatus, "not_run");
     assert.deepEqual(completedRun.orchestration?.lastExecutorResult?.changedFiles, []);
     assert.ok(completedRun.result?.responseText?.includes("src/example.ts:1:17"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime executor can process a terminal git command through the persistent runtime service", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-terminal-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Initialize a git repository for this runtime workspace.",
+      toolRequest: {
+        toolName: "run_terminal_command",
+        input: {
+          commandLine: "git init -b main",
+          category: "git"
+        }
+      },
+      project: {
+        id: "shipyard-runtime",
+        kind: "live",
+        folder: {
+          name: "terminal-workspace",
+          displayPath: tempDir,
+          provider: "runtime",
+          status: "connected"
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "repo-tool");
+    assert.equal(completedRun.result?.toolResult?.ok, true);
+    assert.equal(completedRun.result?.toolResult?.toolName, "run_terminal_command");
+    if (completedRun.result?.toolResult?.ok) {
+      assert.equal(completedRun.result.toolResult.data.category, "git");
+      assert.equal(completedRun.result.toolResult.data.commandLine, "git init -b main");
+      assert.equal(completedRun.result.toolResult.data.exitCode, 0);
+    }
+    assert.equal(completedRun.validationStatus, "not_run");
+    assert.deepEqual(completedRun.orchestration?.lastExecutorResult?.changedFiles, []);
+    await access(path.join(tempDir, ".git"));
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

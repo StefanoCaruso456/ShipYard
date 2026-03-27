@@ -42,6 +42,15 @@ type ComposerProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
+const workflowModeOptions: Array<{ value: RuntimeWorkflowMode; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "build", label: "Build" },
+  { value: "review", label: "Review" },
+  { value: "debug", label: "Debug" },
+  { value: "refactor", label: "Refactor" },
+  { value: "factory", label: "Factory" }
+];
+
 export function Composer({
   project,
   backendConnected,
@@ -65,6 +74,7 @@ export function Composer({
   onSubmit
 }: ComposerProps) {
   const fileInputId = useId();
+  const modeSelectId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -73,9 +83,12 @@ export function Composer({
   const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
   const [steerDrawerOpen, setSteerDrawerOpen] = useState(false);
   const steerEnabled = Boolean(steerMode);
-  const factoryModeSupported =
-    !steerEnabled && backendConnected && project?.kind === "live";
-  const hasDraftContent = composerValue.trim().length > 0 || attachments.length > 0;
+  const factoryModeSupported = !steerEnabled && backendConnected;
+  const terminalModeEnabled = !steerEnabled && workflowMode !== "factory";
+  const hasDraftContent =
+    composerMode === "terminal"
+      ? composerValue.trim().length > 0
+      : composerValue.trim().length > 0 || attachments.length > 0;
   const canSubmit = Boolean(project) && !submitting && !transcribingAudio && hasDraftContent;
   const placeholder =
     recordingState === "recording"
@@ -86,6 +99,16 @@ export function Composer({
           ? "Ask for follow-up changes"
         : workflowMode === "factory"
           ? "Describe the application you want Factory Mode to build..."
+        : composerMode === "terminal"
+          ? "Run a workspace command, for example: git status"
+        : workflowMode === "review"
+          ? "Ask for a review, audit, or findings-first assessment..."
+        : workflowMode === "debug"
+          ? "Describe the bug, error, or failing behavior you want diagnosed..."
+        : workflowMode === "refactor"
+          ? "Describe the refactor or structural cleanup you want to make..."
+        : workflowMode === "build"
+          ? "Describe the feature, implementation step, or code change you want built..."
         : composerMode === "image"
           ? "Describe the image task..."
           : composerMode === "voice"
@@ -133,6 +156,12 @@ export function Composer({
       setSteerDrawerOpen(true);
     }
   }, [hasDraftContent, steerEnabled]);
+
+  useEffect(() => {
+    if (composerMode === "terminal" && !terminalModeEnabled) {
+      onComposerModeChange("text");
+    }
+  }, [composerMode, onComposerModeChange, terminalModeEnabled]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
@@ -271,6 +300,14 @@ export function Composer({
     event.currentTarget.form?.requestSubmit();
   }
 
+  function handleSelectComposerMode(mode: ComposerMode) {
+    if (mode === "terminal") {
+      onWorkflowModeChange("auto");
+    }
+
+    onComposerModeChange(mode);
+  }
+
   return (
     <form className="composer" onSubmit={onSubmit}>
       {!steerMode ? (
@@ -283,33 +320,6 @@ export function Composer({
       ) : null}
 
       <div className={`composer__field ${steerMode ? "composer__field--steer" : ""}`}>
-        {!steerMode ? (
-          <div className="composer__workflow-switcher">
-            <div className="composer__workflow-buttons">
-              <button
-                type="button"
-                className={`composer__workflow-button ${workflowMode === "standard" ? "is-active" : ""}`}
-                onClick={() => onWorkflowModeChange("standard")}
-              >
-                Task mode
-              </button>
-              <button
-                type="button"
-                className={`composer__workflow-button ${workflowMode === "factory" ? "is-active" : ""}`}
-                disabled={!factoryModeSupported && workflowMode !== "factory"}
-                onClick={() => onWorkflowModeChange("factory")}
-              >
-                Factory mode
-              </button>
-            </div>
-            <p className="composer__workflow-copy">
-              {workflowMode === "factory"
-                ? "Factory Mode creates an isolated greenfield workspace for a new app."
-                : "Task mode keeps working in the current project or thread."}
-            </p>
-          </div>
-        ) : null}
-
         {steerMode ? (
           <div className="composer__steer-window">
             <div className="composer__steer-window-copy">
@@ -399,6 +409,33 @@ export function Composer({
                           : "Mic"}
                     </span>
                   </button>
+                  <div className="composer__mode-control">
+                    <label className="composer__mode-label" htmlFor={modeSelectId}>
+                      Mode
+                    </label>
+                    <select
+                      id={modeSelectId}
+                      className="composer__mode-select"
+                      value={workflowMode}
+                      onChange={(event) =>
+                        onWorkflowModeChange(event.target.value as RuntimeWorkflowMode)
+                      }
+                    >
+                      {workflowModeOptions.map((option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                          disabled={
+                            option.value === "factory" &&
+                            !factoryModeSupported &&
+                            workflowMode !== "factory"
+                          }
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="composer__actions">
@@ -524,13 +561,17 @@ export function Composer({
                   />
                 </label>
 
-                {!factoryModeSupported ? (
+                {!backendConnected ? (
                   <p className="composer__factory-note">
-                    Factory Mode runs through the live runtime project and needs the backend to be connected.
+                    Factory Mode needs the live runtime backend to be connected before the build can start.
+                  </p>
+                ) : project?.kind === "live" ? (
+                  <p className="composer__factory-note">
+                    Shipyard will create a fresh isolated workspace for this app before the run starts.
                   </p>
                 ) : (
                   <p className="composer__factory-note">
-                    Shipyard will create a fresh isolated workspace for this app before the run starts.
+                    Factory Mode launches a fresh Shipyard Runtime thread, even when you start from a connected local project.
                   </p>
                 )}
               </div>
@@ -544,6 +585,11 @@ export function Composer({
               placeholder={placeholder}
               rows={4}
             />
+            {composerMode === "terminal" ? (
+              <p className="composer__terminal-note">
+                Runs one allowed workspace command inside the connected runtime folder and captures the transcript in the execution trace.
+              </p>
+            ) : null}
             <div className="composer__toolbar">
               <div className="composer__tools">
                 <button
@@ -551,6 +597,7 @@ export function Composer({
                   className="composer__tool-button composer__tool-button--icon"
                   aria-label="Upload files"
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={composerMode === "terminal"}
                 >
                   <PlusIcon />
                 </button>
@@ -558,17 +605,61 @@ export function Composer({
                   type="button"
                   className={`composer__tool-button ${recordingState !== "idle" || transcribingAudio ? "is-active" : ""}`}
                   onClick={() => void handleMicClick()}
-                  disabled={transcribingAudio}
+                  disabled={transcribingAudio || composerMode === "terminal"}
                 >
                   <MicIcon />
-                  <span>
-                    {recordingState === "recording"
-                      ? "Stop"
-                      : transcribingAudio
-                        ? "Transcribing"
-                        : "Mic"}
-                  </span>
+                    <span>
+                      {recordingState === "recording"
+                        ? "Stop"
+                        : transcribingAudio
+                          ? "Transcribing"
+                          : "Mic"}
+                      </span>
                 </button>
+                <div className="composer__mode-buttons" role="tablist" aria-label="Composer mode">
+                  <button
+                    type="button"
+                    className={`composer__mode-button ${composerMode !== "terminal" ? "is-active" : ""}`}
+                    onClick={() => handleSelectComposerMode("text")}
+                  >
+                    Prompt
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer__mode-button ${composerMode === "terminal" ? "is-active" : ""}`}
+                    disabled={!terminalModeEnabled}
+                    onClick={() => handleSelectComposerMode("terminal")}
+                  >
+                    Terminal
+                  </button>
+                </div>
+                <div className="composer__mode-control">
+                  <label className="composer__mode-label" htmlFor={modeSelectId}>
+                    Mode
+                  </label>
+                  <select
+                    id={modeSelectId}
+                    className="composer__mode-select"
+                    value={workflowMode}
+                    onChange={(event) =>
+                      onWorkflowModeChange(event.target.value as RuntimeWorkflowMode)
+                    }
+                  >
+                    {workflowModeOptions.map((option) => (
+                      <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={
+                          option.value === "factory" &&
+                          !factoryModeSupported &&
+                          workflowMode !== "factory"
+                        }
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="composer__actions">
@@ -586,7 +677,9 @@ export function Composer({
         )}
       </div>
 
-      {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
+      {feedback?.tone === "danger" ? (
+        <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p>
+      ) : null}
 
       <input
         id={fileInputId}

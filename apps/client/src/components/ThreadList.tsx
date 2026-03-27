@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ThreadGroup } from "../types";
 
@@ -27,6 +28,57 @@ export function ThreadList({
 }: ThreadListProps) {
   const [openMenuProjectId, setOpenMenuProjectId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const openMenuProject = openMenuProjectId
+    ? groups.find(({ project }) => project.id === openMenuProjectId)?.project ?? null
+    : null;
+
+  useLayoutEffect(() => {
+    if (!openMenuProjectId) {
+      setMenuPosition(null);
+      return;
+    }
+
+    const projectId = openMenuProjectId;
+
+    function updateMenuPosition() {
+      const trigger = triggerRefs.current[projectId];
+
+      if (!trigger) {
+        return;
+      }
+
+      const rect = trigger.getBoundingClientRect();
+      const panelWidth = 168;
+      const panelHeight = 172;
+      const viewportPadding = 12;
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - panelWidth),
+        window.innerWidth - panelWidth - viewportPadding
+      );
+      const preferredTop = rect.bottom + 6;
+      const top =
+        preferredTop + panelHeight > window.innerHeight - viewportPadding
+          ? Math.max(viewportPadding, rect.top - panelHeight - 6)
+          : preferredTop;
+
+      setMenuPosition({
+        top,
+        left
+      });
+    }
+
+    updateMenuPosition();
+
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [openMenuProjectId]);
 
   useEffect(() => {
     if (!openMenuProjectId) {
@@ -34,7 +86,12 @@ export function ThreadList({
     }
 
     function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      const trigger = openMenuProjectId ? triggerRefs.current[openMenuProjectId] : null;
+
+      if (
+        !menuRef.current?.contains(event.target as Node) &&
+        !trigger?.contains(event.target as Node)
+      ) {
         setOpenMenuProjectId(null);
       }
     }
@@ -74,104 +131,122 @@ export function ThreadList({
   }
 
   return (
-    <div className="thread-list">
-      {groups.map(({ project, threads }) => (
-        <section key={project.id} className="thread-group">
-          <div className="thread-group__header">
-            <button
-              type="button"
-              className={`thread-group__project ${project.id === activeProjectId ? "is-active" : ""}`}
-              onClick={() => onSelectProject(project.id)}
-            >
-              <FolderIcon />
-              <span className="thread-group__project-copy">
-                <strong>{project.name}</strong>
-                <small>{project.branchLabel ?? project.folder?.displayPath ?? project.description}</small>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="thread-group__menu-trigger sidebar__icon-button"
-              onClick={() => onCreateThread(project.id)}
-              aria-label={`Create a new thread in ${project.name}`}
-            >
-              <PlusIcon />
-            </button>
-
-            {project.kind === "local" || project.removable ? (
-              <div
-                ref={openMenuProjectId === project.id ? menuRef : null}
-                className={`thread-group__menu ${openMenuProjectId === project.id ? "is-open" : ""}`}
+    <>
+      <div className="thread-list">
+        {groups.map(({ project, threads }) => (
+          <section key={project.id} className="thread-group">
+            <div className="thread-group__header">
+              <button
+                type="button"
+                className={`thread-group__project ${project.id === activeProjectId ? "is-active" : ""}`}
+                onClick={() => onSelectProject(project.id)}
               >
+                <FolderIcon />
+                <span className="thread-group__project-copy">
+                  <strong>{project.name}</strong>
+                  <small>{project.branchLabel ?? project.folder?.displayPath ?? project.description}</small>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="thread-group__menu-trigger sidebar__icon-button"
+                onClick={() => onCreateThread(project.id)}
+                aria-label={`Create a new thread in ${project.name}`}
+              >
+                <PlusIcon />
+              </button>
+
+              {project.kind === "local" || project.removable ? (
+                <div className={`thread-group__menu ${openMenuProjectId === project.id ? "is-open" : ""}`}>
+                  <button
+                    ref={(node) => {
+                      triggerRefs.current[project.id] = node;
+                    }}
+                    type="button"
+                    className="thread-group__menu-trigger sidebar__icon-button"
+                    onClick={() => toggleProjectMenu(project.id)}
+                    aria-label={`Open actions for ${project.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={openMenuProjectId === project.id}
+                  >
+                    <MoreIcon />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="thread-group__threads">
+              {threads.map((thread) => (
+                <button
+                  key={thread.id}
+                  type="button"
+                  className={`thread-row ${project.id === activeProjectId && thread.id === activeThreadId ? "is-active" : ""}`}
+                  onClick={() => onSelectThread(project.id, thread.id)}
+                >
+                  <span className="thread-row__title">{thread.title}</span>
+                  <span className="thread-row__meta">{thread.updatedLabel}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {openMenuProjectId && menuPosition
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="thread-group__menu-panel thread-group__menu-panel--portal"
+              role="menu"
+              aria-label={`${openMenuProject?.name ?? "Project"} actions`}
+              style={{
+                top: menuPosition.top,
+                left: menuPosition.left
+              }}
+            >
+              {openMenuProject?.kind === "local" ? (
                 <button
                   type="button"
-                  className="thread-group__menu-trigger sidebar__icon-button"
-                  onClick={() => toggleProjectMenu(project.id)}
-                  aria-label={`Open actions for ${project.name}`}
-                  aria-haspopup="menu"
-                  aria-expanded={openMenuProjectId === project.id}
+                  role="menuitem"
+                  className="thread-group__menu-item"
+                  onClick={() => void handleReconnect(openMenuProjectId)}
                 >
-                  <MoreIcon />
+                  <FolderRefreshIcon />
+                  <span>
+                    {openMenuProject.folder?.status === "connected"
+                      ? "Reconnect folder"
+                      : "Connect folder"}
+                  </span>
                 </button>
-
-                {openMenuProjectId === project.id ? (
-                  <div className="thread-group__menu-panel" role="menu" aria-label={`${project.name} actions`}>
-                    {project.kind === "local" ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="thread-group__menu-item"
-                        onClick={() => void handleReconnect(project.id)}
-                      >
-                        <FolderRefreshIcon />
-                        <span>{project.folder?.status === "connected" ? "Reconnect folder" : "Connect folder"}</span>
-                      </button>
-                    ) : null}
-                    {project.removable ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="thread-group__menu-item"
-                        onClick={() => handleRename(project.id)}
-                      >
-                        <RenameIcon />
-                        <span>Rename</span>
-                      </button>
-                    ) : null}
-                    {project.removable ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="thread-group__menu-item thread-group__menu-item--danger"
-                        onClick={() => handleDelete(project.id)}
-                      >
-                        <DeleteIcon />
-                        <span>Remove project</span>
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="thread-group__threads">
-            {threads.map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                className={`thread-row ${project.id === activeProjectId && thread.id === activeThreadId ? "is-active" : ""}`}
-                onClick={() => onSelectThread(project.id, thread.id)}
-              >
-                <span className="thread-row__title">{thread.title}</span>
-                <span className="thread-row__meta">{thread.updatedLabel}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
+              ) : null}
+              {openMenuProject?.removable ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="thread-group__menu-item"
+                  onClick={() => handleRename(openMenuProjectId)}
+                >
+                  <RenameIcon />
+                  <span>Rename</span>
+                </button>
+              ) : null}
+              {openMenuProject?.removable ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="thread-group__menu-item thread-group__menu-item--danger"
+                  onClick={() => handleDelete(openMenuProjectId)}
+                >
+                  <DeleteIcon />
+                  <span>Remove project</span>
+                </button>
+              ) : null}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
 

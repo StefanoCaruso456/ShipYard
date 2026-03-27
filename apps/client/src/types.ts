@@ -89,7 +89,15 @@ export type RuntimeRepoBranchSnapshot = {
 export type RuntimeRepoBranchResponse = RuntimeRepoBranchSnapshot;
 
 export type RuntimeTaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
-export type RuntimeWorkflowMode = "standard" | "factory";
+export type RuntimeRequestedOperatingMode =
+  | "auto"
+  | "build"
+  | "review"
+  | "debug"
+  | "refactor"
+  | "factory";
+export type RuntimeOperatingMode = Exclude<RuntimeRequestedOperatingMode, "auto">;
+export type RuntimeWorkflowMode = RuntimeRequestedOperatingMode;
 export type RuntimeFactoryStackTemplateId =
   | "nextjs_supabase_vercel"
   | "nextjs_railway_postgres"
@@ -219,6 +227,15 @@ export type RuntimeTaskProject = {
   kind: WorkspaceProjectKind;
   environment: string | null;
   description: string | null;
+  links: Array<{
+    id?: string | null;
+    kind: "repository" | "pull_request" | "deployment";
+    url: string;
+    title?: string | null;
+    provider?: string | null;
+    entityKind?: "run" | "phase" | "story" | "task" | null;
+    entityId?: string | null;
+  }>;
   folder: {
     name: string | null;
     displayPath: string | null;
@@ -257,12 +274,26 @@ export type RuntimeTaskContext = {
 
 export type RuntimeTaskSubmitContext = RuntimeTaskContext;
 
+export type RuntimeTerminalToolRequest = {
+  toolName: "run_terminal_command";
+  input: {
+    commandLine: string;
+    cwd?: string;
+    timeoutMs?: number;
+    category?: "shell" | "git" | "ci" | "browser" | null;
+  };
+};
+
+export type RuntimeTaskToolRequest = RuntimeTerminalToolRequest;
+
 export type RuntimeTask = {
   id: string;
   threadId: string;
   parentRunId: string | null;
   title: string | null;
   instruction: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   simulateFailure: boolean;
   toolRequest?: unknown;
   attachments: RuntimeAttachment[];
@@ -336,6 +367,8 @@ export type RuntimeTask = {
       | "repo-tool"
       | "phase-execution"
       | "ship-rebuild";
+    requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+    operatingMode?: RuntimeOperatingMode | null;
     summary: string;
     instructionEcho: string;
     skillId: string;
@@ -362,6 +395,7 @@ export type RuntimeTraceSpanType =
   | "phase"
   | "story"
   | "task"
+  | "sync"
   | "coordinator"
   | "handoff"
   | "merge"
@@ -410,6 +444,8 @@ export type RuntimeTraceRunLog = {
     totalDurationMs: number | null;
     queueDelayMs: number | null;
     roleFlow: string | null;
+    requestedOperatingMode: string | null;
+    operatingMode: string | null;
     model: {
       provider: string | null;
       modelId: string | null;
@@ -760,6 +796,30 @@ export type RuntimeOperatorEvaluation = {
   failurePatterns: string[];
 };
 
+export type RuntimeOperatorComparativeAnalysisSectionId =
+  | "executive_summary"
+  | "delivery_and_outputs"
+  | "validation_and_quality"
+  | "interventions_and_retries"
+  | "blockers_and_conflicts"
+  | "risks_and_follow_ups"
+  | "recommended_improvements";
+
+export type RuntimeOperatorComparativeAnalysisSection = {
+  id: RuntimeOperatorComparativeAnalysisSectionId;
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type RuntimeOperatorComparativeAnalysis = {
+  status: "completed" | "failed";
+  headline: string;
+  sections: RuntimeOperatorComparativeAnalysisSection[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
 export type RuntimeOperatorPlanningArtifact = {
   id: string;
   kind: string;
@@ -791,6 +851,7 @@ export type RuntimeOperatorDelegationPacket = {
     | {
         version: 1;
         sourceArtifactIds: string[];
+        flowArtifactIds: string[];
         scopeSummary: string;
         constraints: string[];
         fileTargets: string[];
@@ -861,6 +922,7 @@ export type RuntimeOperatorView = {
   mergeDecisions: RuntimeOperatorMergeDecision[];
   delivery: RuntimeOperatorDeliverySummary | null;
   evaluation: RuntimeOperatorEvaluation | null;
+  comparativeAnalysis: RuntimeOperatorComparativeAnalysis | null;
   planningArtifacts: RuntimeOperatorPlanningArtifact[];
   delegationPackets: RuntimeOperatorDelegationPacket[];
   journal: RuntimeOperatorJournalEntry[];
@@ -878,6 +940,19 @@ export type WorkspaceProjectFolder = {
   lastConnectedAt: string | null;
 };
 
+export type WorkspaceProjectRepositoryProvider = "github" | "git";
+
+export type WorkspaceProjectRepository = {
+  provider: WorkspaceProjectRepositoryProvider;
+  remoteName: string | null;
+  url: string | null;
+  label: string;
+  owner: string | null;
+  repo: string | null;
+  currentBranch: string | null;
+  source: "git-config" | "git-head";
+};
+
 export type WorkspaceProject = {
   id: string;
   name: string;
@@ -888,6 +963,7 @@ export type WorkspaceProject = {
   region: string;
   branchLabel: string | null;
   folder: WorkspaceProjectFolder | null;
+  repository: WorkspaceProjectRepository | null;
   removable: boolean;
 };
 
@@ -901,7 +977,7 @@ export type SidebarNavItem = {
 
 export type ModeOption = "local" | "worktree" | "cloud";
 
-export type ComposerMode = "text" | "image" | "voice";
+export type ComposerMode = "text" | "image" | "voice" | "terminal";
 
 export type ComposerAttachment = {
   id: string;
@@ -954,6 +1030,36 @@ export type ThreadMessage = {
   timestamp: string;
   tone: "default" | "info" | "success" | "danger";
   attachments?: AttachmentCard[];
+  trace?: {
+    runId: string;
+    status: RuntimeTaskStatus;
+    items: AgentActivityItem[];
+  };
+  tracePlacement?: "before" | "after";
+};
+
+export type RuntimeTerminalCommandEntry = {
+  id: string;
+  runId: string;
+  label: string;
+  commandLine: string;
+  command: string;
+  args: string[];
+  category: "shell" | "git" | "ci" | "browser";
+  cwd: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: "running" | "completed" | "failed";
+  exitCode: number | null;
+  durationMs: number | null;
+  stdout: string;
+  stderr: string;
+  combinedOutput: string;
+  truncated: {
+    stdout: boolean;
+    stderr: boolean;
+    combined: boolean;
+  };
 };
 
 export type ProgressEvent = {
@@ -967,6 +1073,8 @@ export type ProgressEvent = {
 export type RuntimeThreadFocusedRun = {
   id: string;
   instruction: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   status: RuntimeTaskStatus;
   createdAt: string;
   startedAt: string | null;
@@ -997,6 +1105,8 @@ export type WorkspaceThread = {
   id: string;
   title: string;
   summary: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   status: WorkspaceThreadStatus;
   source: "live" | "guide" | "preview" | "draft";
   createdLabel: string;
@@ -1014,6 +1124,7 @@ export type WorkspaceThread = {
     runIds: string[];
     focusedRun: RuntimeThreadFocusedRun | null;
     operatorView: RuntimeOperatorView | null;
+    terminal: RuntimeTerminalCommandEntry[];
     queuedFollowUps: RuntimeThreadQueuedItem[];
     completedRunCount: number;
   };

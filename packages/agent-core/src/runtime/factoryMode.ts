@@ -4,6 +4,7 @@ import type {
   FactoryArtifact,
   FactoryArtifactStatus,
   FactoryCompletionContract,
+  ControlPlaneState,
   FactoryDeploymentProviderId,
   FactoryDeploymentState,
   FactoryExpansionDecision,
@@ -32,6 +33,7 @@ import {
   normalizeFactoryStagePlans,
   syncFactoryStagePlans
 } from "./factoryBacklog";
+import { syncFactoryDelegationState } from "./factoryDelegation";
 
 const DEFAULT_REPOSITORY_PROVIDER: FactoryRepositoryProviderId = "github";
 const DEFAULT_REPOSITORY_VISIBILITY: FactoryRepositoryVisibility = "private";
@@ -196,6 +198,7 @@ export function createFactoryRunState(options: {
   workspacePath: string;
   repositoryUrl?: string | null;
   deploymentUrl?: string | null;
+  phaseExecution?: PhaseExecutionState | null;
   createdAt?: string;
 }): FactoryRunState {
   const normalized = normalizeFactoryRunInput(options.input);
@@ -241,7 +244,7 @@ export function createFactoryRunState(options: {
     createdAt
   });
 
-  return {
+  const factory: FactoryRunState = {
     version: 1,
     mode: "factory",
     appName: normalized.appName,
@@ -252,6 +255,9 @@ export function createFactoryRunState(options: {
     completionContract,
     stagePlans,
     expansionDecisions: [],
+    ownershipPlans: [],
+    dependencyGraphs: [],
+    delegationBriefs: [],
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -302,6 +308,15 @@ export function createFactoryRunState(options: {
     deliverySummary: null,
     createdAt,
     updatedAt: createdAt
+  };
+
+  return {
+    ...factory,
+    ...syncFactoryDelegationState({
+      factory,
+      phaseExecution: options.phaseExecution ?? null,
+      updatedAt: createdAt
+    })
   };
 }
 
@@ -363,7 +378,7 @@ export function normalizeFactoryRunState(
   });
   const expansionDecisions = normalizeFactoryExpansionDecisions(value.expansionDecisions);
 
-  return {
+  const factory: FactoryRunState = {
     version: 1,
     mode: "factory",
     appName,
@@ -374,6 +389,9 @@ export function normalizeFactoryRunState(
     completionContract,
     stagePlans,
     expansionDecisions,
+    ownershipPlans: [],
+    dependencyGraphs: [],
+    delegationBriefs: [],
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -394,11 +412,20 @@ export function normalizeFactoryRunState(
     createdAt,
     updatedAt
   };
+
+  return {
+    ...factory,
+    ...syncFactoryDelegationState({
+      factory,
+      updatedAt
+    })
+  };
 }
 
 export function syncFactoryRunState(options: {
   factory: FactoryRunState | null | undefined;
   phaseExecution?: PhaseExecutionState | null;
+  controlPlane?: ControlPlaneState | null;
   project?: RunProjectInput | null;
   status?: AgentRunStatus;
   rollingSummary?: RollingSummary | null;
@@ -455,6 +482,9 @@ export function syncFactoryRunState(options: {
     deployment,
     completionContract,
     stagePlans,
+    ownershipPlans: [],
+    dependencyGraphs: [],
+    delegationBriefs: [],
     currentStage,
     deliverySummary,
     updatedAt
@@ -467,7 +497,15 @@ export function syncFactoryRunState(options: {
     deliverySummary
   });
 
-  return nextFactory;
+  return {
+    ...nextFactory,
+    ...syncFactoryDelegationState({
+      factory: nextFactory,
+      phaseExecution: options.phaseExecution ?? null,
+      controlPlane: options.controlPlane ?? null,
+      updatedAt
+    })
+  };
 }
 
 export function compileFactoryTaskSubmission(options: {

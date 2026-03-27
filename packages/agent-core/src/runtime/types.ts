@@ -12,6 +12,8 @@ import type {
   ReadFileRangeInput,
   ReadFileRangeResult,
   ReadFileResult,
+  RunTerminalCommandInput,
+  RunTerminalCommandResult,
   RepoToolErrorCode,
   RepoToolName,
   SearchRepoInput,
@@ -28,6 +30,16 @@ import type { TraceService, TraceValue } from "../observability/types";
 export type AgentRunStatus = "pending" | "running" | "paused" | "completed" | "failed";
 
 export type RuntimeWorkerState = "idle" | "running";
+
+export type RequestedOperatingMode =
+  | "auto"
+  | "build"
+  | "review"
+  | "debug"
+  | "refactor"
+  | "factory";
+
+export type OperatingMode = Exclude<RequestedOperatingMode, "auto">;
 
 export type RunAttachmentKind =
   | "image"
@@ -71,6 +83,11 @@ export type RepoMutationToolRequest =
       input: DeleteFileInput;
     };
 
+export type RepoExecutionToolRequest = {
+  toolName: "run_terminal_command";
+  input: RunTerminalCommandInput;
+};
+
 export type RepoInspectionToolRequest =
   | {
       toolName: "list_files";
@@ -89,7 +106,10 @@ export type RepoInspectionToolRequest =
       input: SearchRepoInput;
     };
 
-export type RepoToolRequest = RepoInspectionToolRequest | RepoMutationToolRequest;
+export type RepoToolRequest =
+  | RepoInspectionToolRequest
+  | RepoMutationToolRequest
+  | RepoExecutionToolRequest;
 
 export type RepoMutationToolResult =
   | EditFileRegionResult
@@ -102,7 +122,10 @@ export type RepoInspectionToolResult =
   | ReadFileRangeResult
   | SearchRepoResult;
 
-export type RepoToolResult = RepoInspectionToolResult | RepoMutationToolResult;
+export type RepoToolResult =
+  | RepoInspectionToolResult
+  | RepoMutationToolResult
+  | RunTerminalCommandResult;
 
 export type PhaseStatus = "pending" | "in_progress" | "blocked" | "completed" | "failed";
 
@@ -450,6 +473,8 @@ export type ControlPlaneArtifactKind =
   | "plan"
   | "requirements"
   | "architecture_decision"
+  | "user_flow_spec"
+  | "data_flow_spec"
   | "subtask_breakdown"
   | "delegation_brief"
   | "task_result"
@@ -584,8 +609,39 @@ export type ControlPlaneDelegationBriefArtifactPayload = {
   version: 1;
   scopeSummary: string;
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   dependencyIds: string[];
+  backlogItemIds: string[];
+  delegationPath: "orchestrator_to_production_lead" | "production_lead_to_specialist" | "specialist_to_execution";
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
+};
+
+export type ControlPlaneUserFlowAudience = "end_user" | "operator" | "developer";
+
+export type ControlPlaneUserFlowSpecArtifactPayload = {
+  kind: "user_flow_spec";
+  version: 1;
+  storyId: string;
+  primaryAudience: ControlPlaneUserFlowAudience;
+  entryPoints: string[];
+  journeySteps: string[];
+  successOutcome: string;
+  notes: string[];
+};
+
+export type ControlPlaneDataFlowSpecArtifactPayload = {
+  kind: "data_flow_spec";
+  version: 1;
+  storyId: string;
+  inputSignals: string[];
+  processingSteps: string[];
+  outputs: string[];
+  stores: string[];
+  integrations: string[];
+  fileTargets: string[];
+  domainTargets: string[];
 };
 
 export type DeliverySummaryLinkKind =
@@ -626,6 +682,8 @@ export type ControlPlaneArtifactPayload =
   | ControlPlanePlanArtifactPayload
   | ControlPlaneRequirementsArtifactPayload
   | ControlPlaneArchitectureDecisionArtifactPayload
+  | ControlPlaneUserFlowSpecArtifactPayload
+  | ControlPlaneDataFlowSpecArtifactPayload
   | ControlPlaneSubtaskBreakdownArtifactPayload
   | ControlPlaneDelegationBriefArtifactPayload
   | ControlPlaneDeliverySummaryArtifactPayload
@@ -648,11 +706,14 @@ export type ControlPlaneArtifact = {
 export type ControlPlaneWorkPacket = {
   version: 1;
   sourceArtifactIds: string[];
+  flowArtifactIds: string[];
   scopeSummary: string;
   constraints: string[];
   fileTargets: string[];
   domainTargets: string[];
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   dependencyIds: string[];
   taskIds: string[];
@@ -673,6 +734,8 @@ export type ControlPlaneHandoff = {
   artifactIds: string[];
   dependencyIds: string[];
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   purpose: string;
   workPacket: ControlPlaneWorkPacket | null;
@@ -991,6 +1054,30 @@ export type OperatorRunEvaluation = {
   failurePatterns: string[];
 };
 
+export type OperatorRunComparativeAnalysisSectionId =
+  | "executive_summary"
+  | "delivery_and_outputs"
+  | "validation_and_quality"
+  | "interventions_and_retries"
+  | "blockers_and_conflicts"
+  | "risks_and_follow_ups"
+  | "recommended_improvements";
+
+export type OperatorRunComparativeAnalysisSection = {
+  id: OperatorRunComparativeAnalysisSectionId;
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type OperatorRunComparativeAnalysis = {
+  status: "completed" | "failed";
+  headline: string;
+  sections: OperatorRunComparativeAnalysisSection[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
 export type OperatorRunJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -1034,6 +1121,7 @@ export type OperatorRunView = {
   mergeDecisions: OperatorRunMergeDecision[];
   delivery: OperatorRunDeliverySummary | null;
   evaluation: OperatorRunEvaluation | null;
+  comparativeAnalysis: OperatorRunComparativeAnalysis | null;
   planningArtifacts: OperatorRunPlanningArtifact[];
   delegationPackets: OperatorRunDelegationPacket[];
   journal: OperatorRunJournalEntry[];
@@ -1247,6 +1335,101 @@ export type FactoryStagePlanStatus = "planned" | "active" | "completed" | "faile
 
 export type FactoryExpansionDecisionOutcome = "expanded" | "complete" | "no_change";
 
+export type FactoryDelegationPath =
+  | "orchestrator_to_production_lead"
+  | "production_lead_to_specialist"
+  | "specialist_to_execution";
+
+export type FactoryDelegationStatus =
+  | "planned"
+  | "created"
+  | "accepted"
+  | "completed"
+  | "failed";
+
+export type FactoryOwnershipAssignment = {
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  ownerRole: Extract<ControlPlaneRole, "specialist_dev" | "execution_subagent">;
+  ownerAgentId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
+  acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+};
+
+export type FactoryOwnershipPlan = {
+  stageId: FactoryStageId;
+  phaseId: string;
+  summary: string;
+  productionLeadAgentId: string;
+  productionLeadAgentTypeId: "production_lead";
+  storyAssignments: FactoryOwnershipAssignment[];
+  taskAssignments: FactoryOwnershipAssignment[];
+  updatedAt: string;
+};
+
+export type FactoryDependencyGraphNode = {
+  id: string;
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  label: string;
+};
+
+export type FactoryDependencyGraphEdge = {
+  fromNodeId: string;
+  toNodeId: string;
+  dependencyIds: string[];
+  rationale: string;
+};
+
+export type FactoryDependencyGraph = {
+  stageId: FactoryStageId;
+  phaseId: string;
+  nodes: FactoryDependencyGraphNode[];
+  edges: FactoryDependencyGraphEdge[];
+  updatedAt: string;
+};
+
+export type FactoryDelegationBrief = {
+  id: string;
+  stageId: FactoryStageId;
+  phaseId: string;
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  delegationPath: FactoryDelegationPath;
+  status: FactoryDelegationStatus;
+  fromRole: ControlPlaneRole;
+  fromAgentId: string;
+  fromAgentTypeId: TeamSkillId | null;
+  toRole: ControlPlaneRole;
+  toAgentId: string;
+  toAgentTypeId: TeamSkillId | null;
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
+  scopeSummary: string;
+  acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+  artifactId: string;
+  handoffId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FactoryBacklogItem = {
   id: string;
   stageId: FactoryStageId;
@@ -1316,6 +1499,9 @@ export type FactoryRunState = {
   completionContract: FactoryCompletionContract;
   stagePlans: FactoryStagePlan[];
   expansionDecisions: FactoryExpansionDecision[];
+  ownershipPlans: FactoryOwnershipPlan[];
+  dependencyGraphs: FactoryDependencyGraph[];
+  delegationBriefs: FactoryDelegationBrief[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;
@@ -1474,6 +1660,7 @@ export type SubmitTaskInput = {
   title?: string;
   threadId?: string;
   parentRunId?: string | null;
+  operatingMode?: RequestedOperatingMode | null;
   simulateFailure?: boolean;
   toolRequest?: RepoToolRequest | null;
   attachments?: RunAttachment[];
@@ -1509,6 +1696,8 @@ export type AgentRunResult = {
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
   factory?: FactoryRunState | null;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -1535,6 +1724,8 @@ export type AgentRunRecord = {
   parentRunId: string | null;
   title: string | null;
   instruction: string;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   simulateFailure: boolean;
   toolRequest: RepoToolRequest | null;
   attachments: RunAttachment[];

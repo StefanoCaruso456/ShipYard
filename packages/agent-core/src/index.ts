@@ -98,6 +98,14 @@ export {
   syncFactoryStagePlans
 } from "./runtime/factoryBacklog";
 export {
+  buildFactoryTaskDelegationRuntimeContext,
+  findFactoryDelegationBrief,
+  findFactoryDependencyGraph,
+  findFactoryOwnershipPlan,
+  findFactoryPhaseContract,
+  syncFactoryDelegationState
+} from "./runtime/factoryDelegation";
+export {
   applyFactoryStageExpansion,
   detectFactoryStageMissingWork
 } from "./runtime/factoryPlanner";
@@ -115,6 +123,15 @@ export {
   normalizeFactoryRunState,
   syncFactoryRunState
 } from "./runtime/factoryMode";
+export {
+  getOperatingModePolicy,
+  isOperatingMode,
+  isRequestedOperatingMode,
+  normalizeRequestedOperatingMode,
+  operatingModes,
+  requestedOperatingModes,
+  resolveOperatingMode
+} from "./runtime/operatingMode";
 export { deriveOperatorRunView } from "./runtime/operatorView";
 export { deriveRunCloseout } from "./runtime/runCloseout";
 export {
@@ -131,6 +148,12 @@ export {
   createRebuildState,
   normalizeRebuildState
 } from "./runtime/rebuildState";
+export {
+  buildRepoIntelligenceIndex,
+  clearRepoIntelligenceCache,
+  resolveRelevantFilesForRun,
+  suggestRelevantFilesFromRepo
+} from "./runtime/repoIntelligence";
 export {
   controlPlaneArtifactSchema,
   controlPlaneConflictSchema,
@@ -186,6 +209,13 @@ export type {
   SharedRoleContext
 } from "./context/types";
 export type {
+  RepoIntelligenceIndexedFile,
+  RepoIntelligenceSnapshot,
+  RepoIntelligenceSymbol,
+  RepoIntelligenceSymbolKind,
+  RepoRelevantFileSuggestion
+} from "./runtime/repoIntelligence";
+export type {
   RollbackResult,
   RunEvent,
   RunEventType,
@@ -219,6 +249,7 @@ export type {
   ControlPlaneDeliverySummaryLink,
   ControlPlaneDecomposedTask,
   ControlPlaneDelegationBriefArtifactPayload,
+  ControlPlaneDataFlowSpecArtifactPayload,
   ControlPlaneEntityKind,
   ControlPlaneEntityStatus,
   ControlPlaneFailureReportArtifactPayload,
@@ -239,6 +270,8 @@ export type {
   ControlPlaneSubtaskBreakdownArtifactPayload,
   ControlPlaneTaskNode,
   ControlPlaneTransition,
+  ControlPlaneUserFlowAudience,
+  ControlPlaneUserFlowSpecArtifactPayload,
   ControlPlaneValidationState,
   ControlPlaneWorkPacket,
   DeliverySummaryLinkKind,
@@ -250,10 +283,18 @@ export type {
   FactoryBacklogItem,
   FactoryBacklogItemSource,
   FactoryBacklogItemStatus,
+  FactoryDelegationBrief,
+  FactoryDelegationPath,
+  FactoryDelegationStatus,
   FactoryDeploymentState,
   FactoryDeploymentProviderId,
+  FactoryDependencyGraph,
+  FactoryDependencyGraphEdge,
+  FactoryDependencyGraphNode,
   FactoryExpansionDecision,
   FactoryExpansionDecisionOutcome,
+  FactoryOwnershipAssignment,
+  FactoryOwnershipPlan,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
@@ -310,6 +351,8 @@ export type {
   OperatorRunStageId,
   OperatorRunStageStatus,
   OperatorRunView,
+  OperatingMode,
+  RequestedOperatingMode,
   OrchestrationStepKind,
   Phase,
   PhaseExecutionInput,
@@ -382,6 +425,9 @@ export type {
   RepoToolName,
   RepoToolset,
   RepoToolSuccess,
+  RunTerminalCommandInput,
+  RunTerminalCommandResult,
   SearchRepoInput,
-  SearchRepoResult
+  SearchRepoResult,
+  TerminalCommandCategory
 } from "./tools/repo/types";

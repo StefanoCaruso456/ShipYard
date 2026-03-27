@@ -6,3 +6,5 @@ dist
 coverage
 .vercel
 .shipyard/
+playwright-report
+test-results
