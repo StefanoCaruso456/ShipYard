@@ -6,12 +6,14 @@ import type {
   FactoryCompletionContract,
   FactoryDeploymentProviderId,
   FactoryDeploymentState,
+  FactoryExpansionDecision,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
   FactoryDefinitionOfDone,
   FactoryRunInput,
   FactoryRunState,
+  FactoryStagePlan,
   FactoryStackSummary,
   FactoryStageId,
   FactoryStackTemplateId,
@@ -24,6 +26,12 @@ import type {
   SubmitTaskInput,
   ValidationGate
 } from "./types";
+import {
+  buildFactoryImplementationScopeCriteria,
+  buildInitialFactoryStagePlans,
+  normalizeFactoryStagePlans,
+  syncFactoryStagePlans
+} from "./factoryBacklog";
 
 const DEFAULT_REPOSITORY_PROVIDER: FactoryRepositoryProviderId = "github";
 const DEFAULT_REPOSITORY_VISIBILITY: FactoryRepositoryVisibility = "private";
@@ -227,6 +235,11 @@ export function createFactoryRunState(options: {
     repository,
     deployment
   });
+  const stagePlans = buildInitialFactoryStagePlans({
+    appSpec: completionContract.appSpec,
+    completionContract,
+    createdAt
+  });
 
   return {
     version: 1,
@@ -237,6 +250,8 @@ export function createFactoryRunState(options: {
     repository,
     deployment,
     completionContract,
+    stagePlans,
+    expansionDecisions: [],
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -339,6 +354,14 @@ export function normalizeFactoryRunState(
     repository,
     deployment
   });
+  const createdAt = value.createdAt?.trim() || new Date().toISOString();
+  const updatedAt = value.updatedAt?.trim() || value.createdAt?.trim() || new Date().toISOString();
+  const stagePlans = normalizeFactoryStagePlans({
+    value: value.stagePlans,
+    completionContract,
+    createdAt
+  });
+  const expansionDecisions = normalizeFactoryExpansionDecisions(value.expansionDecisions);
 
   return {
     version: 1,
@@ -349,6 +372,8 @@ export function normalizeFactoryRunState(
     repository,
     deployment,
     completionContract,
+    stagePlans,
+    expansionDecisions,
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -366,8 +391,8 @@ export function normalizeFactoryRunState(
           }))
       : [],
     deliverySummary: value.deliverySummary?.trim() ? value.deliverySummary.trim() : null,
-    createdAt: value.createdAt?.trim() || new Date().toISOString(),
-    updatedAt: value.updatedAt?.trim() || value.createdAt?.trim() || new Date().toISOString()
+    createdAt,
+    updatedAt
   };
 }
 
@@ -417,12 +442,19 @@ export function syncFactoryRunState(options: {
     repository,
     deployment
   });
+  const stagePlans = syncFactoryStagePlans({
+    stagePlans: normalized.stagePlans,
+    phaseExecution: options.phaseExecution ?? null,
+    completionContract,
+    updatedAt
+  });
 
   const nextFactory: FactoryRunState = {
     ...normalized,
     repository,
     deployment,
     completionContract,
+    stagePlans,
     currentStage,
     deliverySummary,
     updatedAt
@@ -936,6 +968,7 @@ function buildFactoryPhaseContracts(
   appSpec: FactoryAppSpec
 ): FactoryCompletionContract["phases"] {
   const implementationTaskIds = FACTORY_IMPLEMENTATION_TASK_IDS[appSpec.stack.templateId];
+  const implementationScopeCriteria = buildFactoryImplementationScopeCriteria(appSpec);
 
   return [
     {
@@ -1033,7 +1066,8 @@ function buildFactoryPhaseContracts(
         {
           id: "factory-implementation:core-flow",
           description: "Core product flow implemented."
-        }
+        },
+        ...implementationScopeCriteria.completionCriteria
       ],
       verificationCriteria: [
         {
@@ -1056,7 +1090,8 @@ function buildFactoryPhaseContracts(
           evidenceKind: "task_evidence",
           target: implementationTaskIds.flowTaskId,
           expectedValue: "Core product flow implemented."
-        }
+        },
+        ...implementationScopeCriteria.verificationCriteria
       ]
     },
     {
@@ -1361,6 +1396,38 @@ function normalizeFactoryStageId(value: string | null | undefined): FactoryStage
     value === "delivery"
     ? value
     : "intake";
+}
+
+function normalizeFactoryExpansionDecisions(
+  value: FactoryExpansionDecision[] | null | undefined
+): FactoryExpansionDecision[] {
+  return Array.isArray(value)
+    ? value
+        .filter(
+          (decision) =>
+            decision &&
+            typeof decision.stageId === "string" &&
+            typeof decision.phaseId === "string" &&
+            typeof decision.decidedAt === "string"
+        )
+        .map((decision) => ({
+          id:
+            decision.id?.trim() ||
+            `factory-expansion:${decision.stageId}:${decision.outcome}:${decision.decidedAt}`,
+          stageId: normalizeFactoryStageId(decision.stageId),
+          phaseId: decision.phaseId.trim(),
+          outcome:
+            decision.outcome === "expanded" || decision.outcome === "complete"
+              ? decision.outcome
+              : "no_change",
+          summary: decision.summary?.trim() || "Factory expansion decision recorded.",
+          rationale: decision.rationale?.trim() || "Factory expansion decision recorded.",
+          missingCompletionCriterionIds: uniqueStrings(decision.missingCompletionCriterionIds ?? []),
+          missingVerificationCriterionIds: uniqueStrings(decision.missingVerificationCriterionIds ?? []),
+          addedBacklogItemIds: uniqueStrings(decision.addedBacklogItemIds ?? []),
+          decidedAt: decision.decidedAt.trim()
+        }))
+    : [];
 }
 
 function normalizeFactoryArtifactKind(value: string): FactoryArtifact["kind"] {

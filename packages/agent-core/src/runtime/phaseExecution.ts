@@ -23,6 +23,7 @@ import {
 } from "./types";
 import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
+import { applyFactoryStageExpansion } from "./factoryPlanner";
 import {
   createControlPlaneState,
   recordPhaseCompleted,
@@ -233,47 +234,88 @@ export async function executePhaseExecutionRun(
     beginPhase(workingRun, phaseExecution, phase);
     await persist(options.persistRun, workingRun);
 
-    for (const story of phase.userStories) {
-      if (story.status === "completed") {
-        continue;
-      }
+    let phaseComplete = false;
 
-      let storyComplete = false;
+    while (!phaseComplete) {
+      for (const story of phase.userStories) {
+        if (story.status === "completed") {
+          continue;
+        }
 
-      while (!storyComplete) {
-        beginStory(workingRun, phaseExecution, phase, story);
-        await persist(options.persistRun, workingRun);
+        let storyComplete = false;
 
-        for (const task of story.tasks) {
-          if (task.status === "completed") {
+        while (!storyComplete) {
+          beginStory(workingRun, phaseExecution, phase, story);
+          await persist(options.persistRun, workingRun);
+
+          for (const task of story.tasks) {
+            if (task.status === "completed") {
+              continue;
+            }
+
+            await executeTask({
+              run: workingRun,
+              phaseExecution,
+              phase,
+              story,
+              task,
+              instructionRuntime: options.instructionRuntime,
+              contextAssembler: options.contextAssembler,
+              executeRun: options.executeRun,
+              persistRun: options.persistRun,
+              getRuntimeStatus: options.getRuntimeStatus
+            });
+          }
+
+          const storyGateResults = evaluateStoryGates(story);
+          story.lastValidationResults = storyGateResults;
+
+          if (storyGateResults.every((gate) => gate.success)) {
+            story.status = "completed";
+            story.failureReason = null;
+            recordStoryCompleted(workingRun.controlPlane ?? null, story, storyGateResults);
+            appendRunEvents(
+              workingRun,
+              ...createGateEvents({
+                type: "validation_gate_passed",
+                phaseId: phase.id,
+                storyId: story.id,
+                taskId: null,
+                results: storyGateResults
+              }),
+              {
+                at: new Date().toISOString(),
+                type: "story_completed",
+                phaseId: phase.id,
+                storyId: story.id,
+                taskId: null,
+                message: `Story ${story.title} completed.`,
+                retryCount: story.retryCount
+              }
+            );
+            updateProgress(phaseExecution);
+            workingRun.rollingSummary = {
+              text: `Story completed: ${story.title}`,
+              updatedAt: new Date().toISOString(),
+              source: "result"
+            };
+            await persist(options.persistRun, workingRun);
+            storyComplete = true;
             continue;
           }
 
-          await executeTask({
-            run: workingRun,
-            phaseExecution,
-            phase,
-            story,
-            task,
-            instructionRuntime: options.instructionRuntime,
-            contextAssembler: options.contextAssembler,
-            executeRun: options.executeRun,
-            persistRun: options.persistRun,
-            getRuntimeStatus: options.getRuntimeStatus
-          });
-        }
+          const storyFailureMessage = storyGateResults
+            .filter((gate) => !gate.success)
+            .map((gate) => gate.message)
+            .join(" ");
 
-        const storyGateResults = evaluateStoryGates(story);
-        story.lastValidationResults = storyGateResults;
-
-        if (storyGateResults.every((gate) => gate.success)) {
-          story.status = "completed";
-          story.failureReason = null;
-          recordStoryCompleted(workingRun.controlPlane ?? null, story, storyGateResults);
+          story.status = "failed";
+          story.failureReason = storyFailureMessage;
+          recordStoryFailed(workingRun.controlPlane ?? null, story, storyFailureMessage, storyGateResults);
           appendRunEvents(
             workingRun,
             ...createGateEvents({
-              type: "validation_gate_passed",
+              type: "validation_gate_failed",
               phaseId: phase.id,
               storyId: story.id,
               taskId: null,
@@ -281,125 +323,143 @@ export async function executePhaseExecutionRun(
             }),
             {
               at: new Date().toISOString(),
-              type: "story_completed",
+              type: "story_failed",
               phaseId: phase.id,
               storyId: story.id,
               taskId: null,
-              message: `Story ${story.title} completed.`,
+              message: storyFailureMessage,
               retryCount: story.retryCount
             }
           );
           updateProgress(phaseExecution);
           workingRun.rollingSummary = {
-            text: `Story completed: ${story.title}`,
+            text: `Story validation failed: ${storyFailureMessage}`,
             updatedAt: new Date().toISOString(),
+            source: "failure"
+          };
+          await persist(options.persistRun, workingRun);
+
+          if (story.retryCount >= phaseExecution.retryPolicy.maxStoryRetries) {
+            phase.status = "failed";
+            phase.failureReason = storyFailureMessage;
+            phaseExecution.status = "failed";
+            phaseExecution.lastFailureReason = storyFailureMessage;
+            recordPhaseFailed(
+              workingRun.controlPlane ?? null,
+              phase,
+              storyFailureMessage,
+              phase.lastValidationResults ?? []
+            );
+            updateProgress(phaseExecution);
+            await persist(options.persistRun, workingRun);
+            throw createExecutionFailure(storyFailureMessage);
+          }
+
+          story.retryCount += 1;
+          resetStoryTasks(story);
+          story.status = "pending";
+          recordStoryRetry(
+            workingRun.controlPlane ?? null,
+            story,
+            story.retryCount,
+            `Retrying story ${story.title} after validation gate failure.`
+          );
+          appendRunEvents(workingRun, {
+            at: new Date().toISOString(),
+            type: "retry_scheduled",
+            phaseId: phase.id,
+            storyId: story.id,
+            taskId: null,
+            message: `Retrying story ${story.title} after validation gate failure.`,
+            retryCount: story.retryCount
+          });
+          updateProgress(phaseExecution);
+          workingRun.rollingSummary = {
+            text: `Retry scheduled for story ${story.title}`,
+            updatedAt: new Date().toISOString(),
+            source: "retry"
+          };
+          await persist(options.persistRun, workingRun);
+        }
+      }
+
+      const factoryExpansion =
+        workingRun.factory && phase.id === "factory-implementation"
+          ? applyFactoryStageExpansion({
+              factory: workingRun.factory,
+              phaseExecution,
+              stageId: "implementation",
+              updatedAt: new Date().toISOString()
+            })
+          : null;
+
+      if (factoryExpansion) {
+        workingRun.factory = factoryExpansion.factory;
+        workingRun.phaseExecution = factoryExpansion.phaseExecution;
+        workingRun.controlPlane = syncControlPlaneState(
+          workingRun.controlPlane ?? createControlPlaneState(factoryExpansion.phaseExecution),
+          factoryExpansion.phaseExecution
+        );
+        updateProgress(factoryExpansion.phaseExecution);
+
+        if (factoryExpansion.expanded && factoryExpansion.decision) {
+          workingRun.rollingSummary = {
+            text: factoryExpansion.decision.summary,
+            updatedAt: factoryExpansion.decision.decidedAt,
             source: "result"
           };
           await persist(options.persistRun, workingRun);
-          storyComplete = true;
           continue;
         }
+      }
 
-        const storyFailureMessage = storyGateResults
+      phase.lastValidationResults = evaluatePhaseGates(phase);
+
+      if (!phase.lastValidationResults.every((gate) => gate.success)) {
+        const phaseFailureMessage = phase.lastValidationResults
           .filter((gate) => !gate.success)
           .map((gate) => gate.message)
           .join(" ");
-
-        story.status = "failed";
-        story.failureReason = storyFailureMessage;
-        recordStoryFailed(workingRun.controlPlane ?? null, story, storyFailureMessage, storyGateResults);
+        phase.status = "failed";
+        phase.failureReason = phaseFailureMessage;
+        phaseExecution.status = "failed";
+        phaseExecution.lastFailureReason = phaseFailureMessage;
+        recordPhaseFailed(
+          workingRun.controlPlane ?? null,
+          phase,
+          phaseFailureMessage,
+          phase.lastValidationResults
+        );
         appendRunEvents(
           workingRun,
           ...createGateEvents({
             type: "validation_gate_failed",
             phaseId: phase.id,
-            storyId: story.id,
+            storyId: null,
             taskId: null,
-            results: storyGateResults
+            results: phase.lastValidationResults
           }),
           {
             at: new Date().toISOString(),
-            type: "story_failed",
+            type: "phase_failed",
             phaseId: phase.id,
-            storyId: story.id,
+            storyId: null,
             taskId: null,
-            message: storyFailureMessage,
-            retryCount: story.retryCount
+            message: phaseFailureMessage
           }
         );
         updateProgress(phaseExecution);
-        workingRun.rollingSummary = {
-          text: `Story validation failed: ${storyFailureMessage}`,
-          updatedAt: new Date().toISOString(),
-          source: "failure"
-        };
         await persist(options.persistRun, workingRun);
-
-        if (story.retryCount >= phaseExecution.retryPolicy.maxStoryRetries) {
-          phase.status = "failed";
-          phase.failureReason = storyFailureMessage;
-          phaseExecution.status = "failed";
-          phaseExecution.lastFailureReason = storyFailureMessage;
-          recordPhaseFailed(
-            workingRun.controlPlane ?? null,
-            phase,
-            storyFailureMessage,
-            phase.lastValidationResults ?? []
-          );
-          updateProgress(phaseExecution);
-          await persist(options.persistRun, workingRun);
-          throw createExecutionFailure(storyFailureMessage);
-        }
-
-        story.retryCount += 1;
-        resetStoryTasks(story);
-        story.status = "pending";
-        recordStoryRetry(
-          workingRun.controlPlane ?? null,
-          story,
-          story.retryCount,
-          `Retrying story ${story.title} after validation gate failure.`
-        );
-        appendRunEvents(workingRun, {
-          at: new Date().toISOString(),
-          type: "retry_scheduled",
-          phaseId: phase.id,
-          storyId: story.id,
-          taskId: null,
-          message: `Retrying story ${story.title} after validation gate failure.`,
-          retryCount: story.retryCount
-        });
-        updateProgress(phaseExecution);
-        workingRun.rollingSummary = {
-          text: `Retry scheduled for story ${story.title}`,
-          updatedAt: new Date().toISOString(),
-          source: "retry"
-        };
-        await persist(options.persistRun, workingRun);
+        throw createExecutionFailure(phaseFailureMessage);
       }
-    }
 
-    phase.lastValidationResults = evaluatePhaseGates(phase);
-
-    if (!phase.lastValidationResults.every((gate) => gate.success)) {
-      const phaseFailureMessage = phase.lastValidationResults
-        .filter((gate) => !gate.success)
-        .map((gate) => gate.message)
-        .join(" ");
-      phase.status = "failed";
-      phase.failureReason = phaseFailureMessage;
-      phaseExecution.status = "failed";
-      phaseExecution.lastFailureReason = phaseFailureMessage;
-      recordPhaseFailed(
-        workingRun.controlPlane ?? null,
-        phase,
-        phaseFailureMessage,
-        phase.lastValidationResults
-      );
+      phase.status = "completed";
+      phase.failureReason = null;
+      recordPhaseCompleted(workingRun.controlPlane ?? null, phase, phase.lastValidationResults);
       appendRunEvents(
         workingRun,
         ...createGateEvents({
-          type: "validation_gate_failed",
+          type: "validation_gate_passed",
           phaseId: phase.id,
           storyId: null,
           taskId: null,
@@ -407,46 +467,22 @@ export async function executePhaseExecutionRun(
         }),
         {
           at: new Date().toISOString(),
-          type: "phase_failed",
+          type: "phase_completed",
           phaseId: phase.id,
           storyId: null,
           taskId: null,
-          message: phaseFailureMessage
+          message: `Phase ${phase.name} completed.`
         }
       );
       updateProgress(phaseExecution);
+      workingRun.rollingSummary = {
+        text: `Phase completed: ${phase.name}`,
+        updatedAt: new Date().toISOString(),
+        source: "result"
+      };
       await persist(options.persistRun, workingRun);
-      throw createExecutionFailure(phaseFailureMessage);
+      phaseComplete = true;
     }
-
-    phase.status = "completed";
-    phase.failureReason = null;
-    recordPhaseCompleted(workingRun.controlPlane ?? null, phase, phase.lastValidationResults);
-    appendRunEvents(
-      workingRun,
-      ...createGateEvents({
-        type: "validation_gate_passed",
-        phaseId: phase.id,
-        storyId: null,
-        taskId: null,
-        results: phase.lastValidationResults
-      }),
-      {
-        at: new Date().toISOString(),
-        type: "phase_completed",
-        phaseId: phase.id,
-        storyId: null,
-        taskId: null,
-        message: `Phase ${phase.name} completed.`
-      }
-    );
-    updateProgress(phaseExecution);
-    workingRun.rollingSummary = {
-      text: `Phase completed: ${phase.name}`,
-      updatedAt: new Date().toISOString(),
-      source: "result"
-    };
-    await persist(options.persistRun, workingRun);
   }
 
   phaseExecution.status = "completed";

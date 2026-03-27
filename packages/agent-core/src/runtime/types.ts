@@ -1217,6 +1217,7 @@ export type FactoryContractEvidenceKind =
   | "phase_status"
   | "artifact_status"
   | "task_evidence"
+  | "backlog_item_status"
   | "delivery_summary"
   | "result_summary"
   | "repository_link";
@@ -1317,6 +1318,60 @@ export type FactoryCompletionContract = {
   phases: FactoryPhaseContract[];
 };
 
+export type FactoryBacklogItemStatus = "planned" | "active" | "completed" | "failed";
+
+export type FactoryBacklogItemSource = "seed" | "expansion";
+
+export type FactoryStagePlanStatus = "planned" | "active" | "completed" | "failed";
+
+export type FactoryExpansionDecisionOutcome = "expanded" | "complete" | "no_change";
+
+export type FactoryBacklogItem = {
+  id: string;
+  stageId: FactoryStageId;
+  title: string;
+  description: string;
+  instruction: string;
+  expectedOutcome: string;
+  storyId: string | null;
+  taskId: string | null;
+  acceptanceCriteria: string[];
+  completionCriterionIds: string[];
+  verificationCriterionIds: string[];
+  preferredSpecialistAgentTypeId: SpecialistAgentTypeId | null;
+  requiredSpecialistAgentTypeId: SpecialistAgentTypeId | null;
+  source: FactoryBacklogItemSource;
+  status: FactoryBacklogItemStatus;
+  rationale: string;
+  createdAt: string;
+  insertedAt: string | null;
+  completedAt: string | null;
+};
+
+export type FactoryStagePlan = {
+  stageId: FactoryStageId;
+  phaseId: string;
+  title: string;
+  summary: string;
+  status: FactoryStagePlanStatus;
+  backlog: FactoryBacklogItem[];
+  lastExpandedAt: string | null;
+  updatedAt: string;
+};
+
+export type FactoryExpansionDecision = {
+  id: string;
+  stageId: FactoryStageId;
+  phaseId: string;
+  outcome: FactoryExpansionDecisionOutcome;
+  summary: string;
+  rationale: string;
+  missingCompletionCriterionIds: string[];
+  missingVerificationCriterionIds: string[];
+  addedBacklogItemIds: string[];
+  decidedAt: string;
+};
+
 export type FactoryArtifact = {
   id: string;
   kind: FactoryArtifactKind;
@@ -1338,6 +1393,8 @@ export type FactoryRunState = {
   repository: FactoryRepositoryState;
   deployment: FactoryDeploymentState;
   completionContract: FactoryCompletionContract;
+  stagePlans: FactoryStagePlan[];
+  expansionDecisions: FactoryExpansionDecision[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;

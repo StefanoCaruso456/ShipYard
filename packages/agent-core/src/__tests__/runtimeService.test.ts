@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
+import { compileFactoryTaskSubmission } from "../index";
 import { createAgentRuntime } from "../runtime/createAgentRuntime";
 import { createPersistentRuntimeService } from "../runtime/createPersistentRuntimeService";
 import { normalizeExternalSyncState } from "../runtime/externalRecordSync";
@@ -782,6 +783,83 @@ test("persistent runtime retries task validation gates before failing the full r
   assert.ok(completedRun.events.some((event) => event.type === "validation_gate_failed"));
   assert.ok(completedRun.events.some((event) => event.type === "retry_scheduled"));
   assert.ok(completedRun.events.some((event) => event.type === "coordination_conflict_detected"));
+});
+
+test("persistent runtime expands factory implementation backlog until contract scope is satisfied", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  submission.phaseExecution?.phases.forEach((phase) => {
+    delete phase.approvalGate;
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+  const implementationPhase = completedRun.phaseExecution?.phases.find(
+    (phase) => phase.id === "factory-implementation"
+  );
+  const implementationPlan = completedRun.factory?.stagePlans.find(
+    (plan) => plan.stageId === "implementation"
+  );
+
+  assert.ok(implementationPhase);
+  assert.ok((implementationPhase?.userStories.length ?? 0) > 2);
+  assert.ok(
+    completedRun.factory?.expansionDecisions.some((decision) => decision.outcome === "expanded")
+  );
+  assert.ok(
+    implementationPlan?.backlog.some(
+      (item) => item.source === "expansion" && item.status === "completed"
+    )
+  );
+  assert.ok(
+    startedInstructions.some(
+      (instruction) =>
+        instruction.includes("Onboarding workflow implemented.") ||
+        instruction.includes("Operations workspace implemented.")
+    )
+  );
 });
 
 test("persistent runtime tracks rebuild targets artifacts and interventions for ship rebuild runs", async () => {
