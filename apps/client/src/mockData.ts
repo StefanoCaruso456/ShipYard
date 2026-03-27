@@ -517,7 +517,8 @@ function buildRuntimeThreadMessages(
             formatDateTime(run.result.completedAt),
             "default",
             [],
-            trace
+            trace,
+            trace ? "before" : "after"
           )
         );
         traceAttached = Boolean(trace);
@@ -534,7 +535,8 @@ function buildRuntimeThreadMessages(
           formatDateTime(run.completedAt ?? run.createdAt),
           "danger",
           [],
-          trace
+          trace,
+          trace ? "before" : "after"
         )
       );
       traceAttached = Boolean(trace);
@@ -909,7 +911,8 @@ function createMessage(
   timestamp: string,
   tone: ThreadMessage["tone"],
   attachments: ThreadMessage["attachments"] = [],
-  trace?: ThreadMessage["trace"]
+  trace?: ThreadMessage["trace"],
+  tracePlacement: ThreadMessage["tracePlacement"] = "after"
 ): ThreadMessage {
   return {
     id,
@@ -919,7 +922,8 @@ function createMessage(
     timestamp,
     tone,
     attachments,
-    trace
+    trace,
+    tracePlacement
   };
 }
 

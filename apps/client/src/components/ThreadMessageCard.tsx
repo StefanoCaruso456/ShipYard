@@ -43,6 +43,12 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
   const [expanded, setExpanded] = useState(!collapsible);
   const blocks = useMemo(() => parseMessageBlocks(message.body), [message.body]);
   const preview = useMemo(() => createCollapsedPreview(message.body), [message.body]);
+  const traceBlock =
+    message.trace && message.trace.items.length > 0 ? (
+      <div className="message__trace">
+        <AgentActivityFeed activity={message.trace.items} status={message.trace.status} />
+      </div>
+    ) : null;
 
   return (
     <article
@@ -55,6 +61,8 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
       </div>
 
       <div className="message__body">
+        {message.tracePlacement === "before" ? traceBlock : null}
+
         {expanded ? (
           <div className="message__content">
             {blocks.map((block, index) => renderBlock(block, `${message.id}-block-${index}`))}
@@ -79,11 +87,7 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
           </div>
         ) : null}
 
-        {message.trace && message.trace.items.length > 0 ? (
-          <div className="message__trace">
-            <AgentActivityFeed activity={message.trace.items} status={message.trace.status} />
-          </div>
-        ) : null}
+        {message.tracePlacement !== "before" ? traceBlock : null}
       </div>
     </article>
   );
