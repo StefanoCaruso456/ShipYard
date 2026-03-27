@@ -91,6 +91,17 @@ export {
   reconcileExternalSyncState
 } from "./runtime/externalRecordSync";
 export {
+  buildFactoryImplementationScopeCriteria,
+  buildInitialFactoryStagePlans,
+  createFactoryStoryFromBacklogItem,
+  normalizeFactoryStagePlans,
+  syncFactoryStagePlans
+} from "./runtime/factoryBacklog";
+export {
+  applyFactoryStageExpansion,
+  detectFactoryStageMissingWork
+} from "./runtime/factoryPlanner";
+export {
   compileFactoryTaskSubmission,
   createFactoryRunState,
   factoryDeploymentProviderIds,
@@ -236,13 +247,20 @@ export type {
   FactoryArtifact,
   FactoryArtifactKind,
   FactoryArtifactStatus,
+  FactoryBacklogItem,
+  FactoryBacklogItemSource,
+  FactoryBacklogItemStatus,
   FactoryDeploymentState,
   FactoryDeploymentProviderId,
+  FactoryExpansionDecision,
+  FactoryExpansionDecisionOutcome,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
   FactoryRunInput,
   FactoryRunState,
+  FactoryStagePlan,
+  FactoryStagePlanStatus,
   FactoryStackSummary,
   FactoryStackTemplateId,
   FactoryStageId,
