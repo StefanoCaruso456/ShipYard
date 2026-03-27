@@ -83,8 +83,7 @@ export function Composer({
   const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording">("idle");
   const [steerDrawerOpen, setSteerDrawerOpen] = useState(false);
   const steerEnabled = Boolean(steerMode);
-  const factoryModeSupported =
-    !steerEnabled && backendConnected && project?.kind === "live";
+  const factoryModeSupported = !steerEnabled && backendConnected;
   const terminalModeEnabled = !steerEnabled && workflowMode !== "factory";
   const hasDraftContent =
     composerMode === "terminal"
@@ -562,13 +561,17 @@ export function Composer({
                   />
                 </label>
 
-                {!factoryModeSupported ? (
+                {!backendConnected ? (
                   <p className="composer__factory-note">
-                    Factory Mode runs through the live runtime project and needs the backend to be connected.
+                    Factory Mode needs the live runtime backend to be connected before the build can start.
+                  </p>
+                ) : project?.kind === "live" ? (
+                  <p className="composer__factory-note">
+                    Shipyard will create a fresh isolated workspace for this app before the run starts.
                   </p>
                 ) : (
                   <p className="composer__factory-note">
-                    Shipyard will create a fresh isolated workspace for this app before the run starts.
+                    Factory Mode launches a fresh Shipyard Runtime thread, even when you start from a connected local project.
                   </p>
                 )}
               </div>
