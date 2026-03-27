@@ -1035,6 +1035,7 @@ export type ThreadMessage = {
     status: RuntimeTaskStatus;
     items: AgentActivityItem[];
   };
+  tracePlacement?: "before" | "after";
 };
 
 export type RuntimeTerminalCommandEntry = {
