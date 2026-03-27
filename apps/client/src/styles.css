@@ -1970,6 +1970,10 @@ a {
   margin-top: 0.15rem;
 }
 
+.message__trace {
+  margin-top: 0.35rem;
+}
+
 .message--assistant .message__meta,
 .message--system .message__meta {
   margin-bottom: 0;

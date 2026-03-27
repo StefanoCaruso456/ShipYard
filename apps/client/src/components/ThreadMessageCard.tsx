@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 
 import type { ThreadMessage } from "../types";
+import { AgentActivityFeed } from "./AgentActivityFeed";
 import { AttachmentPreviewList } from "./AttachmentPreviewList";
 
 type ThreadMessageCardProps = {
@@ -75,6 +76,12 @@ export function ThreadMessageCard({ message }: ThreadMessageCardProps) {
         {message.attachments && message.attachments.length > 0 ? (
           <div className="message__attachments">
             <AttachmentPreviewList attachments={message.attachments} variant="inline" />
+          </div>
+        ) : null}
+
+        {message.trace && message.trace.items.length > 0 ? (
+          <div className="message__trace">
+            <AgentActivityFeed activity={message.trace.items} status={message.trace.status} />
           </div>
         ) : null}
       </div>
