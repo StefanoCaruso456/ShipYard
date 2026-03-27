@@ -108,6 +108,10 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.equal(state.ownershipPlans.length, 4);
   assert.equal(state.dependencyGraphs.length, 4);
   assert.ok(state.delegationBriefs.length > 0);
+  assert.equal(state.phaseVerificationResults.length, 4);
+  assert.equal(state.phaseUnlockDecisions.length, 4);
+  assert.equal(state.phaseVerificationResults[0]?.status, "pending");
+  assert.equal(state.phaseUnlockDecisions[0]?.outcome, "blocked");
   assert.equal(
     state.stagePlans.find((plan) => plan.stageId === "implementation")?.backlog.length,
     2
@@ -308,6 +312,14 @@ test("syncFactoryRunState advances stage and artifact status from phase executio
     synced?.stagePlans.find((plan) => plan.stageId === "implementation")?.status,
     "active"
   );
+  assert.equal(
+    synced?.phaseVerificationResults.find((result) => result.phaseId === "factory-intake")?.status,
+    "failed"
+  );
+  assert.equal(
+    synced?.phaseUnlockDecisions.find((decision) => decision.phaseId === "factory-intake")?.outcome,
+    "blocked"
+  );
 });
 
 test("applyFactoryStageExpansion adds implementation backlog items for uncovered contract scope", () => {
@@ -443,4 +455,87 @@ test("normalizeFactoryRunState backfills the completion contract for legacy stat
       (criterion) => criterion.evidenceKind === "delivery_summary"
     )
   );
+});
+
+test("syncFactoryRunState blocks phase unlock when typed verification evidence is missing", () => {
+  const compiled = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+  const factoryInput = normalizeFactoryRunInput(compiled.factory);
+  const phaseExecution = normalizePhaseExecutionInput(compiled.phaseExecution);
+
+  assert.ok(factoryInput);
+  assert.ok(phaseExecution);
+
+  const factoryState = createFactoryRunState({
+    input: factoryInput,
+    productBrief: compiled.instruction,
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+  const intakePhase = phaseExecution.phases[0];
+  const intakeStory = intakePhase?.userStories[0];
+
+  assert.ok(intakePhase);
+  assert.ok(intakeStory);
+
+  intakePhase.status = "in_progress";
+  intakeStory.status = "completed";
+  intakeStory.tasks.forEach((task) => {
+    task.status = "completed";
+    task.result = {
+      mode: "placeholder-execution",
+      summary: "Completed work.",
+      instructionEcho: task.instruction,
+      skillId: "test-skill",
+      completedAt: "2026-03-27T00:00:00.000Z"
+    };
+  });
+  phaseExecution.current = {
+    phaseId: "factory-intake",
+    storyId: "story-product-brief",
+    taskId: null
+  };
+
+  const synced = syncFactoryRunState({
+    factory: factoryState,
+    phaseExecution,
+    status: "running",
+    updatedAt: "2026-03-27T00:00:00.000Z"
+  });
+  const intakeVerification = synced?.phaseVerificationResults.find(
+    (result) => result.phaseId === "factory-intake"
+  );
+  const intakeUnlock = synced?.phaseUnlockDecisions.find(
+    (decision) => decision.phaseId === "factory-intake"
+  );
+
+  assert.equal(intakeVerification?.status, "failed");
+  assert.ok(
+    intakeVerification?.failedVerificationCriterionIds.includes("factory-intake:product-brief-evidence")
+  );
+  assert.equal(intakeUnlock?.outcome, "blocked");
+  assert.ok(intakeUnlock?.blockingCriterionIds.includes("factory-intake:product-brief-evidence"));
 });

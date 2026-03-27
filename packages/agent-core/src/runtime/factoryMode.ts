@@ -34,6 +34,7 @@ import {
   syncFactoryStagePlans
 } from "./factoryBacklog";
 import { syncFactoryDelegationState } from "./factoryDelegation";
+import { syncFactoryQualityGateState } from "./factoryQualityGates";
 
 const DEFAULT_REPOSITORY_PROVIDER: FactoryRepositoryProviderId = "github";
 const DEFAULT_REPOSITORY_VISIBILITY: FactoryRepositoryVisibility = "private";
@@ -258,6 +259,8 @@ export function createFactoryRunState(options: {
     ownershipPlans: [],
     dependencyGraphs: [],
     delegationBriefs: [],
+    phaseVerificationResults: [],
+    phaseUnlockDecisions: [],
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -310,10 +313,19 @@ export function createFactoryRunState(options: {
     updatedAt: createdAt
   };
 
-  return {
+  const delegatedFactory = {
     ...factory,
     ...syncFactoryDelegationState({
       factory,
+      phaseExecution: options.phaseExecution ?? null,
+      updatedAt: createdAt
+    })
+  };
+
+  return {
+    ...delegatedFactory,
+    ...syncFactoryQualityGateState({
+      factory: delegatedFactory,
       phaseExecution: options.phaseExecution ?? null,
       updatedAt: createdAt
     })
@@ -392,6 +404,8 @@ export function normalizeFactoryRunState(
     ownershipPlans: [],
     dependencyGraphs: [],
     delegationBriefs: [],
+    phaseVerificationResults: [],
+    phaseUnlockDecisions: [],
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -413,10 +427,18 @@ export function normalizeFactoryRunState(
     updatedAt
   };
 
-  return {
+  const delegatedFactory = {
     ...factory,
     ...syncFactoryDelegationState({
       factory,
+      updatedAt
+    })
+  };
+
+  return {
+    ...delegatedFactory,
+    ...syncFactoryQualityGateState({
+      factory: delegatedFactory,
       updatedAt
     })
   };
@@ -445,10 +467,13 @@ export function syncFactoryRunState(options: {
     options.updatedAt?.trim() ||
     options.rollingSummary?.updatedAt ||
     normalized.updatedAt;
-  const deliverySummary =
-    options.resultSummary?.trim() ||
-    (options.status === "completed" ? options.rollingSummary?.text?.trim() || null : null) ||
-    normalized.deliverySummary;
+  const deliverySummary = resolveFactoryDeliverySummary({
+    phaseExecution: options.phaseExecution ?? null,
+    status: options.status ?? null,
+    resultSummary: options.resultSummary ?? null,
+    rollingSummary: options.rollingSummary ?? null,
+    fallback: normalized.deliverySummary
+  });
   const repository: FactoryRepositoryState = {
     ...normalized.repository,
     url: repositoryLink?.url ?? normalized.repository.url,
@@ -485,6 +510,8 @@ export function syncFactoryRunState(options: {
     ownershipPlans: [],
     dependencyGraphs: [],
     delegationBriefs: [],
+    phaseVerificationResults: [],
+    phaseUnlockDecisions: [],
     currentStage,
     deliverySummary,
     updatedAt
@@ -497,12 +524,21 @@ export function syncFactoryRunState(options: {
     deliverySummary
   });
 
-  return {
+  const delegatedFactory = {
     ...nextFactory,
     ...syncFactoryDelegationState({
       factory: nextFactory,
       phaseExecution: options.phaseExecution ?? null,
       controlPlane: options.controlPlane ?? null,
+      updatedAt
+    })
+  };
+
+  return {
+    ...delegatedFactory,
+    ...syncFactoryQualityGateState({
+      factory: delegatedFactory,
+      phaseExecution: options.phaseExecution ?? null,
       updatedAt
     })
   };
@@ -1262,8 +1298,16 @@ function buildFactoryArtifacts(
     deliverySummary: string | null;
   }
 ): FactoryArtifact[] {
-  const bootstrapCompleted = hasPhaseCompleted(input.phaseExecution, "factory-bootstrap");
-  const deliveryCompleted = hasPhaseCompleted(input.phaseExecution, "factory-delivery");
+  const bootstrapCompleted =
+    hasTaskCompleted(input.phaseExecution, "task-repository-bootstrap") ||
+    hasPhaseCompleted(input.phaseExecution, "factory-bootstrap");
+  const deploymentHandoffCompleted =
+    hasTaskCompleted(input.phaseExecution, "task-deployment-handoff") ||
+    hasPhaseCompleted(input.phaseExecution, "factory-delivery");
+  const deliverySummaryCompleted =
+    Boolean(factory.deliverySummary?.trim()) ||
+    hasTaskCompleted(input.phaseExecution, "task-delivery-summary") ||
+    (input.status === "completed" && Boolean(input.deliverySummary?.trim()));
   const repositorySummary = factory.repository.url
     ? `Repository target ${formatRepositoryLabel(factory.repository.owner, factory.repository.name)} is attached.`
     : `Repository target ${formatRepositoryLabel(factory.repository.owner, factory.repository.name)} is staged in the local factory workspace.`;
@@ -1297,7 +1341,7 @@ function buildFactoryArtifacts(
       title: "Deployment handoff",
       summary: `Prepare the ${factory.deployment.provider} handoff for ${factory.appName}.`,
       status:
-        input.status === "completed" || deliveryCompleted
+        deploymentHandoffCompleted
           ? "completed"
           : factory.currentStage === "delivery"
             ? "active"
@@ -1315,7 +1359,7 @@ function buildFactoryArtifacts(
         input.deliverySummary?.trim() ||
         `Summarize the shipped factory workspace for ${factory.appName}.`,
       status:
-        input.status === "completed" && input.deliverySummary
+        deliverySummaryCompleted
           ? "completed"
           : factory.currentStage === "delivery"
             ? "active"
@@ -1377,6 +1421,63 @@ function hasPhaseCompleted(
   return Boolean(
     phaseExecution?.phases.find((phase) => phase.id === phaseId && phase.status === "completed")
   );
+}
+
+function hasTaskCompleted(
+  phaseExecution: PhaseExecutionState | null | undefined,
+  taskId: string
+) {
+  if (!phaseExecution) {
+    return false;
+  }
+
+  return phaseExecution.phases.some((phase) =>
+    phase.userStories.some((story) =>
+      story.tasks.some((task) => task.id === taskId && task.status === "completed")
+    )
+  );
+}
+
+function resolveFactoryDeliverySummary(input: {
+  phaseExecution: PhaseExecutionState | null;
+  status: AgentRunStatus | null;
+  resultSummary: string | null;
+  rollingSummary: RollingSummary | null;
+  fallback: string | null;
+}) {
+  const deliveryTaskSummary = findFactoryTaskSummary(input.phaseExecution, "task-delivery-summary");
+
+  return (
+    deliveryTaskSummary ||
+    (input.status === "completed" ? input.resultSummary?.trim() || null : null) ||
+    (input.status === "completed" ? input.rollingSummary?.text?.trim() || null : null) ||
+    input.fallback
+  );
+}
+
+function findFactoryTaskSummary(
+  phaseExecution: PhaseExecutionState | null,
+  taskId: string
+) {
+  if (!phaseExecution) {
+    return null;
+  }
+
+  for (const phase of phaseExecution.phases) {
+    for (const story of phase.userStories) {
+      const task = story.tasks.find((candidate) => candidate.id === taskId);
+
+      if (task?.result?.summary?.trim()) {
+        return task.result.summary.trim();
+      }
+
+      if (task?.result?.responseText?.trim()) {
+        return task.result.responseText.trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 function mergeProjectLinks(

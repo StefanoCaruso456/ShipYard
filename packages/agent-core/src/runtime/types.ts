@@ -1152,6 +1152,17 @@ export type FactoryContractEvidenceKind =
   | "result_summary"
   | "repository_link";
 
+export type FactoryQualityGateStatus = "pending" | "passed" | "failed";
+
+export type FactoryPhaseVerificationStatus = "pending" | "passed" | "failed";
+
+export type FactoryPhaseRecoveryAction =
+  | "retry_current_phase"
+  | "reassign_owner"
+  | "expand_backlog";
+
+export type FactoryPhaseUnlockOutcome = "unlocked" | "blocked";
+
 export type FactoryCompletionCriterion = {
   id: string;
   description: string;
@@ -1351,6 +1362,61 @@ export type FactoryDelegationBrief = {
   updatedAt: string;
 };
 
+export type FactoryQualityGateResult = {
+  criterionId: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  description: string;
+  evidenceKind: FactoryContractEvidenceKind;
+  target: string;
+  expectedValue: string | null;
+  actualValue: string | null;
+  status: FactoryQualityGateStatus;
+  success: boolean;
+  message: string;
+  sourceTaskIds: string[];
+  sourceStoryIds: string[];
+  sourceArtifactIds: string[];
+  sourceBacklogItemIds: string[];
+  evaluatedAt: string;
+};
+
+export type FactoryPhaseVerificationResult = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  status: FactoryPhaseVerificationStatus;
+  summary: string;
+  candidatePhaseStatus: PhaseStatus;
+  completionSatisfied: boolean;
+  verified: boolean;
+  satisfiedCompletionCriterionIds: string[];
+  missingCompletionCriterionIds: string[];
+  satisfiedVerificationCriterionIds: string[];
+  pendingVerificationCriterionIds: string[];
+  failedVerificationCriterionIds: string[];
+  qualityGateResults: FactoryQualityGateResult[];
+  recoveryActions: FactoryPhaseRecoveryAction[];
+  evaluatedAt: string;
+  verifiedAt: string | null;
+};
+
+export type FactoryPhaseUnlockDecision = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  nextPhaseId: string | null;
+  nextStageId: FactoryStageId | null;
+  verificationResultId: string;
+  verificationStatus: FactoryPhaseVerificationStatus;
+  outcome: FactoryPhaseUnlockOutcome;
+  decidedBy: "coordinator";
+  summary: string;
+  blockingCriterionIds: string[];
+  recoveryActions: FactoryPhaseRecoveryAction[];
+  decidedAt: string;
+};
+
 export type FactoryBacklogItem = {
   id: string;
   stageId: FactoryStageId;
@@ -1423,6 +1489,8 @@ export type FactoryRunState = {
   ownershipPlans: FactoryOwnershipPlan[];
   dependencyGraphs: FactoryDependencyGraph[];
   delegationBriefs: FactoryDelegationBrief[];
+  phaseVerificationResults: FactoryPhaseVerificationResult[];
+  phaseUnlockDecisions: FactoryPhaseUnlockDecision[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;
@@ -1633,6 +1701,12 @@ export type AgentRunResult = {
     gateKind: ApprovalGateKind;
     phaseId: string;
     summary: string;
+  } | {
+    reason: "factory_quality_gate";
+    phaseId: string;
+    decisionId: string;
+    summary: string;
+    recoveryActions: FactoryPhaseRecoveryAction[];
   } | null;
 };
 

@@ -566,7 +566,7 @@ test("operator view assembles delivery summary and evaluation for completed runs
   assert.equal(operatorView.delivery?.status, "completed");
   assert.match(
     operatorView.delivery?.headline ?? "",
-    /Delivery summary prepared|Phase Delivery completed|Shipped/i
+    /Delivery summary prepared|Story Ship the final closeout completed|Phase Delivery completed|Shipped/i
   );
   assert.ok(operatorView.delivery?.outputs.includes("Operator summary shipped"));
   assert.equal(operatorView.delivery?.links.length, 2);

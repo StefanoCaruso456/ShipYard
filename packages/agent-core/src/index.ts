@@ -106,6 +106,12 @@ export {
   syncFactoryDelegationState
 } from "./runtime/factoryDelegation";
 export {
+  evaluateFactoryPhaseVerification,
+  findFactoryPhaseUnlockDecision,
+  findFactoryPhaseVerificationResult,
+  syncFactoryQualityGateState
+} from "./runtime/factoryQualityGates";
+export {
   applyFactoryStageExpansion,
   detectFactoryStageMissingWork
 } from "./runtime/factoryPlanner";
@@ -270,6 +276,13 @@ export type {
   FactoryExpansionDecisionOutcome,
   FactoryOwnershipAssignment,
   FactoryOwnershipPlan,
+  FactoryPhaseRecoveryAction,
+  FactoryPhaseUnlockDecision,
+  FactoryPhaseUnlockOutcome,
+  FactoryPhaseVerificationResult,
+  FactoryPhaseVerificationStatus,
+  FactoryQualityGateResult,
+  FactoryQualityGateStatus,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,

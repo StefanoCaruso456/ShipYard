@@ -809,6 +809,12 @@ test("persistent runtime expands factory implementation backlog until contract s
         instruction.includes("Operations workspace implemented.")
     )
   );
+  assert.ok(
+    completedRun.factory?.phaseVerificationResults.every((result) => result.status === "passed")
+  );
+  assert.ok(
+    completedRun.factory?.phaseUnlockDecisions.every((decision) => decision.outcome === "unlocked")
+  );
 });
 
 test("persistent runtime injects factory delegation context into live task execution", async () => {
@@ -907,6 +913,120 @@ test("persistent runtime injects factory delegation context into live task execu
     )?.acceptanceTargetIds,
     ["factory-implementation:app-shell"]
   );
+});
+
+test("persistent runtime keeps a Factory phase open when typed verification evidence fails", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: "Completed work.",
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  submission.phaseExecution?.phases.forEach((phase) => {
+    delete phase.approvalGate;
+
+    if (phase.id === "factory-intake") {
+      phase.userStories.forEach((story) => {
+        story.validationGates = [
+          {
+            id: `${story.id}-all-tasks-completed-only`,
+            description: "All intake tasks completed.",
+            kind: "all_tasks_completed"
+          }
+        ];
+      story.tasks.forEach((task) => {
+          task.expectedOutcome = "Completed work.";
+          task.validationGates = [
+            {
+              id: `${task.id}-task-completed-only`,
+              description: "Task completed.",
+              kind: "task_completed"
+            }
+          ];
+        });
+      });
+    }
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  let pausedRun: ReturnType<typeof runtimeService.getRun> = null;
+
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const current = runtimeService.getRun(run.id);
+
+    if (current?.status === "paused") {
+      pausedRun = current;
+      break;
+    }
+
+    if (current?.status === "completed" || current?.status === "failed") {
+      assert.fail(
+        `Expected paused factory run, received ${current.status}: ${current.error?.message ?? "no error"}`
+      );
+    }
+
+    await tick();
+  }
+
+  assert.ok(pausedRun, `Expected factory run ${run.id} to pause on verification failure.`);
+  const intakeVerification = pausedRun.factory?.phaseVerificationResults.find(
+    (result) => result.phaseId === "factory-intake"
+  );
+  const intakeUnlock = pausedRun.factory?.phaseUnlockDecisions.find(
+    (decision) => decision.phaseId === "factory-intake"
+  );
+
+  assert.equal(pausedRun.phaseExecution?.phases[0]?.status, "blocked");
+  assert.equal(pausedRun.phaseExecution?.phases[1]?.status, "pending");
+  assert.equal(pausedRun.phaseExecution?.status, "blocked");
+  assert.equal(intakeVerification?.status, "failed");
+  assert.equal(intakeUnlock?.outcome, "blocked");
+  assert.ok(
+    intakeUnlock?.recoveryActions.includes("retry_current_phase")
+  );
+  assert.ok(pausedRun.events.some((event) => event.type === "retry_scheduled"));
+  assert.ok(
+    startedInstructions.every((instruction) => !instruction.includes("Repository foundation scaffolded."))
+  );
+  assert.ok(startedInstructions.filter((instruction) => instruction.includes("Product brief")).length >= 2);
 });
 
 test("persistent runtime tracks rebuild targets artifacts and interventions for ship rebuild runs", async () => {
