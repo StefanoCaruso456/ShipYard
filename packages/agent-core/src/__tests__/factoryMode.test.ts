@@ -5,6 +5,7 @@ import {
   compileFactoryTaskSubmission,
   createFactoryRunState,
   normalizeFactoryRunInput,
+  normalizeFactoryRunState,
   normalizePhaseExecutionInput,
   syncFactoryRunState
 } from "../index";
@@ -47,12 +48,75 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
   assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate?.kind, "architecture");
   assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate?.kind, "implementation");
   assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate?.kind, "deployment");
+  assert.deepEqual(compiled.phaseExecution?.phases[0]?.completionCriteria, [
+    "Product brief captured.",
+    "Factory scope aligned around the first deliverable slice."
+  ]);
+  assert.ok(
+    compiled.phaseExecution?.phases[2]?.verificationCriteria?.some((criterion) =>
+      criterion.includes("Core product flow implemented.")
+    ) ?? false
+  );
   assert.ok(
     compiled.context?.constraints.some((constraint) =>
       constraint.includes("connected runtime folder")
     )
   );
   assert.ok(compiled.context?.relevantFiles.some((file) => file.path === "README.md"));
+  assert.ok(
+    compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-completion-contract" &&
+        item.content.includes("Definition of done:")
+    )
+  );
+});
+
+test("createFactoryRunState stores a typed completion contract", () => {
+  const factoryInput = normalizeFactoryRunInput({
+    appName: "Ops Portal",
+    stackTemplateId: "nextjs_supabase_vercel",
+    repository: {
+      provider: "github",
+      owner: "acme",
+      name: "ops-portal",
+      visibility: "private",
+      baseBranch: "main"
+    },
+    deployment: {
+      provider: "vercel",
+      projectName: "ops-portal",
+      environment: "production"
+    }
+  });
+
+  assert.ok(factoryInput);
+
+  const state = createFactoryRunState({
+    input: factoryInput,
+    productBrief: "Build a customer onboarding portal for operations teams.",
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260326"
+  });
+
+  assert.equal(state.completionContract.appSpec.appName, "Ops Portal");
+  assert.equal(state.completionContract.appSpec.stack.templateId, "nextjs_supabase_vercel");
+  assert.equal(state.completionContract.definitionOfDone.completionCriteria.length, 4);
+  assert.equal(state.completionContract.phases.length, 4);
+  assert.deepEqual(
+    state.completionContract.phases.map((phase) => phase.phaseId),
+    [
+      "factory-intake",
+      "factory-bootstrap",
+      "factory-implementation",
+      "factory-delivery"
+    ]
+  );
+  assert.ok(
+    state.completionContract.phases.every(
+      (phase) =>
+        phase.completionCriteria.length > 0 && phase.verificationCriteria.length > 0
+    )
+  );
 });
 
 test("syncFactoryRunState advances stage and artifact status from phase execution", () => {
@@ -204,6 +268,8 @@ test("syncFactoryRunState advances stage and artifact status from phase executio
 
   assert.equal(synced?.currentStage, "implementation");
   assert.equal(synced?.repository.url, "https://github.com/acme/ops-portal");
+  assert.equal(synced?.completionContract.appSpec.repository.name, "ops-portal");
+  assert.equal(synced?.completionContract.phases[2]?.stageId, "implementation");
   assert.equal(
     synced?.artifacts.find((artifact) => artifact.kind === "repository")?.status,
     "completed"
@@ -211,5 +277,51 @@ test("syncFactoryRunState advances stage and artifact status from phase executio
   assert.equal(
     synced?.artifacts.find((artifact) => artifact.kind === "bootstrap_plan")?.status,
     "completed"
+  );
+});
+
+test("normalizeFactoryRunState backfills the completion contract for legacy state", () => {
+  const normalized = normalizeFactoryRunState({
+    version: 1,
+    mode: "factory",
+    appName: "Legacy Portal",
+    productBrief: "Build a legacy onboarding portal.",
+    stack: {
+      templateId: "nextjs_railway_postgres",
+      label: "Next.js + Railway Postgres",
+      frontend: "Next.js App Router",
+      backend: "Route Handlers and server utilities",
+      data: "Railway Postgres",
+      deployment: "Railway"
+    },
+    repository: {
+      provider: "github",
+      owner: "acme",
+      name: "legacy-portal",
+      visibility: "private",
+      baseBranch: "main",
+      url: null,
+      localPath: "/tmp/factory-workspaces/legacy-portal"
+    },
+    deployment: {
+      provider: "railway",
+      projectName: "legacy-portal",
+      environment: "production",
+      url: null
+    },
+    currentStage: "bootstrap",
+    artifacts: [],
+    deliverySummary: null,
+    createdAt: "2026-03-26T00:00:00.000Z",
+    updatedAt: "2026-03-26T00:00:00.000Z"
+  } as unknown as Parameters<typeof normalizeFactoryRunState>[0]);
+
+  assert.ok(normalized);
+  assert.equal(normalized?.completionContract.appSpec.appName, "Legacy Portal");
+  assert.equal(normalized?.completionContract.phases[1]?.phaseId, "factory-bootstrap");
+  assert.ok(
+    normalized?.completionContract.definitionOfDone.verificationCriteria.some(
+      (criterion) => criterion.evidenceKind === "delivery_summary"
+    )
   );
 });
