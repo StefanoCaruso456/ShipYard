@@ -340,7 +340,8 @@ function summarizeRunTrace(
     rebuild: readRebuildSummary(rootSpan?.metadata),
     controlPlane: readControlPlaneSummary(rootSpan?.metadata),
     delivery: readDeliverySummary(rootSpan?.metadata),
-    evaluation: readEvaluationSummary(rootSpan?.metadata)
+    evaluation: readEvaluationSummary(rootSpan?.metadata),
+    comparativeAnalysis: readComparativeAnalysisSummary(rootSpan?.metadata)
   };
 }
 
@@ -999,5 +1000,19 @@ function readEvaluationSummary(metadata: TraceMetadata | undefined) {
     failureReportCount: readMetadataNumber(metadata.evaluationFailureReportCount) ?? 0,
     failurePatternCount: readMetadataNumber(metadata.evaluationFailurePatternCount) ?? 0,
     bottlenecks: collectMetadataStringArray(metadata.evaluationBottlenecks)
+  };
+}
+
+function readComparativeAnalysisSummary(metadata: TraceMetadata | undefined) {
+  if (!metadata || readMetadataString(metadata.comparativeAnalysisStatus) == null) {
+    return null;
+  }
+
+  return {
+    status: readMetadataString(metadata.comparativeAnalysisStatus),
+    headline: readMetadataString(metadata.comparativeAnalysisHeadline),
+    sectionCount: readMetadataNumber(metadata.comparativeAnalysisSectionCount) ?? 0,
+    sourceArtifactCount: readMetadataNumber(metadata.comparativeAnalysisSourceArtifactCount) ?? 0,
+    sectionTitles: collectMetadataStringArray(metadata.comparativeAnalysisSectionTitles)
   };
 }

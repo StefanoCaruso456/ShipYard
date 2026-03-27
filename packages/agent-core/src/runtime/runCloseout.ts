@@ -4,6 +4,7 @@ import type {
   ControlPlaneDeliverySummaryArtifactPayload,
   ControlPlaneFailureReportArtifactPayload,
   ExternalRecordLink,
+  OperatorRunComparativeAnalysis,
   OperatorRunDeliveryLink,
   OperatorRunDeliverySummary,
   OperatorRunEvaluation,
@@ -13,10 +14,15 @@ import type {
 export function deriveRunCloseout(run: AgentRunRecord): {
   delivery: OperatorRunDeliverySummary | null;
   evaluation: OperatorRunEvaluation | null;
+  comparativeAnalysis: OperatorRunComparativeAnalysis | null;
 } {
+  const delivery = deriveDeliverySummary(run);
+  const evaluation = deriveEvaluation(run);
+
   return {
-    delivery: deriveDeliverySummary(run),
-    evaluation: deriveEvaluation(run)
+    delivery,
+    evaluation,
+    comparativeAnalysis: deriveComparativeAnalysis(run, delivery, evaluation)
   };
 }
 
@@ -155,6 +161,178 @@ function deriveEvaluation(run: AgentRunRecord): OperatorRunEvaluation | null {
     scorecard,
     bottlenecks,
     failurePatterns
+  };
+}
+
+function deriveComparativeAnalysis(
+  run: AgentRunRecord,
+  delivery: OperatorRunDeliverySummary | null,
+  evaluation: OperatorRunEvaluation | null
+): OperatorRunComparativeAnalysis | null {
+  if ((run.status !== "completed" && run.status !== "failed") || (!delivery && !evaluation)) {
+    return null;
+  }
+
+  const failureArtifacts = getArtifactsByPayloadKind<ControlPlaneFailureReportArtifactPayload>(
+    run,
+    "failure_report"
+  );
+  const validationArtifactCount =
+    run.controlPlane?.artifacts.filter((artifact) => artifact.kind === "validation_report").length ?? 0;
+  const retryCount = evaluation?.scorecard.retryCount ?? countRetries(run);
+  const interventionCount = evaluation?.scorecard.interventionCount ?? run.controlPlane?.interventions.length ?? 0;
+  const blockerCount = evaluation?.scorecard.blockerCount ?? run.controlPlane?.blockers.length ?? 0;
+  const conflictCount = evaluation?.scorecard.conflictCount ?? run.controlPlane?.conflicts.length ?? 0;
+  const mergeDecisionCount =
+    evaluation?.scorecard.mergeDecisionCount ?? run.controlPlane?.mergeDecisions.length ?? 0;
+  const sourceArtifactIds = uniqueStrings([
+    ...(delivery?.sourceArtifactIds ?? []),
+    ...(run.rebuild?.artifactLog.map((artifact) => artifact.sourceArtifactId) ?? [])
+  ]);
+  const updatedAt =
+    delivery?.updatedAt ??
+    run.completedAt ??
+    run.rebuild?.lastArtifactAt ??
+    run.rollingSummary?.updatedAt ??
+    null;
+  const validationFailures = uniqueStrings(
+    failureArtifacts.flatMap((artifact) => artifact.payload.validationFailures)
+  ).slice(0, 4);
+  const validationSignals = uniqueStrings([
+    ...validationFailures,
+    ...(run.lastValidationResult?.errors ?? []),
+    ...(run.lastValidationResult?.warnings ?? [])
+  ]).slice(0, 4);
+  const openBlockerSummaries = getOpenBlockerSummaries(run).slice(0, 4);
+  const openConflictSummaries = getOpenConflictSummaries(run).slice(0, 4);
+  const mergeDecisionSummaries = uniqueStrings(
+    run.controlPlane?.mergeDecisions.map((decision) => decision.summary) ?? []
+  ).slice(0, 4);
+  const interventionSummaries = uniqueStrings(
+    [
+      ...(run.controlPlane?.interventions.map((intervention) => intervention.summary) ?? []),
+      ...(run.rebuild?.interventionLog.map((intervention) => intervention.summary) ?? [])
+    ].filter(isNonEmptyString)
+  ).slice(0, 4);
+  const deliveryHighlights = uniqueStrings(
+    [
+      ...(delivery?.outputs ?? []),
+      ...(delivery?.links.map((link) => `${link.label}: ${link.url}`) ?? [])
+    ].filter(isNonEmptyString)
+  ).slice(0, 4);
+  const recommendationHighlights = uniqueStrings(
+    [
+      ...(evaluation?.bottlenecks.map((item) => `${item.label}: ${item.detail}`) ?? []),
+      ...(evaluation?.failurePatterns ?? []),
+      ...(delivery?.followUps ?? [])
+    ].filter(isNonEmptyString)
+  ).slice(0, 4);
+
+  return {
+    status: run.status === "failed" ? "failed" : "completed",
+    headline:
+      delivery?.headline ??
+      run.result?.summary?.trim() ??
+      run.error?.message?.trim() ??
+      "Comparative analysis prepared from runtime evidence.",
+    sections: [
+      {
+        id: "executive_summary",
+        title: "Executive summary",
+        summary:
+          delivery?.headline ??
+          (run.status === "failed"
+            ? "The run closed with unresolved failure evidence."
+            : "The run closed with a complete delivery summary."),
+        highlights: compactHighlights([
+          `Run status: ${humanizeKey(run.status)}.`,
+          run.rebuild ? `Rebuild target: ${describeRebuildTarget(run)}.` : null,
+          sourceArtifactIds.length > 0
+            ? `Referenced evidence artifacts: ${sourceArtifactIds.length}.`
+            : "No closeout artifact ids were attached to this report."
+        ])
+      },
+      {
+        id: "delivery_and_outputs",
+        title: "Delivery and outputs",
+        summary: delivery
+          ? `Closeout recorded ${delivery.outputs.length} output(s) and ${delivery.links.length} delivery link(s).`
+          : "Delivery output has not been assembled yet.",
+        highlights: compactHighlights(
+          deliveryHighlights.length > 0 ? deliveryHighlights : ["No delivery outputs were captured for this run."]
+        )
+      },
+      {
+        id: "validation_and_quality",
+        title: "Validation and quality",
+        summary: `Validation finished with status ${humanizeKey(
+          run.rebuild?.validationStatus ?? run.validationStatus
+        )} and ${validationArtifactCount} validation artifact(s).`,
+        highlights: compactHighlights(
+          validationSignals.length > 0
+            ? validationSignals
+            : ["No explicit validation failure details were recorded."]
+        )
+      },
+      {
+        id: "interventions_and_retries",
+        title: "Interventions and retries",
+        summary: `${retryCount} retr${retryCount === 1 ? "y" : "ies"} and ${interventionCount} intervention${
+          interventionCount === 1 ? "" : "s"
+        } were recorded before closeout.`,
+        highlights: compactHighlights(
+          interventionSummaries.length > 0
+            ? interventionSummaries
+            : ["The run completed without recorded interventions."]
+        )
+      },
+      {
+        id: "blockers_and_conflicts",
+        title: "Blockers and conflicts",
+        summary: `${blockerCount} blocker${blockerCount === 1 ? "" : "s"}, ${conflictCount} conflict${
+          conflictCount === 1 ? "" : "s"
+        }, and ${mergeDecisionCount} merge decision${mergeDecisionCount === 1 ? "" : "s"} shaped the final state.`,
+        highlights: compactHighlights(
+          [
+            ...openBlockerSummaries,
+            ...openConflictSummaries,
+            ...mergeDecisionSummaries
+          ].length > 0
+            ? [...openBlockerSummaries, ...openConflictSummaries, ...mergeDecisionSummaries]
+            : ["No blockers or conflicts remained open at closeout."]
+        )
+      },
+      {
+        id: "risks_and_follow_ups",
+        title: "Risks and follow-ups",
+        summary: `${delivery?.risks.length ?? 0} risk${delivery?.risks.length === 1 ? "" : "s"} and ${
+          delivery?.followUps.length ?? 0
+        } follow-up${delivery?.followUps.length === 1 ? "" : "s"} were surfaced for the operator.`,
+        highlights: compactHighlights(
+          [
+            ...(delivery?.risks ?? []),
+            ...(delivery?.followUps ?? [])
+          ].length > 0
+            ? [...(delivery?.risks ?? []), ...(delivery?.followUps ?? [])]
+            : ["No additional risks or follow-ups were attached to closeout."]
+        )
+      },
+      {
+        id: "recommended_improvements",
+        title: "Recommended improvements",
+        summary:
+          recommendationHighlights.length > 0
+            ? "The runtime surfaced concrete improvements from retries, bottlenecks, and closeout evidence."
+            : "No additional improvement themes were inferred from the current evidence.",
+        highlights: compactHighlights(
+          recommendationHighlights.length > 0
+            ? recommendationHighlights
+            : ["Closeout did not surface additional improvement work beyond the recorded delivery summary."]
+        )
+      }
+    ],
+    sourceArtifactIds,
+    updatedAt
   };
 }
 
@@ -391,6 +569,10 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values)];
 }
 
+function compactHighlights(values: Array<string | null | undefined>) {
+  return uniqueStrings(values.filter(isNonEmptyString)).slice(0, 4);
+}
+
 function isFailureEvent(type: string) {
   return (
     type.includes("failed") ||
@@ -410,4 +592,12 @@ function humanizeKey(value: string) {
 
 function isNonEmptyString(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function describeRebuildTarget(run: AgentRunRecord) {
+  if (!run.rebuild) {
+    return null;
+  }
+
+  return run.rebuild.target.label?.trim() || run.rebuild.target.objective?.trim() || run.rebuild.target.shipId;
 }

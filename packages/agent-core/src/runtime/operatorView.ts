@@ -87,6 +87,7 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
     mergeDecisions,
     delivery: closeout.delivery,
     evaluation: closeout.evaluation,
+    comparativeAnalysis: closeout.comparativeAnalysis,
     planningArtifacts,
     delegationPackets,
     journal: buildJournal(run)
