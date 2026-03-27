@@ -18,6 +18,11 @@ export function ProjectRepositoryButton({
   const isGitHub = repository?.provider === "github" && Boolean(repository.url);
   const heading = isGitHub ? "GitHub connection" : "Repository connection";
   const subtitle = repository?.label ?? project.folder?.displayPath ?? project.name;
+  const triggerLabel = isGitHub
+    ? "GitHub"
+    : repository
+      ? "Repository"
+      : "Repo";
 
   useEffect(() => {
     if (!isOpen) {
@@ -70,6 +75,7 @@ export function ProjectRepositoryButton({
         title={repository?.url ?? "Repository connection"}
       >
         {isGitHub ? <GitHubIcon /> : <RepositoryIcon />}
+        <span className="project-repository-button__label">{triggerLabel}</span>
         <ChevronIcon />
       </button>
 
