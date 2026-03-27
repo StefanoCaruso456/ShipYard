@@ -371,6 +371,7 @@ export type RuntimeTraceSpanType =
   | "phase"
   | "story"
   | "task"
+  | "sync"
   | "coordinator"
   | "handoff"
   | "merge"

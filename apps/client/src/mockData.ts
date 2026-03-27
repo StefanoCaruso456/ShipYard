@@ -949,11 +949,11 @@ function buildRuntimeActivity(
       activity = events.map((event, index) => ({
         id: `${task.id}-event-${index}`,
         kind: "event" as const,
-        badge: deriveEventBadge(event.type),
-        label: deriveEventLabel(event.type),
+        badge: deriveEventBadge({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
+        label: deriveEventLabel({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
         detail: event.message,
         timestamp: formatDateTime(event.at),
-        tone: deriveEventTone(event.type),
+        tone: deriveEventTone({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
         depth: 0,
         surface: "secondary" as const,
         sourceType: "summary" as const,
@@ -1035,7 +1035,9 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
   }
 
   if (traceSummary?.validation.status) {
-    meta.push(`validation ${traceSummary.validation.status}`);
+    if (traceSummary.validation.status !== "not_run") {
+      meta.push(`validation ${traceSummary.validation.status}`);
+    }
   }
 
   if (traceSummary?.tools.count) {
@@ -1057,6 +1059,28 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
   if (traceSummary?.retries.count) {
     meta.push(
       `${traceSummary.retries.count} retr${traceSummary.retries.count === 1 ? "y" : "ies"}`
+    );
+  }
+
+  if (traceSummary?.orchestration?.nextAction) {
+    meta.push(`next ${humanizeOrchestrationAction(traceSummary.orchestration.nextAction)}`);
+  }
+
+  if (
+    traceSummary?.orchestration?.stepRetryCount != null &&
+    traceSummary.orchestration.maxStepRetries != null
+  ) {
+    meta.push(
+      `step retry ${traceSummary.orchestration.stepRetryCount}/${traceSummary.orchestration.maxStepRetries}`
+    );
+  }
+
+  if (
+    traceSummary?.orchestration?.replanCount != null &&
+    traceSummary.orchestration.maxReplans != null
+  ) {
+    meta.push(
+      `replan ${traceSummary.orchestration.replanCount}/${traceSummary.orchestration.maxReplans}`
     );
   }
 
@@ -1240,11 +1264,11 @@ function visitTraceSpan(
     activity.push({
       id: event.id,
       kind: "event",
-      badge: deriveEventBadge(event.name),
-      label: deriveEventLabel(event.name),
-      detail: event.message?.trim() || "Runtime event recorded.",
+      badge: deriveEventBadge(event),
+      label: deriveEventLabel(event),
+      detail: deriveEventDetail(event),
       timestamp: formatDateTime(event.at),
-      tone: deriveEventTone(event.name),
+      tone: deriveEventTone(event),
       depth: depth + 1,
       surface: "secondary",
       sourceType: span.spanType,
@@ -1264,6 +1288,8 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
       return capitalize(readString(span.metadata.role) ?? "Role");
     case "coordinator":
       return "Coordinator";
+    case "sync":
+      return "Sync";
     case "handoff":
       return "Handoff";
     case "merge":
@@ -1294,9 +1320,11 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
 function deriveSpanLabel(span: RuntimeTraceSpan) {
   switch (span.spanType) {
     case "role":
-      return deriveRoleLabel(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name));
+      return deriveRoleLabel(span);
     case "coordinator":
       return "Coordinator decision";
+    case "sync":
+      return "Mirrored external records";
     case "handoff":
       return "Created role handoff";
     case "merge":
@@ -1333,6 +1361,10 @@ function deriveSpanDetail(span: RuntimeTraceSpan) {
 
   if (span.spanType === "coordinator") {
     return span.outputSummary?.trim() || "Recorded the next runtime branch decision.";
+  }
+
+  if (span.spanType === "sync") {
+    return span.outputSummary?.trim() || "Synced the latest runtime state to external records.";
   }
 
   if (span.spanType === "handoff") {
@@ -1375,6 +1407,26 @@ function deriveSpanTone(span: RuntimeTraceSpan): AgentActivityItem["tone"] {
     return "info";
   }
 
+  if (span.spanType === "role") {
+    const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
+
+    if (role === "verifier") {
+      const decision = readString(span.metadata.decision);
+
+      if (decision === "continue") {
+        return "success";
+      }
+
+      if (decision === "retry_step" || decision === "replan") {
+        return "warning";
+      }
+
+      if (decision === "fail") {
+        return "danger";
+      }
+    }
+  }
+
   if (
     span.spanType === "tool" ||
     span.spanType === "model" ||
@@ -1395,7 +1447,13 @@ function deriveSpanSurface(span: RuntimeTraceSpan): AgentActivityItem["surface"]
   return span.spanType === "role" || span.spanType === "coordinator" ? "primary" : "secondary";
 }
 
-function deriveEventBadge(eventName: string) {
+function deriveEventBadge(event: RuntimeTraceSpanEvent) {
+  const eventName = event.name;
+
+  if (eventName === "coordinator_decision") {
+    return "Decision";
+  }
+
   if (eventName.includes("validation")) {
     return "Validation";
   }
@@ -1451,7 +1509,9 @@ function deriveEventBadge(eventName: string) {
   return "Event";
 }
 
-function deriveEventLabel(eventName: string) {
+function deriveEventLabel(event: RuntimeTraceSpanEvent) {
+  const eventName = event.name;
+
   switch (eventName) {
     case "coordination_conflict_detected":
       return "Coordination conflict";
@@ -1494,7 +1554,7 @@ function deriveEventLabel(eventName: string) {
     case "state_merge_failed":
       return "State update failed";
     case "coordinator_decision":
-      return "Coordinator decision";
+      return `Next action: ${humanizeOrchestrationAction(readString(event.metadata?.decision) ?? "continue")}`;
     case "model_unavailable":
       return "Model unavailable";
     default:
@@ -1502,7 +1562,33 @@ function deriveEventLabel(eventName: string) {
   }
 }
 
-function deriveEventTone(eventName: string): AgentActivityItem["tone"] {
+function deriveEventDetail(event: RuntimeTraceSpanEvent) {
+  if (event.name === "coordinator_decision") {
+    return event.message?.trim() || "Recorded the next runtime action.";
+  }
+
+  return event.message?.trim() || "Runtime event recorded.";
+}
+
+function deriveEventTone(event: RuntimeTraceSpanEvent): AgentActivityItem["tone"] {
+  const eventName = event.name;
+
+  if (eventName === "coordinator_decision") {
+    const decision = readString(event.metadata?.decision);
+
+    if (decision === "continue") {
+      return "success";
+    }
+
+    if (decision === "retry_step" || decision === "replan") {
+      return "warning";
+    }
+
+    if (decision === "fail") {
+      return "danger";
+    }
+  }
+
   if (eventName.includes("conflict")) {
     return "warning";
   }
@@ -1532,6 +1618,12 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const modelId = readString(span.metadata.modelId);
   const toolName = readString(span.metadata.toolName);
   const validationStatus = readString(span.metadata.validationStatus);
+  const decision = readString(span.metadata.decision);
+  const executionMode = readString(span.metadata.mode);
+  const intentMatched = readBoolean(span.metadata.intentMatched);
+  const targetMatched = readBoolean(span.metadata.targetMatched);
+  const validationPassed = readBoolean(span.metadata.validationPassed);
+  const sideEffectsDetected = readBoolean(span.metadata.sideEffectsDetected);
   const sectionIds = readStringArray(span.metadata.sectionIds);
   const truncatedSectionIds = readStringArray(span.metadata.truncatedSectionIds);
   const omittedForBudgetSectionIds = readStringArray(span.metadata.omittedForBudgetSectionIds);
@@ -1542,6 +1634,8 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const usedPromptTokens = readNumber(span.metadata.usedPromptTokens);
   const maxPromptTokens = readNumber(span.metadata.maxPromptTokens);
   const maxOutputTokens = readNumber(span.metadata.maxOutputTokens);
+  const externalRecordCount = readNumber(span.metadata.externalRecordCount);
+  const syncedActionCount = readNumber(span.metadata.syncedActionCount);
   const selectedFileCount = readMetadataArrayLength(span.metadata.selectedFiles);
 
   if (toolName && span.spanType !== "tool") {
@@ -1554,6 +1648,10 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
 
   if (modelId && span.spanType !== "model") {
     meta.push(modelId);
+  }
+
+  if (executionMode && span.spanType === "role" && readString(span.metadata.role) === "executor") {
+    meta.push(executionMode);
   }
 
   if (changedFiles.length > 0) {
@@ -1592,7 +1690,29 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     );
   }
 
-  if (validationStatus) {
+  if (decision && readString(span.metadata.role) === "verifier") {
+    meta.push(humanizeVerifierDecision(decision));
+  }
+
+  if (readString(span.metadata.role) === "verifier") {
+    if (intentMatched === false) {
+      meta.push("intent mismatch");
+    }
+
+    if (targetMatched === false) {
+      meta.push("target mismatch");
+    }
+
+    if (validationPassed === false) {
+      meta.push("validation failed");
+    }
+
+    if (sideEffectsDetected === true) {
+      meta.push("unexpected side effects");
+    }
+  }
+
+  if (validationStatus && validationStatus !== "not_run") {
     meta.push(`validation ${validationStatus}`);
   }
 
@@ -1604,6 +1724,16 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
 
   if (span.spanType === "model" && typeof maxOutputTokens === "number") {
     meta.push(`max ${maxOutputTokens} output tokens`);
+  }
+
+  if (span.spanType === "sync") {
+    if (typeof syncedActionCount === "number") {
+      meta.push(`${syncedActionCount} synced action${syncedActionCount === 1 ? "" : "s"}`);
+    }
+
+    if (typeof externalRecordCount === "number") {
+      meta.push(`${externalRecordCount} external record${externalRecordCount === 1 ? "" : "s"}`);
+    }
   }
 
   if (typeof span.durationMs === "number") {
@@ -1625,6 +1755,7 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const ownerAgentTypeId = readString(event.metadata?.workPacketOwnerAgentTypeId);
   const entityKind = readString(event.metadata?.entityKind);
   const entityId = readString(event.metadata?.entityId);
+  const decision = readString(event.metadata?.decision);
 
   if (toolName) {
     meta.push(toolName);
@@ -1652,6 +1783,10 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
 
   if (handoffStatus) {
     meta.push(handoffStatus);
+  }
+
+  if (decision) {
+    meta.push(humanizeOrchestrationAction(decision));
   }
 
   if (ownerAgentTypeId) {
@@ -1688,6 +1823,10 @@ function shouldKeepActivityItem(
   index: number
 ) {
   if (item.sourceType === "run") {
+    return false;
+  }
+
+  if (item.sourceType === "sync" && item.status !== "failed") {
     return false;
   }
 
@@ -1737,14 +1876,16 @@ function readMetadataArrayLength(value: unknown) {
   return Array.isArray(value) ? value.length : 0;
 }
 
-function deriveRoleLabel(role: string) {
+function deriveRoleLabel(span: RuntimeTraceSpan) {
+  const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
+
   switch (role) {
     case "planner":
-      return "Selected next step";
+      return "Planner proposed next step";
     case "executor":
-      return "Executed planned step";
+      return "Executor performed step";
     case "verifier":
-      return "Reviewed execution";
+      return deriveVerifierLabel(readString(span.metadata.decision));
     default:
       return `${capitalize(role)} step`;
   }
@@ -1753,18 +1894,31 @@ function deriveRoleLabel(role: string) {
 function deriveRoleDetail(span: RuntimeTraceSpan) {
   const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
   const toolName = readString(span.metadata.toolName);
+  const changedFiles = readStringArray(span.metadata.changedFiles);
 
   switch (role) {
     case "planner":
-      return toolName
-        ? `Bounded the next move to a scoped ${toolName} action.`
-        : "Bounded the next move to the current request without expanding scope.";
+      return (
+        span.outputSummary?.trim() ||
+        (toolName
+          ? `Bounded the next move to a scoped ${toolName} action.`
+          : "Bounded the next move to the current request without expanding scope.")
+      );
     case "executor":
+      if (changedFiles.length > 0) {
+        return changedFiles.length === 1
+          ? `Executed the planned step and updated ${changedFiles[0]}.`
+          : `Executed the planned step and updated ${changedFiles.length} files.`;
+      }
+
       return toolName
-        ? `Executed the planned ${toolName} step and kept the change on the intended target.`
+        ? `Executed the planned ${toolName} step and captured the current result.`
         : "Executed the planned step and captured the current result.";
     case "verifier":
-      return "Checked intent match, target scope, validation state, and progression safety.";
+      return (
+        span.outputSummary?.trim() ||
+        "Checked intent match, target scope, validation state, and progression safety."
+      );
     default:
       return span.outputSummary?.trim() || span.inputSummary?.trim() || "Runtime role step recorded.";
   }
@@ -1817,10 +1971,61 @@ function readNumber(value: unknown) {
   return typeof value === "number" ? value : null;
 }
 
+function readBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
 function readStringArray(value: unknown) {
   return Array.isArray(value)
     ? value
         .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim())
     : [];
+}
+
+function deriveVerifierLabel(decision: string | null) {
+  switch (decision) {
+    case "continue":
+      return "Verifier approved step";
+    case "retry_step":
+      return "Verifier requested retry";
+    case "replan":
+      return "Verifier requested replan";
+    case "fail":
+      return "Verifier rejected step";
+    default:
+      return "Verifier reviewed execution";
+  }
+}
+
+function humanizeVerifierDecision(decision: string) {
+  switch (decision) {
+    case "continue":
+      return "approved";
+    case "retry_step":
+      return "retry requested";
+    case "replan":
+      return "replan requested";
+    case "fail":
+      return "rejected";
+    default:
+      return humanizeKey(decision).toLowerCase();
+  }
+}
+
+function humanizeOrchestrationAction(action: string) {
+  switch (action) {
+    case "retry_step":
+      return "retry step";
+    case "replan":
+      return "replan";
+    case "continue":
+      return "continue";
+    case "fail":
+      return "fail";
+    case "plan":
+      return "plan";
+    default:
+      return humanizeKey(action).toLowerCase();
+  }
 }
