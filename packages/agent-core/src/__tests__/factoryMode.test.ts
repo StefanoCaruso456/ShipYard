@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyFactoryStageExpansion,
   compileFactoryTaskSubmission,
   createFactoryRunState,
   normalizeFactoryRunInput,
@@ -48,6 +49,7 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
   assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate?.kind, "architecture");
   assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate?.kind, "implementation");
   assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate?.kind, "deployment");
+  assert.ok((compiled.phaseExecution?.phases[2]?.completionCriteria?.length ?? 0) > 2);
   assert.deepEqual(compiled.phaseExecution?.phases[0]?.completionCriteria, [
     "Product brief captured.",
     "Factory scope aligned around the first deliverable slice."
@@ -102,6 +104,12 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.equal(state.completionContract.appSpec.stack.templateId, "nextjs_supabase_vercel");
   assert.equal(state.completionContract.definitionOfDone.completionCriteria.length, 4);
   assert.equal(state.completionContract.phases.length, 4);
+  assert.equal(state.stagePlans.length, 4);
+  assert.equal(
+    state.stagePlans.find((plan) => plan.stageId === "implementation")?.backlog.length,
+    2
+  );
+  assert.deepEqual(state.expansionDecisions, []);
   assert.deepEqual(
     state.completionContract.phases.map((phase) => phase.phaseId),
     [
@@ -278,6 +286,97 @@ test("syncFactoryRunState advances stage and artifact status from phase executio
     synced?.artifacts.find((artifact) => artifact.kind === "bootstrap_plan")?.status,
     "completed"
   );
+  assert.equal(
+    synced?.stagePlans.find((plan) => plan.stageId === "implementation")?.status,
+    "active"
+  );
+});
+
+test("applyFactoryStageExpansion adds implementation backlog items for uncovered contract scope", () => {
+  const compiled = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260326"
+  });
+
+  const factoryInput = normalizeFactoryRunInput(compiled.factory);
+
+  assert.ok(factoryInput);
+  assert.ok(compiled.phaseExecution);
+
+  const factoryState = createFactoryRunState({
+    input: factoryInput,
+    productBrief: compiled.instruction,
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260326"
+  });
+  const phaseExecution = normalizePhaseExecutionInput(compiled.phaseExecution);
+
+  assert.ok(phaseExecution);
+
+  const implementationPhase = phaseExecution.phases[2];
+
+  assert.ok(implementationPhase);
+
+  implementationPhase.status = "in_progress";
+  phaseExecution.current = {
+    phaseId: "factory-implementation",
+    storyId: null,
+    taskId: null
+  };
+
+  for (const story of implementationPhase.userStories) {
+    story.status = "completed";
+
+    for (const task of story.tasks) {
+      task.status = "completed";
+      task.result = {
+        mode: "placeholder-execution",
+        summary: task.expectedOutcome,
+        instructionEcho: task.instruction,
+        skillId: "test-skill",
+        completedAt: "2026-03-27T00:00:00.000Z"
+      };
+    }
+  }
+
+  const expansion = applyFactoryStageExpansion({
+    factory: factoryState,
+    phaseExecution,
+    stageId: "implementation",
+    updatedAt: "2026-03-27T00:00:00.000Z"
+  });
+
+  assert.ok(expansion);
+  assert.equal(expansion?.expanded, true);
+  assert.equal(expansion?.decision?.outcome, "expanded");
+  assert.ok((expansion?.decision?.addedBacklogItemIds.length ?? 0) >= 1);
+  assert.ok(
+    expansion?.factory.stagePlans
+      .find((plan) => plan.stageId === "implementation")
+      ?.backlog.some((item) => item.source === "expansion")
+  );
+  assert.ok((expansion?.phaseExecution.phases[2]?.userStories.length ?? 0) > 2);
 });
 
 test("normalizeFactoryRunState backfills the completion contract for legacy state", () => {
@@ -319,6 +418,8 @@ test("normalizeFactoryRunState backfills the completion contract for legacy stat
   assert.ok(normalized);
   assert.equal(normalized?.completionContract.appSpec.appName, "Legacy Portal");
   assert.equal(normalized?.completionContract.phases[1]?.phaseId, "factory-bootstrap");
+  assert.equal(normalized?.stagePlans.length, 4);
+  assert.deepEqual(normalized?.expansionDecisions, []);
   assert.ok(
     normalized?.completionContract.definitionOfDone.verificationCriteria.some(
       (criterion) => criterion.evidenceKind === "delivery_summary"
