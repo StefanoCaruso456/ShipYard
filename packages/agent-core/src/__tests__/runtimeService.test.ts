@@ -862,6 +862,104 @@ test("persistent runtime expands factory implementation backlog until contract s
   );
 });
 
+test("persistent runtime injects factory delegation context into live task execution", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const seenContextIds = new Map<string, string[]>();
+  const seenConstraints = new Map<string, string[]>();
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      const taskId = run.phaseExecution?.current.taskId;
+
+      if (taskId) {
+        seenContextIds.set(
+          taskId,
+          (run.context.externalContext ?? []).map((item) => item.id)
+        );
+        seenConstraints.set(taskId, [...run.context.constraints]);
+      }
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  submission.phaseExecution?.phases.forEach((phase) => {
+    delete phase.approvalGate;
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes(
+      "factory-delegation-brief:story:story-nextjs-shell"
+    )
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes(
+      "factory-delegation-brief:task:task-nextjs-shell"
+    )
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes("factory-ownership-plan:implementation")
+  );
+  assert.ok(
+    seenContextIds.get("task-nextjs-shell")?.includes("factory-dependency-graph:implementation")
+  );
+  assert.ok(
+    seenConstraints
+      .get("task-nextjs-shell")
+      ?.some((constraint) =>
+        constraint.includes("production_lead -> specialist_dev -> execution_subagent")
+      )
+  );
+  assert.equal(
+    completedRun.factory?.delegationBriefs.find(
+      (brief) => brief.entityKind === "task" && brief.entityId === "task-nextjs-shell"
+    )?.status,
+    "completed"
+  );
+  assert.deepEqual(
+    completedRun.controlPlane?.handoffs.find(
+      (handoff) => handoff.id === "handoff:task:task-nextjs-shell"
+    )?.acceptanceTargetIds,
+    ["factory-implementation:app-shell"]
+  );
+});
+
 test("persistent runtime tracks rebuild targets artifacts and interventions for ship rebuild runs", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const attempts = new Map<string, number>();

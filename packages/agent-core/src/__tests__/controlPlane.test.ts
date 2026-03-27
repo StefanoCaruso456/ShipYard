@@ -10,6 +10,11 @@ import {
   recordTaskStarted,
   syncControlPlaneState
 } from "../runtime/controlPlane";
+import {
+  compileFactoryTaskSubmission,
+  createFactoryRunState,
+  normalizeFactoryRunInput
+} from "../index";
 import { normalizePhaseExecutionInput } from "../runtime/phaseExecution";
 
 test("control plane initializes typed ownership for phases, stories, and tasks", () => {
@@ -239,6 +244,88 @@ test("control plane sync records status transitions and retry interventions", ()
       (intervention) => intervention.kind === "retry" && intervention.entityId === "story-retry"
     )
   );
+});
+
+test("factory handoffs attach delegation targets, dependencies, and artifact payloads", () => {
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+  const phaseExecution = normalizePhaseExecutionInput(submission.phaseExecution);
+  const factoryInput = normalizeFactoryRunInput(submission.factory);
+
+  assert.ok(phaseExecution);
+  assert.ok(factoryInput);
+
+  const factory = createFactoryRunState({
+    input: factoryInput,
+    productBrief: submission.instruction,
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327",
+    phaseExecution
+  });
+  const controlPlane = createControlPlaneState(phaseExecution);
+  const deliveryPhase = phaseExecution.phases.find((phase) => phase.id === "factory-delivery");
+  const deliveryStory = deliveryPhase?.userStories[0];
+  const deliveryTask = deliveryStory?.tasks[1];
+
+  assert.ok(deliveryPhase);
+  assert.ok(deliveryStory);
+  assert.ok(deliveryTask);
+
+  recordPhaseStarted(controlPlane, deliveryPhase, factory);
+  recordStoryStarted(controlPlane, deliveryStory, factory);
+  recordTaskStarted(controlPlane, deliveryStory, deliveryTask, factory);
+
+  const storyHandoff = controlPlane.handoffs.find(
+    (handoff) => handoff.id === "handoff:story:story-delivery-handoff"
+  );
+  const taskHandoff = controlPlane.handoffs.find(
+    (handoff) => handoff.id === "handoff:task:task-delivery-summary"
+  );
+  const taskDelegationArtifact = controlPlane.artifacts.find(
+    (artifact) => artifact.id === "artifact:task-delegation:task-delivery-summary"
+  );
+
+  assert.deepEqual(storyHandoff?.acceptanceTargetIds, [
+    "factory-delivery:deployment-handoff",
+    "factory-delivery:delivery-summary"
+  ]);
+  assert.deepEqual(taskHandoff?.acceptanceTargetIds, [
+    "factory-delivery:delivery-summary"
+  ]);
+  assert.deepEqual(taskHandoff?.verificationTargetIds, [
+    "factory-delivery:summary-evidence",
+    "factory-delivery:summary-artifact"
+  ]);
+  assert.deepEqual(taskHandoff?.dependencyIds, ["task-deployment-handoff"]);
+  assert.equal(taskHandoff?.status, "accepted");
+  assert.equal(taskDelegationArtifact?.payload?.kind, "delegation_brief");
+  assert.equal(taskDelegationArtifact?.payload?.delegationPath, "specialist_to_execution");
+  assert.deepEqual(taskDelegationArtifact?.payload?.backlogItemIds, [
+    "factory-backlog:delivery:delivery-summary"
+  ]);
 });
 
 test("control plane records overlap conflicts and production-lead merge decisions", () => {

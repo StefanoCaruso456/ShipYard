@@ -334,7 +334,8 @@ export async function createPersistentRuntimeService(
             productBrief: instruction,
             workspacePath:
               input.project?.folder?.displayPath?.trim() || factoryInput.repository.name,
-            deploymentUrl: factoryInput.deployment.url ?? null
+            deploymentUrl: factoryInput.deployment.url ?? null,
+            phaseExecution
           })
         : null,
       rollingSummary: null,
@@ -898,6 +899,7 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
   const factory = syncFactoryRunState({
     factory: normalizeFactoryRunState(run.factory),
     phaseExecution,
+    controlPlane,
     project,
     status: run.status,
     rollingSummary,

@@ -609,8 +609,13 @@ export type ControlPlaneDelegationBriefArtifactPayload = {
   version: 1;
   scopeSummary: string;
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   dependencyIds: string[];
+  backlogItemIds: string[];
+  delegationPath: "orchestrator_to_production_lead" | "production_lead_to_specialist" | "specialist_to_execution";
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
 };
 
 export type ControlPlaneUserFlowAudience = "end_user" | "operator" | "developer";
@@ -707,6 +712,8 @@ export type ControlPlaneWorkPacket = {
   fileTargets: string[];
   domainTargets: string[];
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   dependencyIds: string[];
   taskIds: string[];
@@ -727,6 +734,8 @@ export type ControlPlaneHandoff = {
   artifactIds: string[];
   dependencyIds: string[];
   acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
   validationTargets: string[];
   purpose: string;
   workPacket: ControlPlaneWorkPacket | null;
@@ -1326,6 +1335,101 @@ export type FactoryStagePlanStatus = "planned" | "active" | "completed" | "faile
 
 export type FactoryExpansionDecisionOutcome = "expanded" | "complete" | "no_change";
 
+export type FactoryDelegationPath =
+  | "orchestrator_to_production_lead"
+  | "production_lead_to_specialist"
+  | "specialist_to_execution";
+
+export type FactoryDelegationStatus =
+  | "planned"
+  | "created"
+  | "accepted"
+  | "completed"
+  | "failed";
+
+export type FactoryOwnershipAssignment = {
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  ownerRole: Extract<ControlPlaneRole, "specialist_dev" | "execution_subagent">;
+  ownerAgentId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
+  acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+};
+
+export type FactoryOwnershipPlan = {
+  stageId: FactoryStageId;
+  phaseId: string;
+  summary: string;
+  productionLeadAgentId: string;
+  productionLeadAgentTypeId: "production_lead";
+  storyAssignments: FactoryOwnershipAssignment[];
+  taskAssignments: FactoryOwnershipAssignment[];
+  updatedAt: string;
+};
+
+export type FactoryDependencyGraphNode = {
+  id: string;
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  label: string;
+};
+
+export type FactoryDependencyGraphEdge = {
+  fromNodeId: string;
+  toNodeId: string;
+  dependencyIds: string[];
+  rationale: string;
+};
+
+export type FactoryDependencyGraph = {
+  stageId: FactoryStageId;
+  phaseId: string;
+  nodes: FactoryDependencyGraphNode[];
+  edges: FactoryDependencyGraphEdge[];
+  updatedAt: string;
+};
+
+export type FactoryDelegationBrief = {
+  id: string;
+  stageId: FactoryStageId;
+  phaseId: string;
+  entityKind: "story" | "task";
+  entityId: string;
+  storyId: string;
+  taskId: string | null;
+  backlogItemIds: string[];
+  delegationPath: FactoryDelegationPath;
+  status: FactoryDelegationStatus;
+  fromRole: ControlPlaneRole;
+  fromAgentId: string;
+  fromAgentTypeId: TeamSkillId | null;
+  toRole: ControlPlaneRole;
+  toAgentId: string;
+  toAgentTypeId: TeamSkillId | null;
+  specialistAgentTypeId: SpecialistAgentTypeId | null;
+  scopeSummary: string;
+  acceptanceCriteria: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  validationTargets: string[];
+  dependencyIds: string[];
+  artifactId: string;
+  handoffId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FactoryBacklogItem = {
   id: string;
   stageId: FactoryStageId;
@@ -1395,6 +1499,9 @@ export type FactoryRunState = {
   completionContract: FactoryCompletionContract;
   stagePlans: FactoryStagePlan[];
   expansionDecisions: FactoryExpansionDecision[];
+  ownershipPlans: FactoryOwnershipPlan[];
+  dependencyGraphs: FactoryDependencyGraph[];
+  delegationBriefs: FactoryDelegationBrief[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;
