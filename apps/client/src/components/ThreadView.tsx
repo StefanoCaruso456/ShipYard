@@ -76,6 +76,13 @@ export function ThreadView({
             ? "Failed"
             : `Runtime ${runtimeState}`
     : `Runtime ${runtimeState}`;
+  const operatingModeLabel = thread?.operatingMode
+    ? `${thread.operatingMode} mode`
+    : thread?.requestedOperatingMode === "auto"
+      ? "auto mode"
+      : thread?.requestedOperatingMode
+        ? `${thread.requestedOperatingMode} requested`
+        : null;
 
   if (isEmpty) {
     return (
@@ -187,6 +194,12 @@ export function ThreadView({
             <span className="thread-view__status-dot" aria-hidden="true" />
             {statusLabel}
           </span>
+
+          {operatingModeLabel ? (
+            <span className="thread-view__status-pill thread-view__status-pill--mode">
+              {operatingModeLabel}
+            </span>
+          ) : null}
 
           {project?.kind === "local" ? (
             <ProjectRepositoryButton

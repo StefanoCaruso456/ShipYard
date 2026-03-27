@@ -22,6 +22,10 @@ import {
   normalizeFactoryRunState,
   syncFactoryRunState
 } from "./factoryMode";
+import {
+  normalizeRequestedOperatingMode,
+  resolveOperatingMode
+} from "./operatingMode";
 import { createInMemoryRunStore } from "./createInMemoryRunStore";
 import {
   executePhaseExecutionRun,
@@ -284,6 +288,13 @@ export async function createPersistentRuntimeService(
     const phaseExecution = normalizePhaseExecutionInput(input.phaseExecution);
     const controlPlane = phaseExecution ? createControlPlaneState(phaseExecution) : null;
     const factoryInput = normalizeFactoryRunInput(input.factory);
+    const requestedOperatingMode = normalizeRequestedOperatingMode(input.operatingMode);
+    const operatingMode = resolveOperatingMode({
+      requestedOperatingMode,
+      instruction,
+      toolRequest: input.toolRequest ?? null,
+      factory: factoryInput
+    });
     const rebuild = input.rebuild
       ? createRebuildState(input.rebuild, {
           phaseExecution,
@@ -299,6 +310,8 @@ export async function createPersistentRuntimeService(
       parentRunId,
       title: input.title?.trim() ? input.title.trim() : null,
       instruction,
+      requestedOperatingMode,
+      operatingMode,
       simulateFailure: input.simulateFailure ?? false,
       toolRequest: input.toolRequest ?? null,
       attachments: normalizeRunAttachments(input.attachments),
@@ -895,11 +908,20 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
       run.startedAt ??
       run.createdAt
   });
+  const requestedOperatingMode = normalizeRequestedOperatingMode(run.requestedOperatingMode);
+  const operatingMode = resolveOperatingMode({
+    requestedOperatingMode,
+    instruction: run.instruction,
+    toolRequest: run.toolRequest ?? null,
+    factory
+  });
 
   return {
     ...run,
     threadId: run.threadId?.trim() ? run.threadId.trim() : run.id,
     parentRunId: run.parentRunId?.trim() ? run.parentRunId.trim() : null,
+    requestedOperatingMode,
+    operatingMode,
     toolRequest: run.toolRequest ?? null,
     attachments: normalizeRunAttachments(run.attachments),
     project,
@@ -921,7 +943,15 @@ function normalizeRunRecord(run: AgentRunRecord): AgentRunRecord {
     factory,
     externalSync: normalizeExternalSyncState(run.externalSync),
     rollingSummary,
-    events: Array.isArray(run.events) ? run.events : []
+    events: Array.isArray(run.events) ? run.events : [],
+    result: run.result
+      ? {
+          ...run.result,
+          requestedOperatingMode:
+            run.result.requestedOperatingMode ?? requestedOperatingMode,
+          operatingMode: run.result.operatingMode ?? operatingMode
+        }
+      : null
   };
 }
 
@@ -1242,6 +1272,8 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     threadId: run.threadId,
     parentRunId: run.parentRunId,
     status: run.status,
+    requestedOperatingMode: run.requestedOperatingMode ?? null,
+    operatingMode: run.operatingMode ?? null,
     retryCount: run.retryCount,
     validationStatus: run.validationStatus,
     attachmentCount: run.attachments.length,

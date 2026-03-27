@@ -279,6 +279,8 @@ function summarizeRunTrace(
     totalDurationMs: rootSpan?.durationMs ?? null,
     queueDelayMs: readMetadataNumber(rootSpan?.metadata.queueDelayMs),
     roleFlow: readMetadataString(rootSpan?.metadata.roleFlow),
+    requestedOperatingMode: readMetadataString(rootSpan?.metadata.requestedOperatingMode),
+    operatingMode: readMetadataString(rootSpan?.metadata.operatingMode),
     model: modelSummary,
     usage: {
       inputTokens,

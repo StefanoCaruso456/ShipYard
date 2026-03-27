@@ -84,6 +84,8 @@ export type TraceRunSummary = {
   totalDurationMs: number | null;
   queueDelayMs: number | null;
   roleFlow: string | null;
+  requestedOperatingMode: string | null;
+  operatingMode: string | null;
   model: {
     provider: string | null;
     modelId: string | null;
