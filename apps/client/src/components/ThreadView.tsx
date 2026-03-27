@@ -5,6 +5,7 @@ import type {
   WorkspaceThread
 } from "../types";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
+import { ProjectRepositoryButton } from "./ProjectRepositoryButton";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
 import { ThreadMessageCard } from "./ThreadMessageCard";
 
@@ -27,6 +28,7 @@ type ThreadViewProps = {
   suggestions: SuggestionCard[];
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshProjectRepository: (projectId: string) => Promise<void>;
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
@@ -46,6 +48,7 @@ export function ThreadView({
   suggestions,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshProjectRepository,
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
   onRequestSteer,
@@ -93,11 +96,19 @@ export function ThreadView({
           </p>
 
           {project?.kind === "local" ? (
-            <div className="thread-view__project-meta">
-              <span>{project.environment}</span>
-              <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
-              <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
-            </div>
+            <>
+              <div className="thread-view__project-meta">
+                <span>{project.environment}</span>
+                <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
+                <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
+              </div>
+              <div className="thread-view__empty-runtime-actions">
+                <ProjectRepositoryButton
+                  project={project}
+                  onRefresh={onRefreshProjectRepository}
+                />
+              </div>
+            </>
           ) : null}
 
           {project?.kind === "live" && runtimeState !== "error" ? (
@@ -170,6 +181,13 @@ export function ThreadView({
             <span className="thread-view__status-dot" aria-hidden="true" />
             {statusLabel}
           </span>
+
+          {project?.kind === "local" ? (
+            <ProjectRepositoryButton
+              project={project}
+              onRefresh={onRefreshProjectRepository}
+            />
+          ) : null}
 
           {project?.kind === "live" && runtimeState !== "error" ? (
             <RuntimeBranchSwitcher
