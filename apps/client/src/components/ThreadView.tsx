@@ -156,9 +156,12 @@ export function ThreadView({
 
   const hasActivity = (thread.activity?.length ?? 0) > 0;
   const hiddenMessageIds = new Set<string>();
+  const hasActiveRuntimeStage =
+    thread.status === "running" || thread.status === "pending" || thread.status === "paused";
 
   if (
     thread.source === "live" &&
+    hasActiveRuntimeStage &&
     thread.liveRuntime?.focusedRunId &&
     (thread.status === "running" || thread.status === "pending" || thread.status === "paused")
   ) {
@@ -166,10 +169,15 @@ export function ThreadView({
   }
 
   const filteredMessages = thread.messages.filter((message) => !hiddenMessageIds.has(message.id));
-  const showLiveRuntimeStage = thread.source === "live" && Boolean(thread.liveRuntime?.focusedRun);
-  const visibleMessages = hasActivity || showLiveRuntimeStage
-    ? filteredMessages.filter((message) => message.role !== "system")
-    : filteredMessages;
+  const showLiveRuntimeStage =
+    thread.source === "live" &&
+    hasActiveRuntimeStage &&
+    Boolean(thread.liveRuntime?.focusedRun);
+  const visibleMessages =
+    thread.source === "live"
+      ? filteredMessages.filter((message) => message.role !== "system")
+      : filteredMessages;
+  const hasInlineTrace = visibleMessages.some((message) => (message.trace?.items.length ?? 0) > 0);
 
   return (
     <section className="thread-view">
@@ -214,7 +222,7 @@ export function ThreadView({
           />
         ) : null}
 
-        {!hasActivity && !showLiveRuntimeStage
+        {!hasActivity && !showLiveRuntimeStage && !hasInlineTrace
           ? thread.progress.map((event) => (
               <div key={event.id} className={`event-row event-row--${event.tone}`}>
                 <strong>{event.label}</strong>

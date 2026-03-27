@@ -288,12 +288,11 @@ export function buildRuntimeThread(
     (run) => run.status === "pending" && run.id !== focusedRun.id
   );
   const threadStatus = deriveThreadStatus(orderedRuns);
-  const activity = buildThreadActivity(
-    orderedRuns,
-    focusedRun,
-    runtimeTracesByTaskId,
-    localFileEffectsByTaskId
-  );
+  const hasActiveRuntimeStage =
+    threadStatus === "running" || threadStatus === "pending" || threadStatus === "paused";
+  const activity = hasActiveRuntimeStage
+    ? buildThreadActivity(focusedRun, runtimeTracesByTaskId, localFileEffectsByTaskId)
+    : [];
   const queuedFollowUps = buildQueuedFollowUpItems(queuedRuns, optimisticFollowUps);
 
   return {
@@ -309,7 +308,10 @@ export function buildRuntimeThread(
     messages: buildRuntimeThreadMessages(
       orderedRuns,
       focusedRun,
-      runtimeAttachmentPreviewsByTaskId
+      runtimeAttachmentPreviewsByTaskId,
+      runtimeTracesByTaskId,
+      localFileEffectsByTaskId,
+      hasActiveRuntimeStage
     ),
     progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps, localFileEffectsByTaskId),
     activity,
@@ -426,7 +428,10 @@ function buildRuntimeThreadTags(
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
   focusedRun: RuntimeTask,
-  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>,
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>,
+  hasActiveRuntimeStage: boolean
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
@@ -445,6 +450,20 @@ function buildRuntimeThreadMessages(
         : isFollowUp
           ? "You · follow-up"
           : "Operator";
+    const runActivity = buildRuntimeActivity(
+      run,
+      runtimeTracesByTaskId[run.id] ?? null,
+      localFileEffectsByTaskId[run.id] ?? null
+    );
+    const trace =
+      runActivity.length > 0 && (!hasActiveRuntimeStage || run.id !== focusedRun.id)
+        ? {
+            runId: run.id,
+            status: run.status,
+            items: runActivity
+          }
+        : undefined;
+    let traceAttached = false;
 
     messages.push(
       createMessage(
@@ -470,9 +489,15 @@ function buildRuntimeThreadMessages(
         isQueuedBehindFocused ? "Steer queue" : "Runtime queue",
         deriveRuntimeSystemMessage(run, focusedRun),
         formatDateTime(run.startedAt ?? run.createdAt),
-        deriveRuntimeSystemTone(run)
+        deriveRuntimeSystemTone(run),
+        [],
+        !run.result && !run.error ? trace : undefined
       )
     );
+
+    if (!run.result && !run.error && trace) {
+      traceAttached = true;
+    }
 
     if (run.result) {
       const visibleResponseText =
@@ -486,9 +511,12 @@ function buildRuntimeThreadMessages(
             "Assistant",
             visibleResponseText,
             formatDateTime(run.result.completedAt),
-            "default"
+            "default",
+            [],
+            trace
           )
         );
+        traceAttached = Boolean(trace);
       }
     }
 
@@ -500,9 +528,20 @@ function buildRuntimeThreadMessages(
           "Failure",
           run.error.message,
           formatDateTime(run.completedAt ?? run.createdAt),
-          "danger"
+          "danger",
+          [],
+          trace
         )
       );
+      traceAttached = Boolean(trace);
+    }
+
+    if (!traceAttached && trace) {
+      const lastMessage = messages[messages.length - 1];
+
+      if (lastMessage) {
+        lastMessage.trace = trace;
+      }
     }
   }
 
@@ -859,7 +898,8 @@ function createMessage(
   body: string,
   timestamp: string,
   tone: ThreadMessage["tone"],
-  attachments: ThreadMessage["attachments"] = []
+  attachments: ThreadMessage["attachments"] = [],
+  trace?: ThreadMessage["trace"]
 ): ThreadMessage {
   return {
     id,
@@ -868,7 +908,8 @@ function createMessage(
     body,
     timestamp,
     tone,
-    attachments
+    attachments,
+    trace
   };
 }
 
@@ -962,23 +1003,14 @@ function buildRuntimeActivity(
 }
 
 function buildThreadActivity(
-  runs: RuntimeTask[],
   focusedRun: RuntimeTask,
   runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
   localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
 ) {
-  const displayRuns = [...runs]
-    .filter((candidate) => candidate.status !== "pending" || candidate.id === focusedRun.id)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-
-  return condenseActivityItems(
-    displayRuns.flatMap((candidate) =>
-      buildRuntimeActivity(
-        candidate,
-        runtimeTracesByTaskId[candidate.id] ?? null,
-        localFileEffectsByTaskId[candidate.id] ?? null
-      )
-    )
+  return buildRuntimeActivity(
+    focusedRun,
+    runtimeTracesByTaskId[focusedRun.id] ?? null,
+    localFileEffectsByTaskId[focusedRun.id] ?? null
   );
 }
 

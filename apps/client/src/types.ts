@@ -1002,6 +1002,11 @@ export type ThreadMessage = {
   timestamp: string;
   tone: "default" | "info" | "success" | "danger";
   attachments?: AttachmentCard[];
+  trace?: {
+    runId: string;
+    status: RuntimeTaskStatus;
+    items: AgentActivityItem[];
+  };
 };
 
 export type ProgressEvent = {
