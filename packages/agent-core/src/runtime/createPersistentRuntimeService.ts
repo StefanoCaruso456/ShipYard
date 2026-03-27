@@ -1264,6 +1264,7 @@ function buildRunTraceMetadata(run: AgentRunRecord): TraceMetadata {
     ...buildControlPlaneTraceMetadata(run.controlPlane),
     ...buildDeliveryTraceMetadata(closeout.delivery),
     ...buildEvaluationTraceMetadata(closeout.evaluation),
+    ...buildComparativeAnalysisTraceMetadata(closeout.comparativeAnalysis),
     ...buildRebuildTraceMetadata(run.rebuild)
   };
 }
@@ -1491,6 +1492,28 @@ function buildEvaluationTraceMetadata(
     evaluationFailureReportCount: evaluation.scorecard.failureReportCount,
     evaluationFailurePatternCount: evaluation.failurePatterns.length,
     evaluationBottlenecks: evaluation.bottlenecks.map((item) => item.label)
+  };
+}
+
+function buildComparativeAnalysisTraceMetadata(
+  comparativeAnalysis: ReturnType<typeof deriveRunCloseout>["comparativeAnalysis"]
+): TraceMetadata {
+  if (!comparativeAnalysis) {
+    return {
+      comparativeAnalysisStatus: null,
+      comparativeAnalysisHeadline: null,
+      comparativeAnalysisSectionCount: null,
+      comparativeAnalysisSourceArtifactCount: null,
+      comparativeAnalysisSectionTitles: []
+    };
+  }
+
+  return {
+    comparativeAnalysisStatus: comparativeAnalysis.status,
+    comparativeAnalysisHeadline: comparativeAnalysis.headline,
+    comparativeAnalysisSectionCount: comparativeAnalysis.sections.length,
+    comparativeAnalysisSourceArtifactCount: comparativeAnalysis.sourceArtifactIds.length,
+    comparativeAnalysisSectionTitles: comparativeAnalysis.sections.map((section) => section.title)
   };
 }
 

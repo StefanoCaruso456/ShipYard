@@ -387,6 +387,12 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.ok((trace?.summary.delivery?.sourceArtifactCount ?? 0) >= 1);
     assert.equal(trace?.summary.evaluation?.retryCount, 0);
     assert.equal(trace?.summary.evaluation?.openBlockerCount, 0);
+    assert.equal(trace?.summary.comparativeAnalysis?.status, "completed");
+    assert.equal(trace?.summary.comparativeAnalysis?.sectionCount, 7);
+    assert.ok((trace?.summary.comparativeAnalysis?.sourceArtifactCount ?? 0) >= 1);
+    assert.ok(
+      (trace?.summary.comparativeAnalysis?.sectionTitles ?? []).includes("Executive summary")
+    );
     assert.ok(
       (trace?.summary.evaluation?.bottlenecks ?? []).includes("Clean closeout")
     );

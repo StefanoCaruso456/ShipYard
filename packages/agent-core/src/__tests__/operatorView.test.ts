@@ -574,4 +574,26 @@ test("operator view assembles delivery summary and evaluation for completed runs
   assert.ok(
     operatorView.evaluation?.bottlenecks.some((bottleneck) => bottleneck.id === "retry-pressure")
   );
+  assert.equal(operatorView.comparativeAnalysis?.status, "completed");
+  assert.equal(operatorView.comparativeAnalysis?.sections.length, 7);
+  assert.deepEqual(
+    operatorView.comparativeAnalysis?.sections.map((section) => section.id),
+    [
+      "executive_summary",
+      "delivery_and_outputs",
+      "validation_and_quality",
+      "interventions_and_retries",
+      "blockers_and_conflicts",
+      "risks_and_follow_ups",
+      "recommended_improvements"
+    ]
+  );
+  assert.ok(
+    (operatorView.comparativeAnalysis?.sourceArtifactIds.length ?? 0) >= 1
+  );
+  assert.ok(
+    operatorView.comparativeAnalysis?.sections
+      .find((section) => section.id === "recommended_improvements")
+      ?.highlights.some((highlight) => highlight.includes("Retry pressure"))
+  );
 });

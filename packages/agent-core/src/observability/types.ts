@@ -286,6 +286,13 @@ export type TraceRunSummary = {
     failurePatternCount: number;
     bottlenecks: string[];
   } | null;
+  comparativeAnalysis: {
+    status: string | null;
+    headline: string | null;
+    sectionCount: number;
+    sourceArtifactCount: number;
+    sectionTitles: string[];
+  } | null;
 };
 
 export type TraceRunLog = {

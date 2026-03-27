@@ -987,6 +987,30 @@ export type OperatorRunEvaluation = {
   failurePatterns: string[];
 };
 
+export type OperatorRunComparativeAnalysisSectionId =
+  | "executive_summary"
+  | "delivery_and_outputs"
+  | "validation_and_quality"
+  | "interventions_and_retries"
+  | "blockers_and_conflicts"
+  | "risks_and_follow_ups"
+  | "recommended_improvements";
+
+export type OperatorRunComparativeAnalysisSection = {
+  id: OperatorRunComparativeAnalysisSectionId;
+  title: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type OperatorRunComparativeAnalysis = {
+  status: "completed" | "failed";
+  headline: string;
+  sections: OperatorRunComparativeAnalysisSection[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
 export type OperatorRunJournalEntry = {
   id: string;
   kind: "run" | "event" | "handoff" | "blocker" | "intervention" | "artifact";
@@ -1030,6 +1054,7 @@ export type OperatorRunView = {
   mergeDecisions: OperatorRunMergeDecision[];
   delivery: OperatorRunDeliverySummary | null;
   evaluation: OperatorRunEvaluation | null;
+  comparativeAnalysis: OperatorRunComparativeAnalysis | null;
   planningArtifacts: OperatorRunPlanningArtifact[];
   delegationPackets: OperatorRunDelegationPacket[];
   journal: OperatorRunJournalEntry[];
