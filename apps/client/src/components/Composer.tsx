@@ -576,7 +576,9 @@ export function Composer({
         )}
       </div>
 
-      {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
+      {feedback?.tone === "danger" ? (
+        <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p>
+      ) : null}
 
       <input
         id={fileInputId}
