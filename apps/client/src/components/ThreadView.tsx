@@ -170,8 +170,6 @@ export function ThreadView({
   const visibleMessages = hasActivity || showLiveRuntimeStage
     ? filteredMessages.filter((message) => message.role !== "system")
     : filteredMessages;
-  const userMessages = visibleMessages.filter((message) => message.role === "user");
-  const responseMessages = visibleMessages.filter((message) => message.role !== "user");
 
   return (
     <section className="thread-view">
@@ -204,7 +202,7 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
-        {userMessages.map((message) => (
+        {visibleMessages.map((message) => (
           <ThreadMessageCard key={message.id} message={message} />
         ))}
 
@@ -225,10 +223,6 @@ export function ThreadView({
               </div>
             ))
           : null}
-
-        {responseMessages.map((message) => (
-          <ThreadMessageCard key={message.id} message={message} />
-        ))}
       </div>
     </section>
   );

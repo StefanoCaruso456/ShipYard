@@ -1737,6 +1737,9 @@ a {
 
 .message--user {
   margin-left: auto;
+  justify-self: end;
+  width: fit-content;
+  max-width: min(80%, 48rem);
   background: #262626;
 }
 
