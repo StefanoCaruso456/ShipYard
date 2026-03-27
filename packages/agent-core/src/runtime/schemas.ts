@@ -12,6 +12,7 @@ import type {
   ControlPlaneMergeDecision,
   ControlPlaneMergeResolution,
   ControlPlaneRole,
+  ControlPlaneWorkPacket,
   ExternalContextFormat,
   ExternalContextInput,
   ExternalContextKind,
@@ -52,6 +53,8 @@ const controlPlaneArtifactKinds = [
   "plan",
   "requirements",
   "architecture_decision",
+  "user_flow_spec",
+  "data_flow_spec",
   "subtask_breakdown",
   "delegation_brief",
   "task_result",
@@ -211,6 +214,38 @@ export const controlPlaneArtifactSchema = z
     })
   );
 
+export const controlPlaneWorkPacketSchema = z
+  .object({
+    version: z.number().int().optional().default(1),
+    sourceArtifactIds: z.array(z.string()).optional().default([]),
+    flowArtifactIds: z.array(z.string()).optional().default([]),
+    scopeSummary: nonEmptyTrimmedStringSchema,
+    constraints: z.array(z.string()).optional().default([]),
+    fileTargets: z.array(z.string()).optional().default([]),
+    domainTargets: z.array(z.string()).optional().default([]),
+    acceptanceCriteria: z.array(z.string()).optional().default([]),
+    validationTargets: z.array(z.string()).optional().default([]),
+    dependencyIds: z.array(z.string()).optional().default([]),
+    taskIds: z.array(z.string()).optional().default([]),
+    ownerAgentTypeId: z.union([teamSkillIdSchema, z.null(), z.undefined()]).optional()
+  })
+  .transform(
+    (value): ControlPlaneWorkPacket => ({
+      version: 1,
+      sourceArtifactIds: normalizeStringArray(value.sourceArtifactIds),
+      flowArtifactIds: normalizeStringArray(value.flowArtifactIds),
+      scopeSummary: value.scopeSummary,
+      constraints: normalizeStringArray(value.constraints),
+      fileTargets: normalizeStringArray(value.fileTargets),
+      domainTargets: normalizeStringArray(value.domainTargets),
+      acceptanceCriteria: normalizeStringArray(value.acceptanceCriteria),
+      validationTargets: normalizeStringArray(value.validationTargets),
+      dependencyIds: normalizeStringArray(value.dependencyIds),
+      taskIds: normalizeStringArray(value.taskIds),
+      ownerAgentTypeId: value.ownerAgentTypeId ?? null
+    })
+  );
+
 export const controlPlaneHandoffSchema = z
   .object({
     id: nonEmptyTrimmedStringSchema,
@@ -228,7 +263,7 @@ export const controlPlaneHandoffSchema = z
     acceptanceCriteria: z.array(z.string()).optional().default([]),
     validationTargets: z.array(z.string()).optional().default([]),
     purpose: nonEmptyTrimmedStringSchema,
-    workPacket: z.unknown().optional(),
+    workPacket: z.union([controlPlaneWorkPacketSchema, z.null()]).optional(),
     status: controlPlaneHandoffStatusSchema,
     createdAt: nonEmptyTrimmedStringSchema,
     acceptedAt: z.union([z.string(), z.null()]),
@@ -251,7 +286,7 @@ export const controlPlaneHandoffSchema = z
       acceptanceCriteria: normalizeStringArray(value.acceptanceCriteria),
       validationTargets: normalizeStringArray(value.validationTargets),
       purpose: value.purpose,
-      workPacket: (value.workPacket as ControlPlaneHandoff["workPacket"] | undefined) ?? null,
+      workPacket: value.workPacket ?? null,
       status: value.status,
       createdAt: value.createdAt,
       acceptedAt: normalizeOptionalTrimmedString(value.acceptedAt),
