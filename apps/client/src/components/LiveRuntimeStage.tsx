@@ -146,28 +146,6 @@ export function LiveRuntimeStage({
 
       <AgentActivityFeed activity={thread.activity ?? []} status={thread.status} />
 
-      {isActiveRunVisible && (canSteer || queuedFollowUps.length > 0) ? (
-        <section className="live-runtime-stage__follow-up-strip">
-          <div className="live-runtime-stage__follow-up-copy">
-            <strong>Steer drawer</strong>
-            <p>
-              {queuedFollowUps.length > 0
-                ? `${queuedFollowUps.length} follow-up${queuedFollowUps.length === 1 ? "" : "s"} are staged in the docked steer drawer below.`
-                : "Open the steer drawer from the prompt bar below to queue the next follow-up without interrupting the current run."}
-            </p>
-          </div>
-
-          {canSteer ? (
-            <button
-              type="button"
-              className="live-runtime-stage__steer-button"
-              onClick={onRequestSteer}
-            >
-              Open steer
-            </button>
-          ) : null}
-        </section>
-      ) : null}
     </section>
   );
 }
