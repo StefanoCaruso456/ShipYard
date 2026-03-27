@@ -1,12 +1,18 @@
 import type {
   ExecuteRun,
+  OperatingMode,
   RepoToolRequest,
   RepoToolResult,
   RepoToolset,
   RollbackResult,
   ValidationResult
 } from "@shipyard/agent-core";
-import { createRepoToolset, getActiveTraceScope } from "@shipyard/agent-core";
+import {
+  createRepoToolset,
+  getActiveTraceScope,
+  normalizeRequestedOperatingMode,
+  resolveOperatingMode
+} from "@shipyard/agent-core";
 import { generateText } from "ai";
 import path from "node:path";
 
@@ -29,6 +35,9 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
   const repoToolsetsByRoot = new Map<string, RepoToolset>();
 
   return async (run, context) => {
+    const operatingMode = resolveRunOperatingMode(run);
+    const requestedOperatingMode = normalizeRequestedOperatingMode(run.requestedOperatingMode);
+
     if (!run.toolRequest) {
       return openAIExecutor(run, context);
     }
@@ -119,9 +128,22 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       instructionEcho: run.instruction,
       skillId: context.instructionRuntime.skill.meta.id,
       completedAt: new Date().toISOString(),
+      requestedOperatingMode,
+      operatingMode,
       toolResult
     };
   };
+}
+
+function resolveRunOperatingMode(run: Parameters<ExecuteRun>[0]): OperatingMode {
+  return run.operatingMode
+    ? run.operatingMode
+    : resolveOperatingMode({
+        requestedOperatingMode: normalizeRequestedOperatingMode(run.requestedOperatingMode),
+        instruction: run.instruction,
+        toolRequest: run.toolRequest ?? null,
+        factory: run.factory ?? null
+      });
 }
 
 function resolveRepoToolsetForRun(

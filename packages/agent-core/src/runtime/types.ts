@@ -29,6 +29,16 @@ export type AgentRunStatus = "pending" | "running" | "paused" | "completed" | "f
 
 export type RuntimeWorkerState = "idle" | "running";
 
+export type RequestedOperatingMode =
+  | "auto"
+  | "build"
+  | "review"
+  | "debug"
+  | "refactor"
+  | "factory";
+
+export type OperatingMode = Exclude<RequestedOperatingMode, "auto">;
+
 export type RunAttachmentKind =
   | "image"
   | "text"
@@ -1408,6 +1418,7 @@ export type SubmitTaskInput = {
   title?: string;
   threadId?: string;
   parentRunId?: string | null;
+  operatingMode?: RequestedOperatingMode | null;
   simulateFailure?: boolean;
   toolRequest?: RepoToolRequest | null;
   attachments?: RunAttachment[];
@@ -1443,6 +1454,8 @@ export type AgentRunResult = {
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
   factory?: FactoryRunState | null;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -1469,6 +1482,8 @@ export type AgentRunRecord = {
   parentRunId: string | null;
   title: string | null;
   instruction: string;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   simulateFailure: boolean;
   toolRequest: RepoToolRequest | null;
   attachments: RunAttachment[];

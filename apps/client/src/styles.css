@@ -526,6 +526,14 @@ a {
   color: #d7d7d2;
 }
 
+.thread-view__status-pill--mode {
+  gap: 0;
+  color: #c5d5ee;
+  background: rgba(101, 134, 173, 0.12);
+  border: 1px solid rgba(101, 134, 173, 0.2);
+  text-transform: capitalize;
+}
+
 .thread-view__status-dot {
   width: 0.5rem;
   height: 0.5rem;
@@ -2329,6 +2337,40 @@ a {
   color: #a7a7a1;
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+.composer__mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.56rem 0.72rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #202020;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 12px 24px rgba(0, 0, 0, 0.14);
+}
+
+.composer__mode-label {
+  color: #a7a7a1;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.composer__mode-select {
+  min-width: 7rem;
+  border: 0;
+  background: transparent;
+  color: #f3f3f0;
+  outline: none;
+  font-size: 0.84rem;
+  font-weight: 620;
+}
+
+.composer__mode-select:disabled {
+  color: #8f8f8a;
 }
 
 .composer__factory-panel {

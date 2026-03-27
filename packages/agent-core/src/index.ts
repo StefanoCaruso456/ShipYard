@@ -104,6 +104,15 @@ export {
   normalizeFactoryRunState,
   syncFactoryRunState
 } from "./runtime/factoryMode";
+export {
+  getOperatingModePolicy,
+  isOperatingMode,
+  isRequestedOperatingMode,
+  normalizeRequestedOperatingMode,
+  operatingModes,
+  requestedOperatingModes,
+  resolveOperatingMode
+} from "./runtime/operatingMode";
 export { deriveOperatorRunView } from "./runtime/operatorView";
 export { deriveRunCloseout } from "./runtime/runCloseout";
 export {
@@ -295,6 +304,8 @@ export type {
   OperatorRunStageId,
   OperatorRunStageStatus,
   OperatorRunView,
+  OperatingMode,
+  RequestedOperatingMode,
   OrchestrationStepKind,
   Phase,
   PhaseExecutionInput,

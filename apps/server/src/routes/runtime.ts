@@ -22,6 +22,7 @@ import {
   isFactoryDeploymentProviderId,
   isFactoryRepositoryVisibility,
   isFactoryStackTemplateId,
+  isRequestedOperatingMode,
   safeParseRunContextInput
 } from "@shipyard/agent-core";
 
@@ -548,6 +549,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     title?: unknown;
     threadId?: unknown;
     parentRunId?: unknown;
+    operatingMode?: unknown;
     simulateFailure?: unknown;
     toolRequest?: unknown;
     project?: unknown;
@@ -583,6 +585,12 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     return {
       error: "parentRunId must be a string when provided."
     };
+  }
+
+  const operatingMode = parseOperatingMode(body.operatingMode);
+
+  if ("error" in operatingMode) {
+    return operatingMode;
   }
 
   const simulateFailure = parseBooleanField(body.simulateFailure);
@@ -641,6 +649,7 @@ function parseTaskSubmission(request: RuntimeTaskRequest): SubmitTaskInput | { e
     title: body.title,
     threadId: body.threadId,
     parentRunId: body.parentRunId ?? null,
+    operatingMode: operatingMode.value,
     simulateFailure: simulateFailure ?? false,
     toolRequest: toolRequest.value,
     attachments: analyzeTaskAttachments(
@@ -668,6 +677,8 @@ function serializeRun(run: AgentRunRecord) {
     parentRunId: run.parentRunId,
     title: run.title,
     instruction: run.instruction,
+    requestedOperatingMode: run.requestedOperatingMode ?? null,
+    operatingMode: run.operatingMode ?? null,
     simulateFailure: run.simulateFailure,
     toolRequest: run.toolRequest,
     attachments: run.attachments,
@@ -691,6 +702,26 @@ function serializeRun(run: AgentRunRecord) {
     operatorView: deriveOperatorRunView(run),
     error: run.error,
     result: run.result
+  };
+}
+
+function parseOperatingMode(
+  value: unknown
+): { value: SubmitTaskInput["operatingMode"] } | { error: string } {
+  if (value === undefined || value === null || value === "") {
+    return {
+      value: null
+    };
+  }
+
+  if (!isRequestedOperatingMode(value)) {
+    return {
+      error: "operatingMode must be auto, build, review, debug, refactor, or factory when provided."
+    };
+  }
+
+  return {
+    value
   };
 }
 

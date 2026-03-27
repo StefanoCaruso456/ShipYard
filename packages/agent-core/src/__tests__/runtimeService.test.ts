@@ -168,6 +168,35 @@ test("persistent runtime preserves project ownership metadata on queued runs", a
   assert.equal(storedRun?.project?.folder?.displayPath, "analytics-dashboard");
 });
 
+test("persistent runtime resolves auto operating mode from review-style instructions", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Review the runtime API implementation for bugs and risks."
+  });
+
+  const storedRun = runtimeService.getRun(run.id);
+
+  assert.equal(storedRun?.requestedOperatingMode, "auto");
+  assert.equal(storedRun?.operatingMode, "review");
+});
+
+test("persistent runtime preserves explicit operating mode selections", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const runtimeService = await createPersistentRuntimeService({ instructionRuntime });
+
+  const run = await runtimeService.submitTask({
+    instruction: "Clean up the runtime state handling without changing behavior.",
+    operatingMode: "refactor"
+  });
+
+  const storedRun = runtimeService.getRun(run.id);
+
+  assert.equal(storedRun?.requestedOperatingMode, "refactor");
+  assert.equal(storedRun?.operatingMode, "refactor");
+});
+
 test("persistent runtime runs active-thread follow-ups before unrelated queued work", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const firstGate = createDeferred<AgentRunResult>();

@@ -299,6 +299,8 @@ export function buildRuntimeThread(
     id: firstRun.threadId,
     title: firstRun.title?.trim() || deriveThreadTitle(firstRun.instruction),
     summary: deriveRuntimeThreadSummary(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
+    requestedOperatingMode: latestRun.requestedOperatingMode ?? null,
+    operatingMode: latestRun.operatingMode ?? null,
     status: threadStatus,
     source: "live",
     createdLabel: formatShortDate(firstRun.createdAt),
@@ -733,6 +735,8 @@ function buildFocusedRunSummary(
   return {
     id: run.id,
     instruction: run.instruction,
+    requestedOperatingMode: run.requestedOperatingMode ?? null,
+    operatingMode: run.operatingMode ?? null,
     status: run.status,
     createdAt: formatDateTime(run.createdAt),
     startedAt: run.startedAt ? formatDateTime(run.startedAt) : null,
@@ -1018,6 +1022,14 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
   const traceSummary = trace?.summary ?? null;
   const timestamp = formatDateTime(task.completedAt ?? task.startedAt ?? task.createdAt);
   const meta: string[] = [];
+  const resolvedOperatingMode = traceSummary?.operatingMode ?? task.operatingMode ?? null;
+  const requestedOperatingMode = traceSummary?.requestedOperatingMode ?? task.requestedOperatingMode ?? null;
+
+  if (resolvedOperatingMode) {
+    meta.push(`${capitalize(resolvedOperatingMode)} mode`);
+  } else if (requestedOperatingMode) {
+    meta.push(`${capitalize(requestedOperatingMode)} requested`);
+  }
 
   if (traceSummary?.model.modelId) {
     meta.push(traceSummary.model.modelId);
