@@ -5,6 +5,7 @@ import type {
   ProjectPayload,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeRequestedOperatingMode,
   RuntimeRepoBranchResponse,
   RuntimeOperatorApprovalDecision,
   RuntimeStatusResponse,
@@ -94,6 +95,7 @@ export function submitRuntimeTask(input: {
   title?: string;
   threadId?: string;
   parentRunId?: string | null;
+  operatingMode?: RuntimeRequestedOperatingMode | null;
   simulateFailure?: boolean;
   toolRequest?: RuntimeTaskToolRequest | null;
   attachments?: ComposerAttachment[];
@@ -119,6 +121,10 @@ export function submitRuntimeTask(input: {
 
     if (input.parentRunId) {
       formData.append("parentRunId", input.parentRunId);
+    }
+
+    if (input.operatingMode) {
+      formData.append("operatingMode", input.operatingMode);
     }
 
     if (input.simulateFailure !== undefined) {

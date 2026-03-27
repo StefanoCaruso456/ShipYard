@@ -134,27 +134,24 @@ test("normalizeRunContextInputValue salvages valid entries from partially invali
 test("control plane artifact and handoff schemas preserve typed runtime records", () => {
   const artifact = controlPlaneArtifactSchema.parse({
     id: "artifact-1",
-    kind: "architecture_decision",
+    kind: "user_flow_spec",
     entityKind: "story",
     entityId: "story-1",
-    summary: "Route the story to the backend specialist.",
+    summary: "Map the operator journey for the story.",
     createdAt: "2026-03-26T05:00:00.000Z",
     producerRole: "orchestrator",
     producerId: "orch-1",
     producerAgentTypeId: null,
     path: " docs/briefs/backend.md ",
     payload: {
-      kind: "architecture_decision",
+      kind: "user_flow_spec",
       version: 1,
       storyId: "story-1",
-      selectedSpecialistAgentTypeId: "backend_dev",
-      decisionSource: "registry_default",
-      rationale: "Default the story to backend_dev.",
-      domainTargets: ["api", "runtime"],
-      fileTargets: ["packages/agent-core/src/runtime/controlPlane.ts"],
-      allowedToolNames: ["read_file", "edit_file_region"],
-      validationTargets: ["pnpm typecheck"],
-      taskIds: ["task-1"]
+      primaryAudience: "operator",
+      entryPoints: ["Operator view"],
+      journeySteps: ["Open the operator view.", "Review the story packet."],
+      successOutcome: "Operator understands the next action.",
+      notes: ["This flow is operational rather than end-user facing."]
     }
   });
   const handoff = controlPlaneHandoffSchema.parse({
@@ -176,6 +173,7 @@ test("control plane artifact and handoff schemas preserve typed runtime records"
     workPacket: {
       version: 1,
       sourceArtifactIds: [" artifact-1 "],
+      flowArtifactIds: [" artifact-1 "],
       scopeSummary: " Ship the backend patch ",
       constraints: [" keep scope tight "],
       fileTargets: [" packages/agent-core/src/runtime/controlPlane.ts "],
@@ -193,10 +191,11 @@ test("control plane artifact and handoff schemas preserve typed runtime records"
   });
 
   assert.equal(artifact.path, "docs/briefs/backend.md");
-  assert.equal(artifact.payload?.kind, "architecture_decision");
+  assert.equal(artifact.payload?.kind, "user_flow_spec");
   assert.deepEqual(handoff.artifactIds, ["artifact-1"]);
   assert.deepEqual(handoff.validationTargets, ["pnpm typecheck"]);
   assert.equal(handoff.purpose, "Deliver the backend patch");
+  assert.deepEqual(handoff.workPacket?.flowArtifactIds, ["artifact-1"]);
   assert.equal(handoff.workPacket?.ownerAgentTypeId, "backend_dev");
 });
 

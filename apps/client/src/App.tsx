@@ -14,7 +14,6 @@ import {
   submitRuntimeTask,
   transcribeRuntimeAudio
 } from "./api";
-import { buildComposerAttachment } from "./attachments";
 import { applyLocalFilePlan, extractLocalFilePlan } from "./localFileBridge";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -49,8 +48,10 @@ import type {
   RuntimeFactoryRunInput,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeOperatingMode,
   RuntimeRepoBranchSnapshot,
   RuntimeOperatorApprovalDecision,
+  RuntimeRequestedOperatingMode,
   RuntimeStatusResponse,
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
@@ -103,7 +104,13 @@ function App() {
     Record<string, RuntimeQueuedFollowUpDraft[]>
   >({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
-  const [workflowMode, setWorkflowMode] = useState<RuntimeWorkflowMode>("standard");
+  const [workflowMode, setWorkflowMode] = useState<RuntimeWorkflowMode>("auto");
+  const [workflowModesByThreadId, setWorkflowModesByThreadId] = useState<
+    Record<string, RuntimeRequestedOperatingMode>
+  >({});
+  const [workflowModesByProjectId, setWorkflowModesByProjectId] = useState<
+    Record<string, RuntimeRequestedOperatingMode>
+  >({});
   const [factoryDraft, setFactoryDraft] = useState<RuntimeFactoryComposerDraft>(createDefaultFactoryDraft());
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
@@ -397,6 +404,12 @@ function App() {
     : null;
   const activeThread =
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
+  const preferredThreadWorkflowMode =
+    (activeThread ? workflowModesByThreadId[activeThread.id] : undefined) ??
+    activeThread?.requestedOperatingMode ??
+    null;
+  const preferredProjectWorkflowMode =
+    (activeProject ? workflowModesByProjectId[activeProject.id] : undefined) ?? null;
   const activeLiveRunIds =
     activeThread?.source === "live" ? activeThread.liveRuntime?.runIds ?? [] : [];
   const activeLiveRunIdsKey = activeLiveRunIds.join("|");
@@ -435,6 +448,21 @@ function App() {
       [activeProject.id]: null
     }));
   }, [activeGroup, activeProject, activeThreadId]);
+
+  useEffect(() => {
+    const nextWorkflowMode =
+      preferredThreadWorkflowMode ??
+      activeThread?.operatingMode ??
+      preferredProjectWorkflowMode ??
+      "auto";
+
+    setWorkflowMode((current) => (current === nextWorkflowMode ? current : nextWorkflowMode));
+  }, [
+    activeThread?.id,
+    activeThread?.operatingMode,
+    preferredProjectWorkflowMode,
+    preferredThreadWorkflowMode
+  ]);
 
   useEffect(() => {
     if (activeLiveRuns.length === 0) {
@@ -748,6 +776,31 @@ function App() {
     }
   }
 
+  function rememberWorkflowMode(
+    projectId: string | null | undefined,
+    threadId: string | null | undefined,
+    mode: RuntimeRequestedOperatingMode
+  ) {
+    if (projectId) {
+      setWorkflowModesByProjectId((current) => ({
+        ...current,
+        [projectId]: mode
+      }));
+    }
+
+    if (threadId) {
+      setWorkflowModesByThreadId((current) => ({
+        ...current,
+        [threadId]: mode
+      }));
+    }
+  }
+
+  function handleWorkflowModeChange(mode: RuntimeWorkflowMode) {
+    setWorkflowMode(mode);
+    rememberWorkflowMode(activeProject?.id, activeThread?.id, mode);
+  }
+
   function handleCreateThread(projectId = activeProject?.id) {
     const projectToUse = visibleProjects.find((candidate) => candidate.id === projectId);
 
@@ -755,7 +808,7 @@ function App() {
       return;
     }
 
-    const thread = createDraftThread(projectToUse.name);
+    const thread = createDraftThread(projectToUse.name, "auto");
 
     setDraftThreadsByProject((current) => ({
       ...current,
@@ -767,7 +820,8 @@ function App() {
     }));
     setSelectedProjectId(projectToUse.id);
     setActiveNav("projects");
-    setWorkflowMode("standard");
+    rememberWorkflowMode(projectToUse.id, thread.id, "auto");
+    setWorkflowMode("auto");
     setComposerValue("");
     setComposerAttachments([]);
     setComposerMode("text");
@@ -837,6 +891,7 @@ function App() {
         ...current,
         [threadId]: [...(current[threadId] ?? []), followUpDraft]
       }));
+      rememberWorkflowMode(activeProject.id, threadId, workflowMode);
       setActiveNav("projects");
       setComposerValue("");
       setComposerAttachments([]);
@@ -859,11 +914,13 @@ function App() {
           threadId,
           parentRunId: activeThread.liveRuntime.latestRunId,
           toolRequest,
+          operatingMode: workflowMode,
           attachments: submittedAttachments,
           project: activeProject,
           context: runtimeContext
         });
 
+        rememberWorkflowMode(activeProject.id, response.task.threadId, workflowMode);
         setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
         if (submittedAttachments.length > 0) {
@@ -938,8 +995,11 @@ function App() {
       titleOverride: factoryInput ? `Factory · ${factoryInput.appName}` : null,
       instruction,
       attachments: submittedAttachments,
-      backendConnected: canSendToRuntime
+      backendConnected: canSendToRuntime,
+      workflowMode
     });
+
+    rememberWorkflowMode(activeProject.id, draftId, workflowMode);
 
     setDraftThreadsByProject((current) => ({
       ...current,
@@ -978,12 +1038,14 @@ function App() {
         instruction,
         title: optimisticThread.title,
         toolRequest,
+        operatingMode: workflowMode,
         attachments: submittedAttachments,
         project: activeProject,
         context: factoryInput ? undefined : runtimeContext,
         factory: factoryInput
       });
 
+      rememberWorkflowMode(activeProject.id, response.task.threadId, workflowMode);
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
       if (submittedAttachments.length > 0) {
@@ -1028,9 +1090,6 @@ function App() {
   }
 
   async function handleVoiceCapture(file: File) {
-    const attachment = await buildComposerAttachment(file);
-
-    setComposerAttachments((current) => [...current, attachment]);
     setComposerMode("voice");
     setTranscribingAudio(true);
     setSubmissionFeedback({
@@ -1044,17 +1103,6 @@ function App() {
       });
       const transcript = response.transcription.text.trim();
 
-      setComposerAttachments((current) =>
-        current.map((candidate) =>
-          candidate.id === attachment.id
-            ? {
-                ...candidate,
-                summary: response.transcription.summary,
-                excerpt: response.transcription.excerpt
-              }
-            : candidate
-        )
-      );
       setComposerValue((current) => mergeTranscript(current, transcript));
       setComposerMode("text");
       setSubmissionFeedback({
@@ -1396,7 +1444,7 @@ function App() {
           submitting={submitting}
           transcribingAudio={transcribingAudio}
           backendConnected={backendConnected}
-          onWorkflowModeChange={setWorkflowMode}
+          onWorkflowModeChange={handleWorkflowModeChange}
           onFactoryDraftChange={handleFactoryDraftChange}
           onComposerModeChange={setComposerMode}
           onComposerValueChange={setComposerValue}
@@ -1579,11 +1627,16 @@ function areProjectRepositoriesEqual(left: WorkspaceProject["repository"], right
   );
 }
 
-function createDraftThread(projectName: string): WorkspaceThread {
+function createDraftThread(
+  projectName: string,
+  workflowMode: RuntimeRequestedOperatingMode
+): WorkspaceThread {
   return {
     id: createDraftId(),
     title: "New thread",
     summary: `Start a task for ${projectName}.`,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: "draft",
     source: "draft",
     createdLabel: "Just now",
@@ -1601,7 +1654,8 @@ function buildDraftSubmissionThread({
   titleOverride,
   instruction,
   attachments,
-  backendConnected
+  backendConnected,
+  workflowMode
 }: {
   existingThread: WorkspaceThread | null;
   threadId: string;
@@ -1609,6 +1663,7 @@ function buildDraftSubmissionThread({
   instruction: string;
   attachments: ComposerAttachment[];
   backendConnected: boolean;
+  workflowMode: RuntimeRequestedOperatingMode;
 }): WorkspaceThread {
   const timestamp = formatShellTimestamp(new Date());
   const statusMessage = backendConnected
@@ -1618,6 +1673,8 @@ function buildDraftSubmissionThread({
     id: threadId,
     title: deriveThreadTitle(instruction),
     summary: instruction,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: backendConnected ? "pending" : "draft",
     source: "draft" as const,
     createdLabel: timestamp,
@@ -1636,6 +1693,8 @@ function buildDraftSubmissionThread({
           ? deriveThreadTitle(instruction)
         : nextThread.title,
     summary: instruction,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: backendConnected ? "pending" : "draft",
     updatedLabel: timestamp,
     tags: backendConnected ? ["pending", "live-request"] : ["draft", "local"],

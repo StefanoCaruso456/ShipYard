@@ -31,6 +31,16 @@ export type AgentRunStatus = "pending" | "running" | "paused" | "completed" | "f
 
 export type RuntimeWorkerState = "idle" | "running";
 
+export type RequestedOperatingMode =
+  | "auto"
+  | "build"
+  | "review"
+  | "debug"
+  | "refactor"
+  | "factory";
+
+export type OperatingMode = Exclude<RequestedOperatingMode, "auto">;
+
 export type RunAttachmentKind =
   | "image"
   | "text"
@@ -459,6 +469,8 @@ export type ControlPlaneArtifactKind =
   | "plan"
   | "requirements"
   | "architecture_decision"
+  | "user_flow_spec"
+  | "data_flow_spec"
   | "subtask_breakdown"
   | "delegation_brief"
   | "task_result"
@@ -597,6 +609,32 @@ export type ControlPlaneDelegationBriefArtifactPayload = {
   dependencyIds: string[];
 };
 
+export type ControlPlaneUserFlowAudience = "end_user" | "operator" | "developer";
+
+export type ControlPlaneUserFlowSpecArtifactPayload = {
+  kind: "user_flow_spec";
+  version: 1;
+  storyId: string;
+  primaryAudience: ControlPlaneUserFlowAudience;
+  entryPoints: string[];
+  journeySteps: string[];
+  successOutcome: string;
+  notes: string[];
+};
+
+export type ControlPlaneDataFlowSpecArtifactPayload = {
+  kind: "data_flow_spec";
+  version: 1;
+  storyId: string;
+  inputSignals: string[];
+  processingSteps: string[];
+  outputs: string[];
+  stores: string[];
+  integrations: string[];
+  fileTargets: string[];
+  domainTargets: string[];
+};
+
 export type DeliverySummaryLinkKind =
   | "repository"
   | "pull_request"
@@ -635,6 +673,8 @@ export type ControlPlaneArtifactPayload =
   | ControlPlanePlanArtifactPayload
   | ControlPlaneRequirementsArtifactPayload
   | ControlPlaneArchitectureDecisionArtifactPayload
+  | ControlPlaneUserFlowSpecArtifactPayload
+  | ControlPlaneDataFlowSpecArtifactPayload
   | ControlPlaneSubtaskBreakdownArtifactPayload
   | ControlPlaneDelegationBriefArtifactPayload
   | ControlPlaneDeliverySummaryArtifactPayload
@@ -657,6 +697,7 @@ export type ControlPlaneArtifact = {
 export type ControlPlaneWorkPacket = {
   version: 1;
   sourceArtifactIds: string[];
+  flowArtifactIds: string[];
   scopeSummary: string;
   constraints: string[];
   fileTargets: string[];
@@ -1390,6 +1431,7 @@ export type SubmitTaskInput = {
   title?: string;
   threadId?: string;
   parentRunId?: string | null;
+  operatingMode?: RequestedOperatingMode | null;
   simulateFailure?: boolean;
   toolRequest?: RepoToolRequest | null;
   attachments?: RunAttachment[];
@@ -1425,6 +1467,8 @@ export type AgentRunResult = {
   controlPlane?: ControlPlaneState | null;
   rebuild?: RebuildState | null;
   factory?: FactoryRunState | null;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   responseText?: string | null;
   provider?: "openai" | null;
   modelId?: string | null;
@@ -1451,6 +1495,8 @@ export type AgentRunRecord = {
   parentRunId: string | null;
   title: string | null;
   instruction: string;
+  requestedOperatingMode?: RequestedOperatingMode | null;
+  operatingMode?: OperatingMode | null;
   simulateFailure: boolean;
   toolRequest: RepoToolRequest | null;
   attachments: RunAttachment[];

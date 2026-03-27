@@ -130,11 +130,14 @@ test("operator view surfaces execution ownership for an active phase task", () =
   assert.equal(operatorView.progress?.totalTasks, 1);
   assert.equal(operatorView.retries.taskRetries, 1);
   assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "requirements"));
+  assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "user_flow_spec"));
+  assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "data_flow_spec"));
   assert.ok(
     operatorView.delegationPackets.some(
       (packet) =>
         packet.entityKind === "task" &&
-        packet.workPacket?.scopeSummary.includes("Implement the operator overview")
+        packet.workPacket?.scopeSummary.includes("Implement the operator overview") &&
+        packet.workPacket.flowArtifactIds.length === 2
     )
   );
   assert.ok(operatorView.journal.some((entry) => entry.label === "Task Started"));

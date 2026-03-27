@@ -89,7 +89,15 @@ export type RuntimeRepoBranchSnapshot = {
 export type RuntimeRepoBranchResponse = RuntimeRepoBranchSnapshot;
 
 export type RuntimeTaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
-export type RuntimeWorkflowMode = "standard" | "factory";
+export type RuntimeRequestedOperatingMode =
+  | "auto"
+  | "build"
+  | "review"
+  | "debug"
+  | "refactor"
+  | "factory";
+export type RuntimeOperatingMode = Exclude<RuntimeRequestedOperatingMode, "auto">;
+export type RuntimeWorkflowMode = RuntimeRequestedOperatingMode;
 export type RuntimeFactoryStackTemplateId =
   | "nextjs_supabase_vercel"
   | "nextjs_railway_postgres"
@@ -284,6 +292,8 @@ export type RuntimeTask = {
   parentRunId: string | null;
   title: string | null;
   instruction: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   simulateFailure: boolean;
   toolRequest?: unknown;
   attachments: RuntimeAttachment[];
@@ -357,6 +367,8 @@ export type RuntimeTask = {
       | "repo-tool"
       | "phase-execution"
       | "ship-rebuild";
+    requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+    operatingMode?: RuntimeOperatingMode | null;
     summary: string;
     instructionEcho: string;
     skillId: string;
@@ -383,6 +395,7 @@ export type RuntimeTraceSpanType =
   | "phase"
   | "story"
   | "task"
+  | "sync"
   | "coordinator"
   | "handoff"
   | "merge"
@@ -431,6 +444,8 @@ export type RuntimeTraceRunLog = {
     totalDurationMs: number | null;
     queueDelayMs: number | null;
     roleFlow: string | null;
+    requestedOperatingMode: string | null;
+    operatingMode: string | null;
     model: {
       provider: string | null;
       modelId: string | null;
@@ -836,6 +851,7 @@ export type RuntimeOperatorDelegationPacket = {
     | {
         version: 1;
         sourceArtifactIds: string[];
+        flowArtifactIds: string[];
         scopeSummary: string;
         constraints: string[];
         fileTargets: string[];
@@ -1056,6 +1072,8 @@ export type ProgressEvent = {
 export type RuntimeThreadFocusedRun = {
   id: string;
   instruction: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   status: RuntimeTaskStatus;
   createdAt: string;
   startedAt: string | null;
@@ -1086,6 +1104,8 @@ export type WorkspaceThread = {
   id: string;
   title: string;
   summary: string;
+  requestedOperatingMode?: RuntimeRequestedOperatingMode | null;
+  operatingMode?: RuntimeOperatingMode | null;
   status: WorkspaceThreadStatus;
   source: "live" | "guide" | "preview" | "draft";
   createdLabel: string;

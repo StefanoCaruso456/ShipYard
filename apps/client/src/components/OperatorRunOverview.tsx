@@ -426,6 +426,10 @@ export function OperatorRunOverview({
                 <p>{packet.workPacket?.scopeSummary || packet.purpose}</p>
                 <div className="operator-overview__meta">
                   <span>{packet.artifactIds.length} artifacts</span>
+                  <span>
+                    {packet.workPacket?.flowArtifactIds.length ?? 0} flow spec
+                    {(packet.workPacket?.flowArtifactIds.length ?? 0) === 1 ? "" : "s"}
+                  </span>
                   <span>{packet.validationTargets.length} validation targets</span>
                   <span>{packet.dependencyIds.length} dependencies</span>
                   {packet.workPacket?.ownerLabel ? <span>{packet.workPacket.ownerLabel}</span> : null}

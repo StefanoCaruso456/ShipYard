@@ -42,6 +42,15 @@ type ComposerProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
+const workflowModeOptions: Array<{ value: RuntimeWorkflowMode; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "build", label: "Build" },
+  { value: "review", label: "Review" },
+  { value: "debug", label: "Debug" },
+  { value: "refactor", label: "Refactor" },
+  { value: "factory", label: "Factory" }
+];
+
 export function Composer({
   project,
   backendConnected,
@@ -65,6 +74,7 @@ export function Composer({
   onSubmit
 }: ComposerProps) {
   const fileInputId = useId();
+  const modeSelectId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -92,6 +102,14 @@ export function Composer({
           ? "Describe the application you want Factory Mode to build..."
         : composerMode === "terminal"
           ? "Run a workspace command, for example: git status"
+        : workflowMode === "review"
+          ? "Ask for a review, audit, or findings-first assessment..."
+        : workflowMode === "debug"
+          ? "Describe the bug, error, or failing behavior you want diagnosed..."
+        : workflowMode === "refactor"
+          ? "Describe the refactor or structural cleanup you want to make..."
+        : workflowMode === "build"
+          ? "Describe the feature, implementation step, or code change you want built..."
         : composerMode === "image"
           ? "Describe the image task..."
           : composerMode === "voice"
@@ -285,7 +303,7 @@ export function Composer({
 
   function handleSelectComposerMode(mode: ComposerMode) {
     if (mode === "terminal") {
-      onWorkflowModeChange("standard");
+      onWorkflowModeChange("auto");
     }
 
     onComposerModeChange(mode);
@@ -392,6 +410,33 @@ export function Composer({
                           : "Mic"}
                     </span>
                   </button>
+                  <div className="composer__mode-control">
+                    <label className="composer__mode-label" htmlFor={modeSelectId}>
+                      Mode
+                    </label>
+                    <select
+                      id={modeSelectId}
+                      className="composer__mode-select"
+                      value={workflowMode}
+                      onChange={(event) =>
+                        onWorkflowModeChange(event.target.value as RuntimeWorkflowMode)
+                      }
+                    >
+                      {workflowModeOptions.map((option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                          disabled={
+                            option.value === "factory" &&
+                            !factoryModeSupported &&
+                            workflowMode !== "factory"
+                          }
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="composer__actions">
@@ -585,22 +630,32 @@ export function Composer({
                     Terminal
                   </button>
                 </div>
-                <div className="composer__workflow-buttons composer__workflow-buttons--toolbar">
-                  <button
-                    type="button"
-                    className={`composer__workflow-button ${workflowMode === "standard" ? "is-active" : ""}`}
-                    onClick={() => onWorkflowModeChange("standard")}
+                <div className="composer__mode-control">
+                  <label className="composer__mode-label" htmlFor={modeSelectId}>
+                    Mode
+                  </label>
+                  <select
+                    id={modeSelectId}
+                    className="composer__mode-select"
+                    value={workflowMode}
+                    onChange={(event) =>
+                      onWorkflowModeChange(event.target.value as RuntimeWorkflowMode)
+                    }
                   >
-                    Task mode
-                  </button>
-                  <button
-                    type="button"
-                    className={`composer__workflow-button ${workflowMode === "factory" ? "is-active" : ""}`}
-                    disabled={!factoryModeSupported && workflowMode !== "factory"}
-                    onClick={() => onWorkflowModeChange("factory")}
-                  >
-                    Factory mode
-                  </button>
+                    {workflowModeOptions.map((option) => (
+                      <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={
+                          option.value === "factory" &&
+                          !factoryModeSupported &&
+                          workflowMode !== "factory"
+                        }
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -619,7 +674,9 @@ export function Composer({
         )}
       </div>
 
-      {feedback ? <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p> : null}
+      {feedback?.tone === "danger" ? (
+        <p className={`composer__feedback composer__feedback--${feedback.tone}`}>{feedback.text}</p>
+      ) : null}
 
       <input
         id={fileInputId}
