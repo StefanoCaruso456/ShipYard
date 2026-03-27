@@ -14,7 +14,6 @@ import {
   submitRuntimeTask,
   transcribeRuntimeAudio
 } from "./api";
-import { buildComposerAttachment } from "./attachments";
 import { applyLocalFilePlan, extractLocalFilePlan } from "./localFileBridge";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -988,9 +987,6 @@ function App() {
   }
 
   async function handleVoiceCapture(file: File) {
-    const attachment = await buildComposerAttachment(file);
-
-    setComposerAttachments((current) => [...current, attachment]);
     setComposerMode("voice");
     setTranscribingAudio(true);
     setSubmissionFeedback({
@@ -1004,17 +1000,6 @@ function App() {
       });
       const transcript = response.transcription.text.trim();
 
-      setComposerAttachments((current) =>
-        current.map((candidate) =>
-          candidate.id === attachment.id
-            ? {
-                ...candidate,
-                summary: response.transcription.summary,
-                excerpt: response.transcription.excerpt
-              }
-            : candidate
-        )
-      );
       setComposerValue((current) => mergeTranscript(current, transcript));
       setComposerMode("text");
       setSubmissionFeedback({
