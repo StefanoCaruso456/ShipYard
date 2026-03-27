@@ -319,6 +319,8 @@ export type PhaseInput = {
   name: string;
   description: string;
   approvalGate?: ApprovalGateInput | null;
+  completionCriteria?: string[];
+  verificationCriteria?: string[];
   userStories: UserStoryInput[];
 };
 
@@ -400,6 +402,8 @@ export type Phase = {
   description: string;
   approvalGate: ApprovalGateState | null;
   status: PhaseStatus;
+  completionCriteria?: string[];
+  verificationCriteria?: string[];
   userStories: UserStory[];
   failureReason: string | null;
   lastValidationResults: ValidationGateResult[] | null;
@@ -1130,6 +1134,27 @@ export type FactoryArtifactKind =
 
 export type FactoryArtifactStatus = "planned" | "active" | "ready" | "completed";
 
+export type FactoryContractEvidenceKind =
+  | "phase_status"
+  | "artifact_status"
+  | "task_evidence"
+  | "delivery_summary"
+  | "result_summary"
+  | "repository_link";
+
+export type FactoryCompletionCriterion = {
+  id: string;
+  description: string;
+};
+
+export type FactoryVerificationCriterion = {
+  id: string;
+  description: string;
+  evidenceKind: FactoryContractEvidenceKind;
+  target: string;
+  expectedValue?: string | null;
+};
+
 export type FactoryRunInput = {
   appName: string;
   stackTemplateId: FactoryStackTemplateId;
@@ -1174,6 +1199,45 @@ export type FactoryDeploymentState = {
   url: string | null;
 };
 
+export type FactoryAppSpec = {
+  appName: string;
+  productBrief: string;
+  stack: FactoryStackSummary;
+  repository: {
+    provider: FactoryRepositoryProviderId;
+    owner: string | null;
+    name: string;
+    visibility: FactoryRepositoryVisibility;
+    baseBranch: string;
+  };
+  deployment: {
+    provider: FactoryDeploymentProviderId;
+    projectName: string | null;
+    environment: string | null;
+  };
+};
+
+export type FactoryPhaseContract = {
+  phaseId: string;
+  stageId: FactoryStageId;
+  name: string;
+  completionCriteria: FactoryCompletionCriterion[];
+  verificationCriteria: FactoryVerificationCriterion[];
+};
+
+export type FactoryDefinitionOfDone = {
+  summary: string;
+  completionCriteria: FactoryCompletionCriterion[];
+  verificationCriteria: FactoryVerificationCriterion[];
+};
+
+export type FactoryCompletionContract = {
+  version: 1;
+  appSpec: FactoryAppSpec;
+  definitionOfDone: FactoryDefinitionOfDone;
+  phases: FactoryPhaseContract[];
+};
+
 export type FactoryArtifact = {
   id: string;
   kind: FactoryArtifactKind;
@@ -1194,6 +1258,7 @@ export type FactoryRunState = {
   stack: FactoryStackSummary;
   repository: FactoryRepositoryState;
   deployment: FactoryDeploymentState;
+  completionContract: FactoryCompletionContract;
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;

@@ -1,10 +1,15 @@
 import type {
   AgentRunStatus,
+  FactoryAppSpec,
   FactoryArtifact,
   FactoryArtifactStatus,
+  FactoryCompletionContract,
   FactoryDeploymentProviderId,
+  FactoryDeploymentState,
   FactoryRepositoryProviderId,
+  FactoryRepositoryState,
   FactoryRepositoryVisibility,
+  FactoryDefinitionOfDone,
   FactoryRunInput,
   FactoryRunState,
   FactoryStackSummary,
@@ -58,6 +63,38 @@ const FACTORY_PHASE_STAGE_IDS = {
   "factory-implementation": "implementation",
   "factory-delivery": "delivery"
 } as const satisfies Record<string, FactoryStageId>;
+
+const FACTORY_IMPLEMENTATION_TASK_IDS = {
+  nextjs_supabase_vercel: {
+    shellTaskId: "task-nextjs-shell",
+    flowTaskId: "task-supabase-flow"
+  },
+  nextjs_railway_postgres: {
+    shellTaskId: "task-nextjs-shell",
+    flowTaskId: "task-railway-data-flow"
+  },
+  react_express_railway: {
+    shellTaskId: "task-frontend-shell",
+    flowTaskId: "task-api-flow"
+  }
+} as const satisfies Record<
+  FactoryStackTemplateId,
+  {
+    shellTaskId: string;
+    flowTaskId: string;
+  }
+>;
+
+type FactoryCompletionContractSeed = {
+  appName: string;
+  productBrief: string;
+  stack: FactoryStackSummary;
+  repository: Pick<
+    FactoryRepositoryState,
+    "provider" | "owner" | "name" | "visibility" | "baseBranch"
+  >;
+  deployment: Pick<FactoryDeploymentState, "provider" | "projectName" | "environment">;
+};
 
 export const factoryStackTemplateIds = Object.keys(
   FACTORY_STACK_SUMMARIES
@@ -166,29 +203,40 @@ export function createFactoryRunState(options: {
     normalized.deployment.url?.trim() ||
     null;
   const stack = getFactoryStackSummary(normalized.stackTemplateId);
-  const repositoryLabel = formatRepositoryLabel(normalized.repository.owner, normalized.repository.name);
+  const productBrief = options.productBrief.trim();
+  const repository: FactoryRepositoryState = {
+    provider: normalized.repository.provider ?? DEFAULT_REPOSITORY_PROVIDER,
+    owner: normalized.repository.owner ?? null,
+    name: normalized.repository.name,
+    visibility: normalized.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY,
+    baseBranch: normalized.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH,
+    url: repositoryUrl,
+    localPath: options.workspacePath.trim()
+  };
+  const deployment: FactoryDeploymentState = {
+    provider: normalized.deployment.provider,
+    projectName: normalized.deployment.projectName ?? null,
+    environment: normalized.deployment.environment ?? null,
+    url: deploymentUrl
+  };
+  const repositoryLabel = formatRepositoryLabel(repository.owner, repository.name);
+  const completionContract = buildFactoryCompletionContract({
+    appName: normalized.appName,
+    productBrief,
+    stack,
+    repository,
+    deployment
+  });
 
   return {
     version: 1,
     mode: "factory",
     appName: normalized.appName,
-    productBrief: options.productBrief.trim(),
+    productBrief,
     stack,
-    repository: {
-      provider: normalized.repository.provider ?? DEFAULT_REPOSITORY_PROVIDER,
-      owner: normalized.repository.owner ?? null,
-      name: normalized.repository.name,
-      visibility: normalized.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY,
-      baseBranch: normalized.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH,
-      url: repositoryUrl,
-      localPath: options.workspacePath.trim()
-    },
-    deployment: {
-      provider: normalized.deployment.provider,
-      projectName: normalized.deployment.projectName ?? null,
-      environment: normalized.deployment.environment ?? null,
-      url: deploymentUrl
-    },
+    repository,
+    deployment,
+    completionContract,
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -258,37 +306,49 @@ export function normalizeFactoryRunState(
     return null;
   }
 
+  const productBrief = value.productBrief?.trim() ? value.productBrief.trim() : "";
+  const repository: FactoryRepositoryState = {
+    provider: value.repository?.provider === "github" ? "github" : DEFAULT_REPOSITORY_PROVIDER,
+    owner: value.repository?.owner?.trim() ? value.repository.owner.trim() : null,
+    name: value.repository?.name?.trim() ? value.repository.name.trim() : slugify(appName),
+    visibility: isFactoryRepositoryVisibility(value.repository?.visibility)
+      ? value.repository.visibility
+      : DEFAULT_REPOSITORY_VISIBILITY,
+    baseBranch: value.repository?.baseBranch?.trim()
+      ? value.repository.baseBranch.trim()
+      : DEFAULT_REPOSITORY_BASE_BRANCH,
+    url: value.repository?.url?.trim() ? value.repository.url.trim() : null,
+    localPath: value.repository?.localPath?.trim() ? value.repository.localPath.trim() : null
+  };
+  const deployment: FactoryDeploymentState = {
+    provider: isFactoryDeploymentProviderId(value.deployment?.provider)
+      ? value.deployment.provider
+      : "manual",
+    projectName: value.deployment?.projectName?.trim()
+      ? value.deployment.projectName.trim()
+      : null,
+    environment: value.deployment?.environment?.trim()
+      ? value.deployment.environment.trim()
+      : null,
+    url: value.deployment?.url?.trim() ? value.deployment.url.trim() : null
+  };
+  const completionContract = buildFactoryCompletionContract({
+    appName,
+    productBrief,
+    stack,
+    repository,
+    deployment
+  });
+
   return {
     version: 1,
     mode: "factory",
     appName,
-    productBrief: value.productBrief?.trim() ? value.productBrief.trim() : "",
+    productBrief,
     stack,
-    repository: {
-      provider: value.repository?.provider === "github" ? "github" : DEFAULT_REPOSITORY_PROVIDER,
-      owner: value.repository?.owner?.trim() ? value.repository.owner.trim() : null,
-      name: value.repository?.name?.trim() ? value.repository.name.trim() : slugify(appName),
-      visibility: isFactoryRepositoryVisibility(value.repository?.visibility)
-        ? value.repository.visibility
-        : DEFAULT_REPOSITORY_VISIBILITY,
-      baseBranch: value.repository?.baseBranch?.trim()
-        ? value.repository.baseBranch.trim()
-        : DEFAULT_REPOSITORY_BASE_BRANCH,
-      url: value.repository?.url?.trim() ? value.repository.url.trim() : null,
-      localPath: value.repository?.localPath?.trim() ? value.repository.localPath.trim() : null
-    },
-    deployment: {
-      provider: isFactoryDeploymentProviderId(value.deployment?.provider)
-        ? value.deployment.provider
-        : "manual",
-      projectName: value.deployment?.projectName?.trim()
-        ? value.deployment.projectName.trim()
-        : null,
-      environment: value.deployment?.environment?.trim()
-        ? value.deployment.environment.trim()
-        : null,
-      url: value.deployment?.url?.trim() ? value.deployment.url.trim() : null
-    },
+    repository,
+    deployment,
+    completionContract,
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -337,22 +397,32 @@ export function syncFactoryRunState(options: {
     options.resultSummary?.trim() ||
     (options.status === "completed" ? options.rollingSummary?.text?.trim() || null : null) ||
     normalized.deliverySummary;
+  const repository: FactoryRepositoryState = {
+    ...normalized.repository,
+    url: repositoryLink?.url ?? normalized.repository.url,
+    localPath:
+      options.project?.folder?.provider === "runtime" &&
+      options.project.folder.displayPath?.trim()
+        ? options.project.folder.displayPath.trim()
+        : normalized.repository.localPath
+  };
+  const deployment: FactoryDeploymentState = {
+    ...normalized.deployment,
+    url: deploymentLink?.url ?? normalized.deployment.url
+  };
+  const completionContract = buildFactoryCompletionContract({
+    appName: normalized.appName,
+    productBrief: normalized.productBrief,
+    stack: normalized.stack,
+    repository,
+    deployment
+  });
 
   const nextFactory: FactoryRunState = {
     ...normalized,
-    repository: {
-      ...normalized.repository,
-      url: repositoryLink?.url ?? normalized.repository.url,
-      localPath:
-        options.project?.folder?.provider === "runtime" &&
-        options.project.folder.displayPath?.trim()
-          ? options.project.folder.displayPath.trim()
-          : normalized.repository.localPath
-    },
-    deployment: {
-      ...normalized.deployment,
-      url: deploymentLink?.url ?? normalized.deployment.url
-    },
+    repository,
+    deployment,
+    completionContract,
     currentStage,
     deliverySummary,
     updatedAt
@@ -380,6 +450,23 @@ export function compileFactoryTaskSubmission(options: {
   }
 
   const stack = getFactoryStackSummary(normalizedFactory.stackTemplateId);
+  const completionContract = buildFactoryCompletionContract({
+    appName: normalizedFactory.appName,
+    productBrief: options.input.instruction,
+    stack,
+    repository: {
+      provider: normalizedFactory.repository.provider ?? DEFAULT_REPOSITORY_PROVIDER,
+      owner: normalizedFactory.repository.owner ?? null,
+      name: normalizedFactory.repository.name,
+      visibility: normalizedFactory.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY,
+      baseBranch: normalizedFactory.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH
+    },
+    deployment: {
+      provider: normalizedFactory.deployment.provider,
+      projectName: normalizedFactory.deployment.projectName ?? null,
+      environment: normalizedFactory.deployment.environment ?? null
+    }
+  });
   const projectLinks = mergeProjectLinks(
     options.input.project?.links,
     normalizedFactory.deployment.url?.trim()
@@ -415,15 +502,20 @@ export function compileFactoryTaskSubmission(options: {
         provider: "runtime"
       }
     },
-    context: buildFactoryRunContext(options.input.context, normalizedFactory),
-    phaseExecution: buildFactoryPhaseExecution(normalizedFactory),
+    context: buildFactoryRunContext(
+      options.input.context,
+      normalizedFactory,
+      completionContract
+    ),
+    phaseExecution: buildFactoryPhaseExecution(normalizedFactory, completionContract),
     factory: normalizedFactory
   };
 }
 
 function buildFactoryRunContext(
   base: SubmitTaskInput["context"],
-  factory: FactoryRunInput
+  factory: FactoryRunInput,
+  completionContract: FactoryCompletionContract
 ): RunContextInput {
   const stack = getFactoryStackSummary(factory.stackTemplateId);
   const existing = base ?? {
@@ -460,6 +552,14 @@ function buildFactoryRunContext(
     ]),
     externalContext: [
       ...(existing.externalContext ?? []),
+      {
+        id: "factory-completion-contract",
+        kind: "spec",
+        title: "Factory completion contract",
+        content: summarizeFactoryCompletionContract(completionContract),
+        source: "factory-mode",
+        format: "markdown"
+      },
       {
         id: "factory-stack-summary",
         kind: "spec",
@@ -499,17 +599,26 @@ function buildFactoryRunContext(
     ],
     validationTargets: uniqueStrings([
       ...existing.validationTargets,
-      "Repository foundation scaffolded",
-      "Application shell implemented",
-      "Core product flow implemented",
-      "Delivery handoff prepared"
+      ...completionContract.definitionOfDone.completionCriteria.map(
+        (criterion) => criterion.description
+      )
     ]),
     specialistAgentTypeId: existing.specialistAgentTypeId ?? null
   };
 }
 
-function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInput {
+function buildFactoryPhaseExecution(
+  factory: FactoryRunInput,
+  completionContract: FactoryCompletionContract
+): PhaseExecutionInput {
   const stack = getFactoryStackSummary(factory.stackTemplateId);
+  const intakeCriteria = getFactoryPhaseCriteria(completionContract, "factory-intake");
+  const bootstrapCriteria = getFactoryPhaseCriteria(completionContract, "factory-bootstrap");
+  const implementationCriteria = getFactoryPhaseCriteria(
+    completionContract,
+    "factory-implementation"
+  );
+  const deliveryCriteria = getFactoryPhaseCriteria(completionContract, "factory-delivery");
 
   return {
     phases: [
@@ -517,6 +626,8 @@ function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInp
         id: "factory-intake",
         name: "Intake",
         description: `Clarify the product brief and working scope for ${factory.appName}.`,
+        completionCriteria: intakeCriteria.completionCriteria,
+        verificationCriteria: intakeCriteria.verificationCriteria,
         userStories: [
           {
             id: "story-product-brief",
@@ -542,6 +653,8 @@ function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInp
         id: "factory-bootstrap",
         name: "Bootstrap",
         description: `Scaffold the repository foundation for ${factory.appName}.`,
+        completionCriteria: bootstrapCriteria.completionCriteria,
+        verificationCriteria: bootstrapCriteria.verificationCriteria,
         approvalGate: {
           kind: "architecture",
           title: "Architecture bootstrap review",
@@ -570,6 +683,8 @@ function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInp
         id: "factory-implementation",
         name: "Implementation",
         description: `Build the initial product slice for ${factory.appName}.`,
+        completionCriteria: implementationCriteria.completionCriteria,
+        verificationCriteria: implementationCriteria.verificationCriteria,
         approvalGate: {
           kind: "implementation",
           title: "Implementation review",
@@ -582,6 +697,8 @@ function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInp
         id: "factory-delivery",
         name: "Delivery",
         description: `Prepare the delivery handoff for ${factory.appName}.`,
+        completionCriteria: deliveryCriteria.completionCriteria,
+        verificationCriteria: deliveryCriteria.verificationCriteria,
         approvalGate: {
           kind: "deployment",
           title: "Delivery review",
@@ -722,6 +839,321 @@ function buildImplementationStories(factory: FactoryRunInput) {
         }
       ];
   }
+}
+
+function buildFactoryCompletionContract(
+  seed: FactoryCompletionContractSeed
+): FactoryCompletionContract {
+  const appSpec: FactoryAppSpec = {
+    appName: seed.appName,
+    productBrief: seed.productBrief.trim(),
+    stack: seed.stack,
+    repository: {
+      provider: seed.repository.provider,
+      owner: seed.repository.owner ?? null,
+      name: seed.repository.name,
+      visibility: seed.repository.visibility,
+      baseBranch: seed.repository.baseBranch
+    },
+    deployment: {
+      provider: seed.deployment.provider,
+      projectName: seed.deployment.projectName ?? null,
+      environment: seed.deployment.environment ?? null
+    }
+  };
+
+  return {
+    version: 1,
+    appSpec,
+    definitionOfDone: buildFactoryDefinitionOfDone(appSpec),
+    phases: buildFactoryPhaseContracts(appSpec)
+  };
+}
+
+function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitionOfDone {
+  const repositoryLabel = formatRepositoryLabel(appSpec.repository.owner, appSpec.repository.name);
+
+  return {
+    summary: `${appSpec.appName} is complete when ${repositoryLabel} contains a verified first delivery slice on ${appSpec.stack.label} and the ${appSpec.deployment.provider} handoff is ready for operator review.`,
+    completionCriteria: [
+      {
+        id: "definition-of-done:intake",
+        description: "Factory intake is locked with a scoped product brief and first deliverable slice."
+      },
+      {
+        id: "definition-of-done:bootstrap",
+        description: `Repository foundation is scaffolded for ${repositoryLabel}.`
+      },
+      {
+        id: "definition-of-done:implementation",
+        description: "Application shell and core product flow are implemented for the first slice."
+      },
+      {
+        id: "definition-of-done:delivery",
+        description: "Deployment handoff and delivery summary are prepared for operator review."
+      }
+    ],
+    verificationCriteria: [
+      {
+        id: "definition-of-done:phase-intake",
+        description: "Phase execution marks Intake as completed.",
+        evidenceKind: "phase_status",
+        target: "factory-intake",
+        expectedValue: "completed"
+      },
+      {
+        id: "definition-of-done:phase-bootstrap",
+        description: "Phase execution marks Bootstrap as completed.",
+        evidenceKind: "phase_status",
+        target: "factory-bootstrap",
+        expectedValue: "completed"
+      },
+      {
+        id: "definition-of-done:phase-implementation",
+        description: "Phase execution marks Implementation as completed.",
+        evidenceKind: "phase_status",
+        target: "factory-implementation",
+        expectedValue: "completed"
+      },
+      {
+        id: "definition-of-done:phase-delivery",
+        description: "Phase execution marks Delivery as completed.",
+        evidenceKind: "phase_status",
+        target: "factory-delivery",
+        expectedValue: "completed"
+      },
+      {
+        id: "definition-of-done:delivery-summary",
+        description: "Delivery summary is persisted in runtime state.",
+        evidenceKind: "delivery_summary",
+        target: "factory.deliverySummary"
+      }
+    ]
+  };
+}
+
+function buildFactoryPhaseContracts(
+  appSpec: FactoryAppSpec
+): FactoryCompletionContract["phases"] {
+  const implementationTaskIds = FACTORY_IMPLEMENTATION_TASK_IDS[appSpec.stack.templateId];
+
+  return [
+    {
+      phaseId: "factory-intake",
+      stageId: "intake",
+      name: "Intake",
+      completionCriteria: [
+        {
+          id: "factory-intake:product-brief",
+          description: "Product brief captured."
+        },
+        {
+          id: "factory-intake:scope-aligned",
+          description: "Factory scope aligned around the first deliverable slice."
+        }
+      ],
+      verificationCriteria: [
+        {
+          id: "factory-intake:phase-status",
+          description: "Phase execution marks Intake as completed.",
+          evidenceKind: "phase_status",
+          target: "factory-intake",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-intake:product-brief-evidence",
+          description: 'Execution evidence includes "Product brief captured."',
+          evidenceKind: "task_evidence",
+          target: "task-product-brief",
+          expectedValue: "Product brief captured."
+        },
+        {
+          id: "factory-intake:scope-evidence",
+          description: 'Execution evidence includes "Factory scope aligned."',
+          evidenceKind: "task_evidence",
+          target: "task-factory-scope",
+          expectedValue: "Factory scope aligned."
+        }
+      ]
+    },
+    {
+      phaseId: "factory-bootstrap",
+      stageId: "bootstrap",
+      name: "Bootstrap",
+      completionCriteria: [
+        {
+          id: "factory-bootstrap:repository-foundation",
+          description: "Repository foundation scaffolded."
+        },
+        {
+          id: "factory-bootstrap:stack-alignment",
+          description: "Bootstrap plan aligned to the selected stack and factory workspace."
+        }
+      ],
+      verificationCriteria: [
+        {
+          id: "factory-bootstrap:phase-status",
+          description: "Phase execution marks Bootstrap as completed.",
+          evidenceKind: "phase_status",
+          target: "factory-bootstrap",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-bootstrap:repository-evidence",
+          description: 'Execution evidence includes "Repository foundation scaffolded."',
+          evidenceKind: "task_evidence",
+          target: "task-repository-bootstrap",
+          expectedValue: "Repository foundation scaffolded."
+        },
+        {
+          id: "factory-bootstrap:repository-artifact",
+          description: "Repository target artifact is marked completed.",
+          evidenceKind: "artifact_status",
+          target: "factory-artifact:repository",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-bootstrap:plan-artifact",
+          description: "Bootstrap plan artifact is marked completed.",
+          evidenceKind: "artifact_status",
+          target: "factory-artifact:bootstrap-plan",
+          expectedValue: "completed"
+        }
+      ]
+    },
+    {
+      phaseId: "factory-implementation",
+      stageId: "implementation",
+      name: "Implementation",
+      completionCriteria: [
+        {
+          id: "factory-implementation:app-shell",
+          description: "Application shell implemented."
+        },
+        {
+          id: "factory-implementation:core-flow",
+          description: "Core product flow implemented."
+        }
+      ],
+      verificationCriteria: [
+        {
+          id: "factory-implementation:phase-status",
+          description: "Phase execution marks Implementation as completed.",
+          evidenceKind: "phase_status",
+          target: "factory-implementation",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-implementation:app-shell-evidence",
+          description: 'Execution evidence includes "Application shell implemented."',
+          evidenceKind: "task_evidence",
+          target: implementationTaskIds.shellTaskId,
+          expectedValue: "Application shell implemented."
+        },
+        {
+          id: "factory-implementation:core-flow-evidence",
+          description: 'Execution evidence includes "Core product flow implemented."',
+          evidenceKind: "task_evidence",
+          target: implementationTaskIds.flowTaskId,
+          expectedValue: "Core product flow implemented."
+        }
+      ]
+    },
+    {
+      phaseId: "factory-delivery",
+      stageId: "delivery",
+      name: "Delivery",
+      completionCriteria: [
+        {
+          id: "factory-delivery:deployment-handoff",
+          description: "Deployment handoff prepared."
+        },
+        {
+          id: "factory-delivery:delivery-summary",
+          description: "Delivery summary prepared."
+        }
+      ],
+      verificationCriteria: [
+        {
+          id: "factory-delivery:phase-status",
+          description: "Phase execution marks Delivery as completed.",
+          evidenceKind: "phase_status",
+          target: "factory-delivery",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-delivery:handoff-evidence",
+          description: 'Execution evidence includes "Deployment handoff prepared."',
+          evidenceKind: "task_evidence",
+          target: "task-deployment-handoff",
+          expectedValue: "Deployment handoff prepared."
+        },
+        {
+          id: "factory-delivery:summary-evidence",
+          description: 'Execution evidence includes "Delivery summary prepared."',
+          evidenceKind: "task_evidence",
+          target: "task-delivery-summary",
+          expectedValue: "Delivery summary prepared."
+        },
+        {
+          id: "factory-delivery:handoff-artifact",
+          description: "Deployment handoff artifact is marked completed.",
+          evidenceKind: "artifact_status",
+          target: "factory-artifact:deployment-handoff",
+          expectedValue: "completed"
+        },
+        {
+          id: "factory-delivery:summary-artifact",
+          description: "Delivery summary artifact is marked completed.",
+          evidenceKind: "artifact_status",
+          target: "factory-artifact:delivery-summary",
+          expectedValue: "completed"
+        }
+      ]
+    }
+  ];
+}
+
+function getFactoryPhaseCriteria(
+  completionContract: FactoryCompletionContract,
+  phaseId: string
+) {
+  const phase = completionContract.phases.find((candidate) => candidate.phaseId === phaseId);
+
+  return {
+    completionCriteria:
+      phase?.completionCriteria.map((criterion) => criterion.description) ?? [],
+    verificationCriteria:
+      phase?.verificationCriteria.map((criterion) => criterion.description) ?? []
+  };
+}
+
+function summarizeFactoryCompletionContract(
+  completionContract: FactoryCompletionContract
+) {
+  const lines = [
+    `Definition of done: ${completionContract.definitionOfDone.summary}`,
+    "",
+    "Completion criteria:",
+    ...completionContract.definitionOfDone.completionCriteria.map(
+      (criterion) => `- ${criterion.description}`
+    ),
+    "",
+    "Verification criteria:",
+    ...completionContract.definitionOfDone.verificationCriteria.map(
+      (criterion) => `- ${criterion.description}`
+    ),
+    "",
+    ...completionContract.phases.flatMap((phase) => [
+      `${phase.name} completion criteria:`,
+      ...phase.completionCriteria.map((criterion) => `- ${criterion.description}`),
+      `${phase.name} verification criteria:`,
+      ...phase.verificationCriteria.map((criterion) => `- ${criterion.description}`),
+      ""
+    ])
+  ];
+
+  return lines.join("\n").trim();
 }
 
 function createFactoryTask(options: {
