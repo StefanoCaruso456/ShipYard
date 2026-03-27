@@ -294,7 +294,7 @@ export const controlPlaneHandoffSchema = z
       verificationTargetIds: normalizeStringArray(value.verificationTargetIds),
       validationTargets: normalizeStringArray(value.validationTargets),
       purpose: value.purpose,
-      workPacket: (value.workPacket as ControlPlaneHandoff["workPacket"] | undefined) ?? null,
+      workPacket: value.workPacket ?? null,
       status: value.status,
       createdAt: value.createdAt,
       acceptedAt: normalizeOptionalTrimmedString(value.acceptedAt),

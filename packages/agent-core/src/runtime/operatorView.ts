@@ -87,6 +87,7 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
     mergeDecisions,
     delivery: closeout.delivery,
     evaluation: closeout.evaluation,
+    comparativeAnalysis: closeout.comparativeAnalysis,
     planningArtifacts,
     delegationPackets,
     journal: buildJournal(run)
@@ -886,6 +887,8 @@ function derivePlanningArtifacts(
         "plan",
         "requirements",
         "architecture_decision",
+        "user_flow_spec",
+        "data_flow_spec",
         "subtask_breakdown",
         "delegation_brief"
       ].includes(artifact.kind)
@@ -943,6 +946,7 @@ function deriveDelegationPackets(
         ? {
             ...handoff.workPacket,
             sourceArtifactIds: [...handoff.workPacket.sourceArtifactIds],
+            flowArtifactIds: [...handoff.workPacket.flowArtifactIds],
             constraints: [...handoff.workPacket.constraints],
             fileTargets: [...handoff.workPacket.fileTargets],
             domainTargets: [...handoff.workPacket.domainTargets],
@@ -998,6 +1002,32 @@ function describeArtifactHighlights(artifact: ControlPlaneArtifact) {
           ? `${artifact.payload.allowedToolNames.length} allowed tool${artifact.payload.allowedToolNames.length === 1 ? "" : "s"}`
           : null
       ]);
+    case "user_flow_spec":
+      return compactHighlights([
+        humanizeKey(artifact.payload.primaryAudience),
+        artifact.payload.entryPoints.length
+          ? `${artifact.payload.entryPoints.length} entry point${artifact.payload.entryPoints.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.journeySteps.length
+          ? `${artifact.payload.journeySteps.length} journey step${artifact.payload.journeySteps.length === 1 ? "" : "s"}`
+          : null,
+        summarizeText(artifact.payload.successOutcome, 72)
+      ]);
+    case "data_flow_spec":
+      return compactHighlights([
+        artifact.payload.inputSignals.length
+          ? `${artifact.payload.inputSignals.length} input signal${artifact.payload.inputSignals.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.processingSteps.length
+          ? `${artifact.payload.processingSteps.length} processing step${artifact.payload.processingSteps.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.stores.length
+          ? `${artifact.payload.stores.length} store${artifact.payload.stores.length === 1 ? "" : "s"}`
+          : null,
+        artifact.payload.integrations.length
+          ? `${artifact.payload.integrations.length} integration${artifact.payload.integrations.length === 1 ? "" : "s"}`
+          : null
+      ]);
     case "subtask_breakdown":
       return compactHighlights([
         `${artifact.payload.tasks.length} task${artifact.payload.tasks.length === 1 ? "" : "s"}`,
@@ -1046,6 +1076,8 @@ function appendArtifactEntries(entries: OperatorRunJournalEntry[], artifacts: Co
       artifact.kind !== "plan" &&
       artifact.kind !== "requirements" &&
       artifact.kind !== "architecture_decision" &&
+      artifact.kind !== "user_flow_spec" &&
+      artifact.kind !== "data_flow_spec" &&
       artifact.kind !== "subtask_breakdown" &&
       artifact.kind !== "delivery_summary" &&
       artifact.kind !== "failure_report"
@@ -1443,6 +1475,10 @@ function describeArtifactLabel(kind: ControlPlaneArtifact["kind"]) {
       return "Requirements recorded";
     case "architecture_decision":
       return "Architecture decision recorded";
+    case "user_flow_spec":
+      return "User flow recorded";
+    case "data_flow_spec":
+      return "Data flow recorded";
     case "subtask_breakdown":
       return "Subtask breakdown recorded";
     case "delivery_summary":

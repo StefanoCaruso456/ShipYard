@@ -71,7 +71,8 @@ export async function bootRuntimeService(): Promise<BootedRuntimeService> {
   });
   const contextAssembler = createContextAssembler({
       instructionRuntime,
-      projectRules
+      projectRules,
+      rootDir
   });
   const { store, runtimeStatePath, runtimeStore } = createConfiguredRunStore(rootDir);
 

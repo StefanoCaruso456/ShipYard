@@ -14,7 +14,6 @@ import {
   submitRuntimeTask,
   transcribeRuntimeAudio
 } from "./api";
-import { buildComposerAttachment } from "./attachments";
 import { applyLocalFilePlan, extractLocalFilePlan } from "./localFileBridge";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -37,6 +36,7 @@ import {
   supportsProjectDirectoryPicker,
   updateLocalProjectFolder
 } from "./projects";
+import { inspectLocalRepository } from "./repository";
 import type {
   AttachmentCard,
   ComposerAttachment,
@@ -48,12 +48,15 @@ import type {
   RuntimeFactoryRunInput,
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
+  RuntimeOperatingMode,
   RuntimeRepoBranchSnapshot,
   RuntimeOperatorApprovalDecision,
+  RuntimeRequestedOperatingMode,
   RuntimeStatusResponse,
   RuntimeTraceRunLog,
   RuntimeQueuedFollowUpDraft,
   RuntimeTask,
+  RuntimeTaskToolRequest,
   RuntimeTaskSubmitContext,
   RuntimeWorkflowMode,
   SidebarNavItemId,
@@ -101,7 +104,13 @@ function App() {
     Record<string, RuntimeQueuedFollowUpDraft[]>
   >({});
   const [activeNav, setActiveNav] = useState<SidebarNavItemId>("projects");
-  const [workflowMode, setWorkflowMode] = useState<RuntimeWorkflowMode>("standard");
+  const [workflowMode, setWorkflowMode] = useState<RuntimeWorkflowMode>("auto");
+  const [workflowModesByThreadId, setWorkflowModesByThreadId] = useState<
+    Record<string, RuntimeRequestedOperatingMode>
+  >({});
+  const [workflowModesByProjectId, setWorkflowModesByProjectId] = useState<
+    Record<string, RuntimeRequestedOperatingMode>
+  >({});
   const [factoryDraft, setFactoryDraft] = useState<RuntimeFactoryComposerDraft>(createDefaultFactoryDraft());
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [composerValue, setComposerValue] = useState("");
@@ -210,10 +219,20 @@ function App() {
 
     async function hydrateProjectFolderStatuses() {
       const updates = await Promise.all(
-        localProjects.map(async (project) => ({
-          id: project.id,
-          status: await resolveStoredProjectFolderStatus(project.id)
-        }))
+        localProjects.map(async (project) => {
+          const status = await resolveStoredProjectFolderStatus(project.id);
+          const handle =
+            status === "connected" ? await getProjectDirectoryHandle(project.id) : null;
+          const repository =
+            status === "connected" && handle ? await inspectLocalRepository(handle) : undefined;
+
+          return {
+            id: project.id,
+            status,
+            folderName: handle?.name ?? project.folder?.name ?? project.name,
+            repository
+          };
+        })
       );
 
       if (cancelled.value) {
@@ -224,16 +243,35 @@ function App() {
         current.map((project) => {
           const next = updates.find((candidate) => candidate.id === project.id);
 
-          if (!next || !project.folder || project.folder.status === next.status) {
+          if (!next || !project.folder) {
+            return project;
+          }
+
+          const statusChanged = project.folder.status !== next.status;
+          const folderChanged =
+            project.folder.name !== next.folderName ||
+            project.folder.displayPath !== next.folderName;
+          const repositoryChanged =
+            next.repository !== undefined &&
+            !areProjectRepositoriesEqual(project.repository, next.repository);
+
+          if (!statusChanged && !folderChanged && !repositoryChanged) {
             return project;
           }
 
           return {
             ...project,
+            branchLabel:
+              next.repository === undefined
+                ? project.branchLabel
+                : next.repository?.currentBranch ?? null,
             folder: {
               ...project.folder,
+              name: next.folderName,
+              displayPath: next.folderName,
               status: next.status
-            }
+            },
+            repository: next.repository === undefined ? project.repository : next.repository
           };
         })
       );
@@ -366,6 +404,12 @@ function App() {
     : null;
   const activeThread =
     activeGroup?.threads.find((candidate) => candidate.id === activeThreadId) ?? null;
+  const preferredThreadWorkflowMode =
+    (activeThread ? workflowModesByThreadId[activeThread.id] : undefined) ??
+    activeThread?.requestedOperatingMode ??
+    null;
+  const preferredProjectWorkflowMode =
+    (activeProject ? workflowModesByProjectId[activeProject.id] : undefined) ?? null;
   const activeLiveRunIds =
     activeThread?.source === "live" ? activeThread.liveRuntime?.runIds ?? [] : [];
   const activeLiveRunIdsKey = activeLiveRunIds.join("|");
@@ -404,6 +448,21 @@ function App() {
       [activeProject.id]: null
     }));
   }, [activeGroup, activeProject, activeThreadId]);
+
+  useEffect(() => {
+    const nextWorkflowMode =
+      preferredThreadWorkflowMode ??
+      activeThread?.operatingMode ??
+      preferredProjectWorkflowMode ??
+      "auto";
+
+    setWorkflowMode((current) => (current === nextWorkflowMode ? current : nextWorkflowMode));
+  }, [
+    activeThread?.id,
+    activeThread?.operatingMode,
+    preferredProjectWorkflowMode,
+    preferredThreadWorkflowMode
+  ]);
 
   useEffect(() => {
     if (activeLiveRuns.length === 0) {
@@ -619,6 +678,40 @@ function App() {
     return "";
   }
 
+  function buildTerminalToolRequest(): RuntimeTaskToolRequest | null {
+    const commandLine = composerValue.trim();
+
+    if (!commandLine) {
+      return null;
+    }
+
+    return {
+      toolName: "run_terminal_command",
+      input: {
+        commandLine,
+        category: inferTerminalCategory(commandLine)
+      }
+    };
+  }
+
+  function buildSubmissionPayload() {
+    if (composerMode === "terminal") {
+      const toolRequest = buildTerminalToolRequest();
+
+      return {
+        instruction: toolRequest
+          ? `Run terminal command: ${toolRequest.input.commandLine}`
+          : "",
+        toolRequest
+      };
+    }
+
+    return {
+      instruction: buildInstructionPayload(),
+      toolRequest: null
+    };
+  }
+
   function handleOpenProjectDialog() {
     setProjectDialogOpen(true);
     setProjectDialogName("");
@@ -652,12 +745,14 @@ function App() {
       return;
     }
 
-    const project = createLocalProject({
-      name: projectDialogName,
-      folderName: projectDialogFolder.folderName
-    });
-
     try {
+      const repository = await inspectLocalRepository(projectDialogFolder.handle);
+      const project = createLocalProject({
+        name: projectDialogName,
+        folderName: projectDialogFolder.folderName,
+        repository
+      });
+
       await persistProjectDirectoryHandle(project.id, projectDialogFolder.handle);
       setLocalProjects((current) => [project, ...current]);
       setSelectedProjectId(project.id);
@@ -681,6 +776,31 @@ function App() {
     }
   }
 
+  function rememberWorkflowMode(
+    projectId: string | null | undefined,
+    threadId: string | null | undefined,
+    mode: RuntimeRequestedOperatingMode
+  ) {
+    if (projectId) {
+      setWorkflowModesByProjectId((current) => ({
+        ...current,
+        [projectId]: mode
+      }));
+    }
+
+    if (threadId) {
+      setWorkflowModesByThreadId((current) => ({
+        ...current,
+        [threadId]: mode
+      }));
+    }
+  }
+
+  function handleWorkflowModeChange(mode: RuntimeWorkflowMode) {
+    setWorkflowMode(mode);
+    rememberWorkflowMode(activeProject?.id, activeThread?.id, mode);
+  }
+
   function handleCreateThread(projectId = activeProject?.id) {
     const projectToUse = visibleProjects.find((candidate) => candidate.id === projectId);
 
@@ -688,7 +808,7 @@ function App() {
       return;
     }
 
-    const thread = createDraftThread(projectToUse.name);
+    const thread = createDraftThread(projectToUse.name, "auto");
 
     setDraftThreadsByProject((current) => ({
       ...current,
@@ -700,7 +820,8 @@ function App() {
     }));
     setSelectedProjectId(projectToUse.id);
     setActiveNav("projects");
-    setWorkflowMode("standard");
+    rememberWorkflowMode(projectToUse.id, thread.id, "auto");
+    setWorkflowMode("auto");
     setComposerValue("");
     setComposerAttachments([]);
     setComposerMode("text");
@@ -737,12 +858,15 @@ function App() {
       return;
     }
 
-    const instruction = buildInstructionPayload();
+    const { instruction, toolRequest } = buildSubmissionPayload();
 
     if (!instruction) {
       setSubmissionFeedback({
         tone: "info",
-        text: "Write a prompt or attach a file before sending the thread."
+        text:
+          composerMode === "terminal"
+            ? "Enter a terminal command before sending the run."
+            : "Write a prompt or attach a file before sending the thread."
       });
       return;
     }
@@ -751,10 +875,15 @@ function App() {
       workflowMode === "factory"
         ? buildFactorySubmission(factoryDraft)
         : null;
+    const submissionProject =
+      workflowMode === "factory" ? runtimeProject ?? activeProject : activeProject;
+    const reusesActiveDraftThread =
+      workflowMode !== "factory" && activeThread?.source === "draft";
 
     const submittedAttachments = composerAttachments;
     const canSendToRuntime = backendConnected;
     const isLiveThreadFollowUp =
+      workflowMode !== "factory" &&
       canSendToRuntime &&
       activeThread?.source === "live" &&
       Boolean(activeThread.liveRuntime?.threadId);
@@ -767,6 +896,7 @@ function App() {
         ...current,
         [threadId]: [...(current[threadId] ?? []), followUpDraft]
       }));
+      rememberWorkflowMode(activeProject.id, threadId, workflowMode);
       setActiveNav("projects");
       setComposerValue("");
       setComposerAttachments([]);
@@ -788,11 +918,14 @@ function App() {
           title: activeThread.title,
           threadId,
           parentRunId: activeThread.liveRuntime.latestRunId,
+          toolRequest,
+          operatingMode: workflowMode,
           attachments: submittedAttachments,
           project: activeProject,
           context: runtimeContext
         });
 
+        rememberWorkflowMode(activeProject.id, response.task.threadId, workflowMode);
         setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
         if (submittedAttachments.length > 0) {
@@ -843,10 +976,10 @@ function App() {
         return;
       }
 
-      if (activeProject.kind !== "live") {
+      if (!runtimeProject) {
         setSubmissionFeedback({
           tone: "danger",
-          text: "Factory Mode runs through the live runtime project. Switch back to Shipyard Runtime first."
+          text: "Factory Mode is unavailable until the Shipyard Runtime workspace is ready."
         });
         return;
       }
@@ -860,27 +993,31 @@ function App() {
       }
     }
 
-    const draftId = activeThread?.source === "draft" ? activeThread.id : createDraftId();
+    const draftId = reusesActiveDraftThread ? activeThread.id : createDraftId();
     const optimisticThread = buildDraftSubmissionThread({
-      existingThread: activeThread?.source === "draft" ? activeThread : null,
+      existingThread: reusesActiveDraftThread ? activeThread : null,
       threadId: draftId,
       titleOverride: factoryInput ? `Factory · ${factoryInput.appName}` : null,
       instruction,
       attachments: submittedAttachments,
-      backendConnected: canSendToRuntime
+      backendConnected: canSendToRuntime,
+      workflowMode
     });
+
+    rememberWorkflowMode(submissionProject.id, draftId, workflowMode);
 
     setDraftThreadsByProject((current) => ({
       ...current,
-      [activeProject.id]: [
+      [submissionProject.id]: [
         optimisticThread,
-        ...(current[activeProject.id] ?? []).filter((candidate) => candidate.id !== draftId)
+        ...(current[submissionProject.id] ?? []).filter((candidate) => candidate.id !== draftId)
       ]
     }));
     setSelectedThreadIds((current) => ({
       ...current,
-      [activeProject.id]: draftId
+      [submissionProject.id]: draftId
     }));
+    setSelectedProjectId(submissionProject.id);
     setActiveNav("projects");
     setComposerValue("");
     setComposerAttachments([]);
@@ -899,19 +1036,22 @@ function App() {
 
     try {
       const runtimeContext = buildRuntimeContextForProject(
-        activeProject,
+        submissionProject,
         runtimeTasks,
         localFileEffectsByTaskId
       );
       const response = await submitRuntimeTask({
         instruction,
         title: optimisticThread.title,
+        toolRequest,
+        operatingMode: workflowMode,
         attachments: submittedAttachments,
-        project: activeProject,
+        project: submissionProject,
         context: factoryInput ? undefined : runtimeContext,
         factory: factoryInput
       });
 
+      rememberWorkflowMode(submissionProject.id, response.task.threadId, workflowMode);
       setRuntimeTasks((current) => upsertRuntimeTask(current, response.task));
 
       if (submittedAttachments.length > 0) {
@@ -923,18 +1063,23 @@ function App() {
 
       setDraftThreadsByProject((current) => ({
         ...current,
-        [activeProject.id]: (current[activeProject.id] ?? []).filter(
+        [submissionProject.id]: (current[submissionProject.id] ?? []).filter(
           (candidate) => candidate.id !== draftId
         )
       }));
       setSelectedThreadIds((current) => ({
         ...current,
-        [activeProject.id]: response.task.threadId
+        [submissionProject.id]: response.task.threadId
       }));
-      setSubmissionFeedback({
-        tone: "success",
-        text: "Thread accepted by the persistent runtime."
-      });
+      setSelectedProjectId(submissionProject.id);
+      setSubmissionFeedback(
+        workflowMode === "factory"
+          ? {
+              tone: "success",
+              text: `Factory run started in ${submissionProject.name}.`
+            }
+          : null
+      );
 
       void loadRuntimeSnapshot();
     } catch (error) {
@@ -945,7 +1090,7 @@ function App() {
 
       setDraftThreadsByProject((current) => ({
         ...current,
-        [activeProject.id]: (current[activeProject.id] ?? []).map((candidate) =>
+        [submissionProject.id]: (current[submissionProject.id] ?? []).map((candidate) =>
           candidate.id === draftId ? markDraftThreadFailed(candidate, message) : candidate
         )
       }));
@@ -959,9 +1104,6 @@ function App() {
   }
 
   async function handleVoiceCapture(file: File) {
-    const attachment = await buildComposerAttachment(file);
-
-    setComposerAttachments((current) => [...current, attachment]);
     setComposerMode("voice");
     setTranscribingAudio(true);
     setSubmissionFeedback({
@@ -975,17 +1117,6 @@ function App() {
       });
       const transcript = response.transcription.text.trim();
 
-      setComposerAttachments((current) =>
-        current.map((candidate) =>
-          candidate.id === attachment.id
-            ? {
-                ...candidate,
-                summary: response.transcription.summary,
-                excerpt: response.transcription.excerpt
-              }
-            : candidate
-        )
-      );
       setComposerValue((current) => mergeTranscript(current, transcript));
       setComposerMode("text");
       setSubmissionFeedback({
@@ -1041,12 +1172,13 @@ function App() {
 
     try {
       const nextFolder = await pickProjectDirectory();
+      const repository = await inspectLocalRepository(nextFolder.handle);
 
       await persistProjectDirectoryHandle(projectId, nextFolder.handle);
       setLocalProjects((current) =>
         current.map((candidate) =>
           candidate.id === projectId
-            ? updateLocalProjectFolder(candidate, nextFolder.folderName, "connected")
+            ? updateLocalProjectFolder(candidate, nextFolder.folderName, "connected", repository)
             : candidate
         )
       );
@@ -1063,6 +1195,78 @@ function App() {
             : "Could not reconnect the local project folder."
       });
     }
+  }
+
+  async function handleRefreshProjectRepository(projectId: string) {
+    const projectToRefresh = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToRefresh || projectToRefresh.kind !== "local") {
+      return;
+    }
+
+    const folderStatus = await resolveStoredProjectFolderStatus(projectId);
+
+    if (folderStatus !== "connected") {
+      setLocalProjects((current) =>
+        current.map((candidate) =>
+          candidate.id === projectId && candidate.folder
+            ? {
+                ...candidate,
+                folder: {
+                  ...candidate.folder,
+                  status: "needs-access"
+                }
+              }
+            : candidate
+        )
+      );
+      setSubmissionFeedback({
+        tone: "danger",
+        text: "Reconnect the local folder before refreshing repository metadata."
+      });
+      return;
+    }
+
+    const handle = await getProjectDirectoryHandle(projectId);
+
+    if (!handle) {
+      setSubmissionFeedback({
+        tone: "danger",
+        text: "The connected local folder could not be found in this browser session."
+      });
+      return;
+    }
+
+    const repository = await inspectLocalRepository(handle);
+
+    setLocalProjects((current) =>
+      current.map((candidate) =>
+        candidate.id === projectId && candidate.kind === "local"
+          ? {
+              ...candidate,
+              branchLabel: repository?.currentBranch ?? null,
+              folder: candidate.folder
+                ? {
+                    ...candidate.folder,
+                    name: handle.name,
+                    displayPath: handle.name,
+                    status: "connected"
+                  }
+                : candidate.folder,
+              repository
+            }
+          : candidate
+      )
+    );
+
+    setSubmissionFeedback({
+      tone: repository?.provider === "github" ? "success" : "info",
+      text: repository
+        ? repository.provider === "github"
+          ? `Refreshed GitHub connection for ${projectToRefresh.name}.`
+          : `Refreshed repository metadata for ${projectToRefresh.name}.`
+        : `No git repository metadata was detected for ${projectToRefresh.name}.`
+    });
   }
 
   async function handleRefreshRuntimeBranches() {
@@ -1254,7 +1458,7 @@ function App() {
           submitting={submitting}
           transcribingAudio={transcribingAudio}
           backendConnected={backendConnected}
-          onWorkflowModeChange={setWorkflowMode}
+          onWorkflowModeChange={handleWorkflowModeChange}
           onFactoryDraftChange={handleFactoryDraftChange}
           onComposerModeChange={setComposerMode}
           onComposerValueChange={setComposerValue}
@@ -1272,6 +1476,7 @@ function App() {
             setComposerValue(prompt);
           }}
           onReconnectProjectFolder={handleReconnectProjectFolder}
+          onRefreshProjectRepository={handleRefreshProjectRepository}
           onRefreshRuntimeBranches={handleRefreshRuntimeBranches}
           onSwitchRuntimeBranch={handleSwitchRuntimeBranch}
           onRequestSteer={handleRequestSteer}
@@ -1296,6 +1501,42 @@ function App() {
       />
     </>
   );
+}
+
+function inferTerminalCategory(commandLine: string): RuntimeTaskToolRequest["input"]["category"] {
+  const normalized = commandLine.trim().toLowerCase();
+
+  if (!normalized) {
+    return "shell";
+  }
+
+  if (normalized.startsWith("git ") || normalized === "git" || normalized.startsWith("gh ")) {
+    return "git";
+  }
+
+  if (
+    normalized.includes("playwright") ||
+    normalized.includes("cypress") ||
+    normalized.includes("storybook")
+  ) {
+    return "browser";
+  }
+
+  if (
+    normalized.startsWith("pnpm ") ||
+    normalized.startsWith("npm ") ||
+    normalized.startsWith("yarn ") ||
+    normalized.startsWith("npx ") ||
+    normalized.startsWith("vitest") ||
+    normalized.startsWith("jest") ||
+    normalized.startsWith("pytest") ||
+    normalized.startsWith("tsc") ||
+    normalized.startsWith("pyright")
+  ) {
+    return "ci";
+  }
+
+  return "shell";
 }
 
 function buildThreadsForProject(
@@ -1362,16 +1603,54 @@ function buildRuntimeContextForProject(
       source: "local-file-bridge",
       reason: "Recently created or updated in the connected local folder."
     })),
-    externalContext: [],
+    externalContext: project.repository
+      ? [
+          {
+            id: `repository-${project.id}`,
+            kind: "spec",
+            title: "Connected repository",
+            content: [
+              `Repository: ${project.repository.label}`,
+              `Provider: ${project.repository.provider}`,
+              project.repository.currentBranch
+                ? `Current branch: ${project.repository.currentBranch}`
+                : null,
+              project.repository.url ? `URL: ${project.repository.url}` : null
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            source: "project.repository",
+            format: "markdown"
+          }
+        ]
+      : [],
     validationTargets: recentFilePaths.slice(0, 8)
   };
 }
 
-function createDraftThread(projectName: string): WorkspaceThread {
+function areProjectRepositoriesEqual(left: WorkspaceProject["repository"], right: WorkspaceProject["repository"]) {
+  return (
+    left?.provider === right?.provider &&
+    left?.remoteName === right?.remoteName &&
+    left?.url === right?.url &&
+    left?.label === right?.label &&
+    left?.owner === right?.owner &&
+    left?.repo === right?.repo &&
+    left?.currentBranch === right?.currentBranch &&
+    left?.source === right?.source
+  );
+}
+
+function createDraftThread(
+  projectName: string,
+  workflowMode: RuntimeRequestedOperatingMode
+): WorkspaceThread {
   return {
     id: createDraftId(),
     title: "New thread",
     summary: `Start a task for ${projectName}.`,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: "draft",
     source: "draft",
     createdLabel: "Just now",
@@ -1389,7 +1668,8 @@ function buildDraftSubmissionThread({
   titleOverride,
   instruction,
   attachments,
-  backendConnected
+  backendConnected,
+  workflowMode
 }: {
   existingThread: WorkspaceThread | null;
   threadId: string;
@@ -1397,6 +1677,7 @@ function buildDraftSubmissionThread({
   instruction: string;
   attachments: ComposerAttachment[];
   backendConnected: boolean;
+  workflowMode: RuntimeRequestedOperatingMode;
 }): WorkspaceThread {
   const timestamp = formatShellTimestamp(new Date());
   const statusMessage = backendConnected
@@ -1406,6 +1687,8 @@ function buildDraftSubmissionThread({
     id: threadId,
     title: deriveThreadTitle(instruction),
     summary: instruction,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: backendConnected ? "pending" : "draft",
     source: "draft" as const,
     createdLabel: timestamp,
@@ -1424,6 +1707,8 @@ function buildDraftSubmissionThread({
           ? deriveThreadTitle(instruction)
         : nextThread.title,
     summary: instruction,
+    requestedOperatingMode: workflowMode,
+    operatingMode: workflowMode === "auto" ? null : workflowMode,
     status: backendConnected ? "pending" : "draft",
     updatedLabel: timestamp,
     tags: backendConnected ? ["pending", "live-request"] : ["draft", "local"],

@@ -22,6 +22,7 @@ export const runtimeContextPrecedence: readonly RuntimeContextPrecedenceLayer[] 
 type CreateContextAssemblerOptions = {
   instructionRuntime: AgentInstructionRuntime;
   projectRules: ProjectRulesDocument;
+  rootDir?: string;
 };
 
 export function createContextAssembler(
@@ -36,7 +37,8 @@ export function createContextAssembler(
         projectRules: options.projectRules,
         role,
         run: input.run,
-        runtimeStatus: input.runtimeStatus
+        runtimeStatus: input.runtimeStatus,
+        repoRoot: options.rootDir
       });
 
       switch (role) {

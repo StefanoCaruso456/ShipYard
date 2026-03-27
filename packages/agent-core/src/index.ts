@@ -123,6 +123,15 @@ export {
   normalizeFactoryRunState,
   syncFactoryRunState
 } from "./runtime/factoryMode";
+export {
+  getOperatingModePolicy,
+  isOperatingMode,
+  isRequestedOperatingMode,
+  normalizeRequestedOperatingMode,
+  operatingModes,
+  requestedOperatingModes,
+  resolveOperatingMode
+} from "./runtime/operatingMode";
 export { deriveOperatorRunView } from "./runtime/operatorView";
 export { deriveRunCloseout } from "./runtime/runCloseout";
 export {
@@ -139,6 +148,12 @@ export {
   createRebuildState,
   normalizeRebuildState
 } from "./runtime/rebuildState";
+export {
+  buildRepoIntelligenceIndex,
+  clearRepoIntelligenceCache,
+  resolveRelevantFilesForRun,
+  suggestRelevantFilesFromRepo
+} from "./runtime/repoIntelligence";
 export {
   controlPlaneArtifactSchema,
   controlPlaneConflictSchema,
@@ -193,6 +208,13 @@ export type {
   RuntimeContextPrecedenceLayer,
   SharedRoleContext
 } from "./context/types";
+export type {
+  RepoIntelligenceIndexedFile,
+  RepoIntelligenceSnapshot,
+  RepoIntelligenceSymbol,
+  RepoIntelligenceSymbolKind,
+  RepoRelevantFileSuggestion
+} from "./runtime/repoIntelligence";
 export type {
   RollbackResult,
   RunEvent,
@@ -329,6 +351,8 @@ export type {
   OperatorRunStageId,
   OperatorRunStageStatus,
   OperatorRunView,
+  OperatingMode,
+  RequestedOperatingMode,
   OrchestrationStepKind,
   Phase,
   PhaseExecutionInput,
@@ -401,6 +425,9 @@ export type {
   RepoToolName,
   RepoToolset,
   RepoToolSuccess,
+  RunTerminalCommandInput,
+  RunTerminalCommandResult,
   SearchRepoInput,
-  SearchRepoResult
+  SearchRepoResult,
+  TerminalCommandCategory
 } from "./tools/repo/types";

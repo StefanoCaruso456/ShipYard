@@ -5,7 +5,9 @@ import type {
   WorkspaceThread
 } from "../types";
 import { LiveRuntimeStage } from "./LiveRuntimeStage";
+import { ProjectRepositoryButton } from "./ProjectRepositoryButton";
 import { RuntimeBranchSwitcher } from "./RuntimeBranchSwitcher";
+import { TerminalPanel } from "./TerminalPanel";
 import { ThreadMessageCard } from "./ThreadMessageCard";
 
 type SuggestionCard = {
@@ -27,6 +29,7 @@ type ThreadViewProps = {
   suggestions: SuggestionCard[];
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshProjectRepository: (projectId: string) => Promise<void>;
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
@@ -46,6 +49,7 @@ export function ThreadView({
   suggestions,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshProjectRepository,
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
   onRequestSteer,
@@ -73,6 +77,13 @@ export function ThreadView({
             ? "Failed"
             : `Runtime ${runtimeState}`
     : `Runtime ${runtimeState}`;
+  const operatingModeLabel = thread?.operatingMode
+    ? `${thread.operatingMode} mode`
+    : thread?.requestedOperatingMode === "auto"
+      ? "auto mode"
+      : thread?.requestedOperatingMode
+        ? `${thread.requestedOperatingMode} requested`
+        : null;
 
   if (isEmpty) {
     return (
@@ -93,11 +104,19 @@ export function ThreadView({
           </p>
 
           {project?.kind === "local" ? (
-            <div className="thread-view__project-meta">
-              <span>{project.environment}</span>
-              <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
-              <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
-            </div>
+            <>
+              <div className="thread-view__project-meta">
+                <span>{project.environment}</span>
+                <span>{project.folder?.displayPath ?? "Folder not connected"}</span>
+                <span>{projectNeedsAccess ? "Reconnect required" : "Ready for new threads"}</span>
+              </div>
+              <div className="thread-view__empty-runtime-actions">
+                <ProjectRepositoryButton
+                  project={project}
+                  onRefresh={onRefreshProjectRepository}
+                />
+              </div>
+            </>
           ) : null}
 
           {project?.kind === "live" && runtimeState !== "error" ? (
@@ -145,9 +164,12 @@ export function ThreadView({
 
   const hasActivity = (thread.activity?.length ?? 0) > 0;
   const hiddenMessageIds = new Set<string>();
+  const hasActiveRuntimeStage =
+    thread.status === "running" || thread.status === "pending" || thread.status === "paused";
 
   if (
     thread.source === "live" &&
+    hasActiveRuntimeStage &&
     thread.liveRuntime?.focusedRunId &&
     (thread.status === "running" || thread.status === "pending" || thread.status === "paused")
   ) {
@@ -155,12 +177,16 @@ export function ThreadView({
   }
 
   const filteredMessages = thread.messages.filter((message) => !hiddenMessageIds.has(message.id));
-  const showLiveRuntimeStage = thread.source === "live" && Boolean(thread.liveRuntime?.focusedRun);
-  const visibleMessages = hasActivity || showLiveRuntimeStage
-    ? filteredMessages.filter((message) => message.role !== "system")
-    : filteredMessages;
-  const userMessages = visibleMessages.filter((message) => message.role === "user");
-  const responseMessages = visibleMessages.filter((message) => message.role !== "user");
+  const showLiveRuntimeStage =
+    thread.source === "live" &&
+    hasActiveRuntimeStage &&
+    Boolean(thread.liveRuntime?.focusedRun);
+  const visibleMessages =
+    thread.source === "live"
+      ? filteredMessages.filter((message) => message.role !== "system")
+      : filteredMessages;
+  const hasInlineTrace = visibleMessages.some((message) => (message.trace?.items.length ?? 0) > 0);
+  const terminalEntries = thread.liveRuntime?.terminal ?? [];
 
   return (
     <section className="thread-view">
@@ -170,6 +196,19 @@ export function ThreadView({
             <span className="thread-view__status-dot" aria-hidden="true" />
             {statusLabel}
           </span>
+
+          {operatingModeLabel ? (
+            <span className="thread-view__status-pill thread-view__status-pill--mode">
+              {operatingModeLabel}
+            </span>
+          ) : null}
+
+          {project?.kind === "local" ? (
+            <ProjectRepositoryButton
+              project={project}
+              onRefresh={onRefreshProjectRepository}
+            />
+          ) : null}
 
           {project?.kind === "live" && runtimeState !== "error" ? (
             <RuntimeBranchSwitcher
@@ -186,7 +225,7 @@ export function ThreadView({
       </div>
 
       <div className="thread-view__stream">
-        {userMessages.map((message) => (
+        {visibleMessages.map((message) => (
           <ThreadMessageCard key={message.id} message={message} />
         ))}
 
@@ -198,7 +237,7 @@ export function ThreadView({
           />
         ) : null}
 
-        {!hasActivity && !showLiveRuntimeStage
+        {!hasActivity && !showLiveRuntimeStage && !hasInlineTrace
           ? thread.progress.map((event) => (
               <div key={event.id} className={`event-row event-row--${event.tone}`}>
                 <strong>{event.label}</strong>
@@ -207,11 +246,9 @@ export function ThreadView({
               </div>
             ))
           : null}
-
-        {responseMessages.map((message) => (
-          <ThreadMessageCard key={message.id} message={message} />
-        ))}
       </div>
+
+      {terminalEntries.length > 0 ? <TerminalPanel entries={terminalEntries} /> : null}
     </section>
   );
 }

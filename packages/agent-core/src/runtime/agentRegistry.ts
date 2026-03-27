@@ -49,6 +49,7 @@ const TEAM_SKILL_REFS: Record<TeamSkillId, SpecialistAgentSkillRef> = {
 
 const READ_ONLY_TOOLS: RepoToolName[] = ["list_files", "read_file", "read_file_range", "search_repo"];
 const MUTATION_TOOLS: RepoToolName[] = ["edit_file_region", "create_file", "delete_file"];
+const EXECUTION_TOOLS: RepoToolName[] = ["run_terminal_command"];
 
 export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
   version: 1,
@@ -60,7 +61,7 @@ export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
       domainTags: ["frontend", "ui", "client", "react", "css"],
       skillRefs: [TEAM_SKILL_REFS.frontend_dev],
       toolScope: {
-        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS]
+        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS, ...EXECUTION_TOOLS]
       },
       allowedHandoffTargets: ["execution_subagent", "production_lead"],
       canSpawnExecutionSubagents: true,
@@ -73,7 +74,7 @@ export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
       domainTags: ["backend", "runtime", "server", "api", "database"],
       skillRefs: [TEAM_SKILL_REFS.backend_dev],
       toolScope: {
-        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS]
+        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS, ...EXECUTION_TOOLS]
       },
       allowedHandoffTargets: ["execution_subagent", "production_lead"],
       canSpawnExecutionSubagents: true,
@@ -86,7 +87,7 @@ export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
       domainTags: ["repo", "tools", "editing", "search", "validation"],
       skillRefs: [TEAM_SKILL_REFS.repo_tools_dev],
       toolScope: {
-        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS]
+        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS, ...EXECUTION_TOOLS]
       },
       allowedHandoffTargets: ["execution_subagent", "production_lead"],
       canSpawnExecutionSubagents: true,
@@ -99,7 +100,7 @@ export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
       domainTags: ["observability", "tracing", "langsmith", "logging", "metrics"],
       skillRefs: [TEAM_SKILL_REFS.observability_dev],
       toolScope: {
-        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS]
+        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS, ...EXECUTION_TOOLS]
       },
       allowedHandoffTargets: ["execution_subagent", "production_lead"],
       canSpawnExecutionSubagents: true,
@@ -112,7 +113,7 @@ export const DEFAULT_SPECIALIST_AGENT_REGISTRY: SpecialistAgentRegistry = {
       domainTags: ["rebuild", "integration", "migration", "ship"],
       skillRefs: [TEAM_SKILL_REFS.rebuild_dev],
       toolScope: {
-        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS]
+        allowedToolNames: [...READ_ONLY_TOOLS, ...MUTATION_TOOLS, ...EXECUTION_TOOLS]
       },
       allowedHandoffTargets: ["execution_subagent", "production_lead"],
       canSpawnExecutionSubagents: true,

@@ -1,12 +1,18 @@
 import type {
   ExecuteRun,
+  OperatingMode,
   RepoToolRequest,
   RepoToolResult,
   RepoToolset,
   RollbackResult,
   ValidationResult
 } from "@shipyard/agent-core";
-import { createRepoToolset, getActiveTraceScope } from "@shipyard/agent-core";
+import {
+  createRepoToolset,
+  getActiveTraceScope,
+  normalizeRequestedOperatingMode,
+  resolveOperatingMode
+} from "@shipyard/agent-core";
 import { generateText } from "ai";
 import path from "node:path";
 
@@ -14,6 +20,7 @@ import {
   createOpenAIExecutor,
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
+import { executeTerminalTool } from "./createTerminalToolExecutor";
 
 type CreateRuntimeExecutorOptions = {
   openAI: OpenAIExecutorConfig;
@@ -24,11 +31,15 @@ type CreateRuntimeExecutorOptions = {
 export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): ExecuteRun {
   const openAIExecutor = createOpenAIExecutor({
     config: options.openAI,
-    generateTextImpl: options.generateTextImpl
+    generateTextImpl: options.generateTextImpl,
+    repoRoot: options.repoToolset.rootDir
   });
   const repoToolsetsByRoot = new Map<string, RepoToolset>();
 
   return async (run, context) => {
+    const operatingMode = resolveRunOperatingMode(run);
+    const requestedOperatingMode = normalizeRequestedOperatingMode(run.requestedOperatingMode);
+
     if (!run.toolRequest) {
       return openAIExecutor(run, context);
     }
@@ -58,7 +69,11 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       repoToolsetsByRoot,
       run
     );
-    const toolResult = await executeToolRequest(repoToolset, toolRequest).catch(
+    const toolResult = await executeToolRequest(repoToolset, toolRequest, {
+      run,
+      rootDir: repoToolset.rootDir,
+      plannedStepId: context.plannedStep?.id ?? null
+    }).catch(
       async (error) => {
         traceScope?.activeSpan.addEvent("tool_failed", {
           message: error instanceof Error ? error.message : String(error),
@@ -119,9 +134,22 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       instructionEcho: run.instruction,
       skillId: context.instructionRuntime.skill.meta.id,
       completedAt: new Date().toISOString(),
+      requestedOperatingMode,
+      operatingMode,
       toolResult
     };
   };
+}
+
+function resolveRunOperatingMode(run: Parameters<ExecuteRun>[0]): OperatingMode {
+  return run.operatingMode
+    ? run.operatingMode
+    : resolveOperatingMode({
+        requestedOperatingMode: normalizeRequestedOperatingMode(run.requestedOperatingMode),
+        instruction: run.instruction,
+        toolRequest: run.toolRequest ?? null,
+        factory: run.factory ?? null
+      });
 }
 
 function resolveRepoToolsetForRun(
@@ -160,6 +188,8 @@ function summarizeToolRequest(toolRequest: RepoToolRequest) {
         : "List files in the repository.";
     case "search_repo":
       return `Search the repo for "${toolRequest.input.query}".`;
+    case "run_terminal_command":
+      return `Run terminal command "${toolRequest.input.commandLine}".`;
     default: {
       const toolPath = extractToolPath(toolRequest);
 
@@ -178,7 +208,12 @@ function extractToolPath(toolRequest: RepoToolRequest) {
 
 async function executeToolRequest(
   repoToolset: RepoToolset,
-  toolRequest: RepoToolRequest
+  toolRequest: RepoToolRequest,
+  context: {
+    run: Parameters<ExecuteRun>[0];
+    rootDir: string;
+    plannedStepId: string | null;
+  }
 ): Promise<RepoToolResult> {
   switch (toolRequest.toolName) {
     case "list_files":
@@ -195,6 +230,13 @@ async function executeToolRequest(
       return repoToolset.createFile(toolRequest.input);
     case "delete_file":
       return repoToolset.deleteFile(toolRequest.input);
+    case "run_terminal_command":
+      return executeTerminalTool({
+        run: context.run,
+        input: toolRequest.input,
+        rootDir: context.rootDir,
+        plannedStepId: context.plannedStepId
+      });
   }
 }
 
@@ -214,6 +256,8 @@ function summarizeToolResult(toolResult: Extract<RepoToolResult, { ok: true }>) 
       return `Created ${toolResult.data.path}.`;
     case "delete_file":
       return `Deleted ${toolResult.data.path}.`;
+    case "run_terminal_command":
+      return `Ran ${toolResult.data.commandLine} from ${toolResult.data.cwd}.`;
   }
 }
 
@@ -278,6 +322,17 @@ function renderToolResponse(toolResult: Extract<RepoToolResult, { ok: true }>) {
         `Tool: ${toolResult.toolName}`,
         `Path: ${toolResult.data.path}`,
         `Validation status: ${toolResult.data.validationResult.success ? "passed" : "failed"}`
+      ].join("\n");
+    case "run_terminal_command":
+      return [
+        `Tool: ${toolResult.toolName}`,
+        `Command: ${toolResult.data.commandLine}`,
+        `Category: ${toolResult.data.category}`,
+        `Working directory: ${toolResult.data.cwd}`,
+        `Exit code: ${toolResult.data.exitCode}`,
+        `Duration: ${toolResult.data.durationMs} ms`,
+        "",
+        toolResult.data.combinedOutput
       ].join("\n");
   }
 }

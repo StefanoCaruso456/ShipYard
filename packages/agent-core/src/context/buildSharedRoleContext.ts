@@ -10,6 +10,7 @@ import type {
   ControlPlaneAgent,
   RepoToolResult
 } from "../runtime/types";
+import { resolveRelevantFilesForRun } from "../runtime/repoIntelligence";
 import type { ProjectRulesDocument, SharedRoleContext } from "./types";
 
 export function buildSharedRoleContext(input: {
@@ -18,6 +19,7 @@ export function buildSharedRoleContext(input: {
   role: AgentRole;
   run: AgentRunRecord;
   runtimeStatus: AgentRuntimeStatus;
+  repoRoot?: string;
 }): SharedRoleContext {
   return {
     runtimeContract: buildRuntimeContract(input.role),
@@ -28,7 +30,7 @@ export function buildSharedRoleContext(input: {
     runtimeStatus: input.runtimeStatus,
     taskObjective: deriveTaskObjective(input.run),
     constraints: input.run.context.constraints ?? [],
-    relevantFiles: deriveRelevantFiles(input.run),
+    relevantFiles: deriveRelevantFiles(input.run, input.repoRoot),
     externalContext: input.run.context.externalContext ?? [],
     recentToolResults: deriveRecentToolResults(input.run),
     validationTargets: deriveValidationTargets(input.run),
@@ -131,24 +133,8 @@ function summarizeInstruction(instruction: string) {
   return `${compact.slice(0, 117).trimEnd()}...`;
 }
 
-function deriveRelevantFiles(run: AgentRunRecord) {
-  if ((run.context.relevantFiles ?? []).length > 0) {
-    return run.context.relevantFiles;
-  }
-
-  const toolPath = extractToolPath(run);
-
-  if (!toolPath) {
-    return [];
-  }
-
-  return [
-    {
-      path: toolPath,
-      source: "toolRequest",
-      reason: "Derived from the active repo tool request."
-    }
-  ];
+function deriveRelevantFiles(run: AgentRunRecord, repoRoot?: string) {
+  return resolveRelevantFilesForRun(run, repoRoot);
 }
 
 function deriveRecentToolResults(run: AgentRunRecord): RepoToolResult[] {
@@ -172,6 +158,18 @@ function deriveValidationTargets(run: AgentRunRecord) {
   return validationPath ? [validationPath] : [];
 }
 
+function extractToolPath(run: AgentRunRecord) {
+  if (!run.toolRequest) {
+    return null;
+  }
+
+  if ("path" in run.toolRequest.input && typeof run.toolRequest.input.path === "string") {
+    return run.toolRequest.input.path;
+  }
+
+  return null;
+}
+
 function deriveKnownFailures(run: AgentRunRecord) {
   const failures: string[] = [];
 
@@ -186,18 +184,6 @@ function deriveKnownFailures(run: AgentRunRecord) {
   }
 
   return [...new Set(failures)];
-}
-
-function extractToolPath(run: AgentRunRecord) {
-  if (!run.toolRequest) {
-    return null;
-  }
-
-  if ("path" in run.toolRequest.input && typeof run.toolRequest.input.path === "string") {
-    return run.toolRequest.input.path;
-  }
-
-  return null;
 }
 
 function extractActiveTask(run: AgentRunRecord) {

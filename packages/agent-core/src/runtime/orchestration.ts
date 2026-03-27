@@ -17,6 +17,7 @@ import {
 } from "./coordinator/conflicts";
 import { recordMergeGovernanceDecision } from "./controlPlane";
 import { mergeExecutorResult, mergePlannerResult, mergeVerifierResult } from "./coordinator/merge";
+import { getOperatingModePolicy, normalizeRequestedOperatingMode, resolveOperatingMode } from "./operatingMode";
 import {
   cloneRunRecord,
   type AgentRunFailure,
@@ -477,6 +478,15 @@ export function planNextStep(input: {
   iteration: number;
 }): PlannerStepResult {
   const at = new Date().toISOString();
+  const operatingMode = input.run.operatingMode
+    ? input.run.operatingMode
+    : resolveOperatingMode({
+        requestedOperatingMode: normalizeRequestedOperatingMode(input.run.requestedOperatingMode),
+        instruction: input.run.instruction,
+        toolRequest: input.task?.toolRequest ?? input.run.toolRequest ?? null,
+        factory: input.run.factory ?? null
+      });
+  const operatingModePolicy = getOperatingModePolicy(operatingMode);
   const activeToolRequest = input.task?.toolRequest ?? input.run.toolRequest ?? null;
   const validationTargets = deriveValidationTargets(input.run, input.task, input.payload);
   const successCriteria = deriveSuccessCriteria(input.run, input.task);
@@ -488,7 +498,7 @@ export function planNextStep(input: {
   return {
     role: "planner",
     at,
-    summary: `Planner proposed ${stepId}: ${activeToolRequest ? "execute the scoped repo tool step" : "produce the scoped execution response"}.`,
+    summary: `Planner proposed ${stepId}: ${activeToolRequest ? "execute the scoped repo tool step" : "produce the scoped execution response"} in ${operatingModePolicy.shortLabel.toLowerCase()} mode.`,
     consumedContextSectionIds: selectConsumedSectionIds(input.payload, [
       "task-objective",
       "current-run-state",
@@ -502,11 +512,19 @@ export function planNextStep(input: {
         : summarizeText(input.task?.instruction ?? input.run.instruction, 80),
       kind: activeToolRequest ? "repo_tool" : "model_response",
       rationale: failureContext
-        ? `Address the current task conservatively while accounting for the latest failure: ${failureContext}`
-        : `Keep the next action bounded to the current task objective: ${objective}`,
+        ? `${operatingModePolicy.plannerDirective} Account for the latest failure: ${failureContext}`
+        : `${operatingModePolicy.plannerDirective} Current objective: ${objective}`,
       summary: activeToolRequest
         ? `Execute ${activeToolRequest.toolName}${targetPath ? ` on ${targetPath}` : ""}.`
-        : `Respond directly to the current task without expanding scope.`,
+        : operatingMode === "review"
+          ? "Review the current request and return findings without editing."
+          : operatingMode === "debug"
+            ? "Diagnose the failure and return the clearest next debugging move."
+            : operatingMode === "refactor"
+              ? "Propose or carry out the smallest behavior-preserving structural change."
+              : operatingMode === "factory"
+                ? "Advance the current factory stage without drifting outside the build pipeline."
+                : "Respond directly to the current task without expanding scope.",
       successCriteria,
       requiredInputs: targetPath ? [targetPath] : [],
       requiredTool: activeToolRequest?.toolName ?? null,
@@ -518,6 +536,14 @@ export function planNextStep(input: {
 
 export function verifyStepResult(input: VerificationInput): VerifierStepResult {
   const at = new Date().toISOString();
+  const operatingMode = input.run.operatingMode
+    ? input.run.operatingMode
+    : resolveOperatingMode({
+        requestedOperatingMode: normalizeRequestedOperatingMode(input.run.requestedOperatingMode),
+        instruction: input.run.instruction,
+        toolRequest: input.run.toolRequest ?? null,
+        factory: input.run.factory ?? null
+      });
   const evidence = buildVerificationEvidence(input.executionResult, input.executorResult);
   const expectedPath = extractToolPath(input.plannerResult.step.toolRequest);
   const intentMatched =
@@ -570,7 +596,7 @@ export function verifyStepResult(input: VerificationInput): VerifierStepResult {
     at,
     stepId: input.plannerResult.step.id,
     decision,
-    summary: renderVerifierSummary(decision, input.plannerResult.step.id, reasons),
+    summary: renderVerifierSummary(decision, input.plannerResult.step.id, reasons, operatingMode),
     reasons,
     intentMatched,
     targetMatched,
@@ -945,19 +971,22 @@ function decideVerifierAction(input: {
 function renderVerifierSummary(
   decision: OrchestrationAction,
   stepId: string,
-  reasons: string[]
+  reasons: string[],
+  operatingMode: AgentRunRecord["operatingMode"]
 ) {
+  const modeSuffix = operatingMode ? ` in ${operatingMode} mode` : "";
+
   switch (decision) {
     case "continue":
-      return `Verifier approved ${stepId}.`;
+      return `Verifier approved ${stepId}${modeSuffix}.`;
     case "retry_step":
-      return `Verifier requested a retry for ${stepId}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
+      return `Verifier requested a retry for ${stepId}${modeSuffix}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
     case "replan":
-      return `Verifier requested a replan for ${stepId}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
+      return `Verifier requested a replan for ${stepId}${modeSuffix}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
     case "fail":
-      return `Verifier failed ${stepId}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
+      return `Verifier failed ${stepId}${modeSuffix}.${reasons.length > 0 ? ` ${reasons[0]}` : ""}`;
     case "plan":
-      return `Planner will propose a new step for ${stepId}.`;
+      return `Planner will propose a new step for ${stepId}${modeSuffix}.`;
   }
 }
 
