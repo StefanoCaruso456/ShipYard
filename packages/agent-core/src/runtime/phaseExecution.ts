@@ -79,6 +79,8 @@ export function normalizePhaseExecutionInput(
       description: phase.description.trim(),
       approvalGate: normalizeApprovalGate(phase.approvalGate, phase.id.trim(), phase.name.trim()),
       status: "pending" as const,
+      completionCriteria: normalizePhaseCriteria(phase.completionCriteria),
+      verificationCriteria: normalizePhaseCriteria(phase.verificationCriteria),
       userStories: phase.userStories
         .filter((story) => story && typeof story.id === "string" && story.id.trim())
         .map((story) => ({
@@ -149,6 +151,8 @@ export function normalizePhaseExecutionState(
     description: phase.description.trim(),
     approvalGate: normalizeApprovalGateState(phase.approvalGate, phase.id.trim(), phase.name.trim()),
     status: normalizePhaseStatus(phase.status),
+    completionCriteria: normalizePhaseCriteria(phase.completionCriteria),
+    verificationCriteria: normalizePhaseCriteria(phase.verificationCriteria),
     userStories: phase.userStories.map((story) => ({
       id: story.id.trim(),
       title: story.title.trim(),
@@ -1311,6 +1315,10 @@ function normalizeValidationGates(value: ValidationGate[] | null | undefined) {
           expectedValue: gate.expectedValue?.trim() ? gate.expectedValue.trim() : null
         }))
     : [];
+}
+
+function normalizePhaseCriteria(value: string[] | null | undefined) {
+  return uniqueStrings(Array.isArray(value) ? value : []);
 }
 
 function normalizeApprovalGate(
