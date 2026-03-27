@@ -37,6 +37,7 @@ import {
   supportsProjectDirectoryPicker,
   updateLocalProjectFolder
 } from "./projects";
+import { inspectLocalRepository } from "./repository";
 import type {
   AttachmentCard,
   ComposerAttachment,
@@ -210,10 +211,20 @@ function App() {
 
     async function hydrateProjectFolderStatuses() {
       const updates = await Promise.all(
-        localProjects.map(async (project) => ({
-          id: project.id,
-          status: await resolveStoredProjectFolderStatus(project.id)
-        }))
+        localProjects.map(async (project) => {
+          const status = await resolveStoredProjectFolderStatus(project.id);
+          const handle =
+            status === "connected" ? await getProjectDirectoryHandle(project.id) : null;
+          const repository =
+            status === "connected" && handle ? await inspectLocalRepository(handle) : undefined;
+
+          return {
+            id: project.id,
+            status,
+            folderName: handle?.name ?? project.folder?.name ?? project.name,
+            repository
+          };
+        })
       );
 
       if (cancelled.value) {
@@ -224,16 +235,35 @@ function App() {
         current.map((project) => {
           const next = updates.find((candidate) => candidate.id === project.id);
 
-          if (!next || !project.folder || project.folder.status === next.status) {
+          if (!next || !project.folder) {
+            return project;
+          }
+
+          const statusChanged = project.folder.status !== next.status;
+          const folderChanged =
+            project.folder.name !== next.folderName ||
+            project.folder.displayPath !== next.folderName;
+          const repositoryChanged =
+            next.repository !== undefined &&
+            !areProjectRepositoriesEqual(project.repository, next.repository);
+
+          if (!statusChanged && !folderChanged && !repositoryChanged) {
             return project;
           }
 
           return {
             ...project,
+            branchLabel:
+              next.repository === undefined
+                ? project.branchLabel
+                : next.repository?.currentBranch ?? null,
             folder: {
               ...project.folder,
+              name: next.folderName,
+              displayPath: next.folderName,
               status: next.status
-            }
+            },
+            repository: next.repository === undefined ? project.repository : next.repository
           };
         })
       );
@@ -652,12 +682,14 @@ function App() {
       return;
     }
 
-    const project = createLocalProject({
-      name: projectDialogName,
-      folderName: projectDialogFolder.folderName
-    });
-
     try {
+      const repository = await inspectLocalRepository(projectDialogFolder.handle);
+      const project = createLocalProject({
+        name: projectDialogName,
+        folderName: projectDialogFolder.folderName,
+        repository
+      });
+
       await persistProjectDirectoryHandle(project.id, projectDialogFolder.handle);
       setLocalProjects((current) => [project, ...current]);
       setSelectedProjectId(project.id);
@@ -1038,12 +1070,13 @@ function App() {
 
     try {
       const nextFolder = await pickProjectDirectory();
+      const repository = await inspectLocalRepository(nextFolder.handle);
 
       await persistProjectDirectoryHandle(projectId, nextFolder.handle);
       setLocalProjects((current) =>
         current.map((candidate) =>
           candidate.id === projectId
-            ? updateLocalProjectFolder(candidate, nextFolder.folderName, "connected")
+            ? updateLocalProjectFolder(candidate, nextFolder.folderName, "connected", repository)
             : candidate
         )
       );
@@ -1060,6 +1093,78 @@ function App() {
             : "Could not reconnect the local project folder."
       });
     }
+  }
+
+  async function handleRefreshProjectRepository(projectId: string) {
+    const projectToRefresh = visibleProjects.find((candidate) => candidate.id === projectId);
+
+    if (!projectToRefresh || projectToRefresh.kind !== "local") {
+      return;
+    }
+
+    const folderStatus = await resolveStoredProjectFolderStatus(projectId);
+
+    if (folderStatus !== "connected") {
+      setLocalProjects((current) =>
+        current.map((candidate) =>
+          candidate.id === projectId && candidate.folder
+            ? {
+                ...candidate,
+                folder: {
+                  ...candidate.folder,
+                  status: "needs-access"
+                }
+              }
+            : candidate
+        )
+      );
+      setSubmissionFeedback({
+        tone: "danger",
+        text: "Reconnect the local folder before refreshing repository metadata."
+      });
+      return;
+    }
+
+    const handle = await getProjectDirectoryHandle(projectId);
+
+    if (!handle) {
+      setSubmissionFeedback({
+        tone: "danger",
+        text: "The connected local folder could not be found in this browser session."
+      });
+      return;
+    }
+
+    const repository = await inspectLocalRepository(handle);
+
+    setLocalProjects((current) =>
+      current.map((candidate) =>
+        candidate.id === projectId && candidate.kind === "local"
+          ? {
+              ...candidate,
+              branchLabel: repository?.currentBranch ?? null,
+              folder: candidate.folder
+                ? {
+                    ...candidate.folder,
+                    name: handle.name,
+                    displayPath: handle.name,
+                    status: "connected"
+                  }
+                : candidate.folder,
+              repository
+            }
+          : candidate
+      )
+    );
+
+    setSubmissionFeedback({
+      tone: repository?.provider === "github" ? "success" : "info",
+      text: repository
+        ? repository.provider === "github"
+          ? `Refreshed GitHub connection for ${projectToRefresh.name}.`
+          : `Refreshed repository metadata for ${projectToRefresh.name}.`
+        : `No git repository metadata was detected for ${projectToRefresh.name}.`
+    });
   }
 
   async function handleRefreshRuntimeBranches() {
@@ -1269,6 +1374,7 @@ function App() {
             setComposerValue(prompt);
           }}
           onReconnectProjectFolder={handleReconnectProjectFolder}
+          onRefreshProjectRepository={handleRefreshProjectRepository}
           onRefreshRuntimeBranches={handleRefreshRuntimeBranches}
           onSwitchRuntimeBranch={handleSwitchRuntimeBranch}
           onRequestSteer={handleRequestSteer}
@@ -1359,9 +1465,42 @@ function buildRuntimeContextForProject(
       source: "local-file-bridge",
       reason: "Recently created or updated in the connected local folder."
     })),
-    externalContext: [],
+    externalContext: project.repository
+      ? [
+          {
+            id: `repository-${project.id}`,
+            kind: "spec",
+            title: "Connected repository",
+            content: [
+              `Repository: ${project.repository.label}`,
+              `Provider: ${project.repository.provider}`,
+              project.repository.currentBranch
+                ? `Current branch: ${project.repository.currentBranch}`
+                : null,
+              project.repository.url ? `URL: ${project.repository.url}` : null
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            source: "project.repository",
+            format: "markdown"
+          }
+        ]
+      : [],
     validationTargets: recentFilePaths.slice(0, 8)
   };
+}
+
+function areProjectRepositoriesEqual(left: WorkspaceProject["repository"], right: WorkspaceProject["repository"]) {
+  return (
+    left?.provider === right?.provider &&
+    left?.remoteName === right?.remoteName &&
+    left?.url === right?.url &&
+    left?.label === right?.label &&
+    left?.owner === right?.owner &&
+    left?.repo === right?.repo &&
+    left?.currentBranch === right?.currentBranch &&
+    left?.source === right?.source
+  );
 }
 
 function createDraftThread(projectName: string): WorkspaceThread {

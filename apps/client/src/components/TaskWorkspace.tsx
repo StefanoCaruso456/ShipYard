@@ -47,6 +47,7 @@ type TaskWorkspaceProps = {
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshProjectRepository: (projectId: string) => Promise<void>;
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
@@ -89,6 +90,7 @@ export function TaskWorkspace({
   onVoiceCaptureError,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshProjectRepository,
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
   onRequestSteer,
@@ -160,6 +162,7 @@ export function TaskWorkspace({
             suggestions={suggestionCards}
             onSelectSuggestion={onSelectSuggestion}
             onReconnectProjectFolder={onReconnectProjectFolder}
+            onRefreshProjectRepository={onRefreshProjectRepository}
             onRefreshRuntimeBranches={onRefreshRuntimeBranches}
             onSwitchRuntimeBranch={onSwitchRuntimeBranch}
             onRequestSteer={onRequestSteer}

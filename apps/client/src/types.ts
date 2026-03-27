@@ -219,6 +219,15 @@ export type RuntimeTaskProject = {
   kind: WorkspaceProjectKind;
   environment: string | null;
   description: string | null;
+  links: Array<{
+    id?: string | null;
+    kind: "repository" | "pull_request" | "deployment";
+    url: string;
+    title?: string | null;
+    provider?: string | null;
+    entityKind?: "run" | "phase" | "story" | "task" | null;
+    entityId?: string | null;
+  }>;
   folder: {
     name: string | null;
     displayPath: string | null;
@@ -878,6 +887,19 @@ export type WorkspaceProjectFolder = {
   lastConnectedAt: string | null;
 };
 
+export type WorkspaceProjectRepositoryProvider = "github" | "git";
+
+export type WorkspaceProjectRepository = {
+  provider: WorkspaceProjectRepositoryProvider;
+  remoteName: string | null;
+  url: string | null;
+  label: string;
+  owner: string | null;
+  repo: string | null;
+  currentBranch: string | null;
+  source: "git-config" | "git-head";
+};
+
 export type WorkspaceProject = {
   id: string;
   name: string;
@@ -888,6 +910,7 @@ export type WorkspaceProject = {
   region: string;
   branchLabel: string | null;
   folder: WorkspaceProjectFolder | null;
+  repository: WorkspaceProjectRepository | null;
   removable: boolean;
 };
 
