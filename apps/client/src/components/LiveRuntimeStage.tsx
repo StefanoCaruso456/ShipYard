@@ -103,7 +103,19 @@ export function LiveRuntimeStage({
       {isActiveRunVisible ? (
         <article className="live-runtime-stage__active">
           <div className="live-runtime-stage__eyebrow">
-            <span className="live-runtime-stage__badge">{runtimeMetaLabel}</span>
+            <div className="live-runtime-stage__eyebrow-main">
+              <span className="live-runtime-stage__badge">{runtimeMetaLabel}</span>
+              {canResolveGate ? (
+                <button
+                  type="button"
+                  className="live-runtime-stage__quick-approve"
+                  disabled={submittingDecision !== null}
+                  onClick={() => void handleApprovalDecision("approve")}
+                >
+                  {submittingDecision === "approve" ? "Approving..." : "Approve"}
+                </button>
+              ) : null}
+            </div>
             <span>{focusedRun.startedAt ?? focusedRun.createdAt}</span>
           </div>
 
