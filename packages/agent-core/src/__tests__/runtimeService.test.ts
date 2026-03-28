@@ -830,10 +830,6 @@ test("persistent runtime expands factory implementation backlog until contract s
     workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
   });
 
-  submission.phaseExecution?.phases.forEach((phase) => {
-    delete phase.approvalGate;
-  });
-
   const run = await runtimeService.submitTask(submission);
   const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
   const implementationPhase = completedRun.phaseExecution?.phases.find(
@@ -922,10 +918,6 @@ test("persistent runtime injects factory delegation context into live task execu
     workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
   });
 
-  submission.phaseExecution?.phases.forEach((phase) => {
-    delete phase.approvalGate;
-  });
-
   const run = await runtimeService.submitTask(submission);
   const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
 
@@ -963,6 +955,112 @@ test("persistent runtime injects factory delegation context into live task execu
       (handoff) => handoff.id === "handoff:task:task-nextjs-shell"
     )?.acceptanceTargetIds,
     ["factory-implementation:app-shell"]
+  );
+});
+
+test("persistent runtime pauses Factory only for defined autonomy risks", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const startedInstructions: string[] = [];
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      startedInstructions.push(run.instruction);
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a public launch site with a manual release handoff.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Launch Site",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "launch-site",
+          visibility: "public",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "manual"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/launch-site-20260327"
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  const pausedRun = await waitForRunStatus(runtimeService, run.id, "paused");
+
+  assert.deepEqual(startedInstructions, [
+    'Translate the request into a concise product brief for Launch Site. Cover users, primary flows, core entities, and key constraints. When the brief is ready, explicitly say "Product brief captured."',
+    'Define the initial factory scope for Launch Site using Next.js + Supabase + Vercel. Call out assumptions, the first implementation slice, and what must be true before delivery. When done, explicitly say "Factory scope aligned."'
+  ]);
+  assert.equal(pausedRun.phaseExecution?.status, "blocked");
+  assert.equal(
+    pausedRun.phaseExecution?.phases.find((phase) => phase.id === "factory-intake")?.status,
+    "completed"
+  );
+  assert.equal(
+    pausedRun.phaseExecution?.phases.find((phase) => phase.id === "factory-bootstrap")?.status,
+    "pending"
+  );
+  assert.equal(
+    pausedRun.phaseExecution?.phases.find((phase) => phase.id === "factory-implementation")
+      ?.status,
+    "pending"
+  );
+  assert.equal(
+    pausedRun.phaseExecution?.activeApprovalGateId,
+    "factory-autonomy-gate:factory-bootstrap"
+  );
+  assert.equal(
+    pausedRun.phaseExecution?.phases.find((phase) => phase.id === "factory-bootstrap")?.approvalGate
+      ?.status,
+    "waiting"
+  );
+  assert.ok(
+    pausedRun.factory?.autonomyPolicy.riskEscalationRules.some(
+      (rule) =>
+        rule.phaseId === "factory-bootstrap" &&
+        rule.pauseReason === "high_risk_repository_target"
+    )
+  );
+  assert.ok(
+    pausedRun.controlPlane?.approvalGates.some(
+      (gate) =>
+        gate.id === "factory-autonomy-gate:factory-bootstrap" &&
+        gate.title === "Public repository review"
+    )
+  );
+  assert.equal(
+    pausedRun.factory?.phaseVerificationResults.find(
+      (result) => result.phaseId === "factory-intake"
+    )?.status,
+    "passed"
+  );
+  assert.equal(
+    pausedRun.factory?.phaseVerificationResults.find(
+      (result) => result.phaseId === "factory-bootstrap"
+    )?.status,
+    "pending"
+  );
+  assert.ok(
+    startedInstructions.every(
+      (instruction) => !instruction.includes("Repository foundation scaffolded.")
+    )
   );
 });
 
@@ -1012,8 +1110,6 @@ test("persistent runtime keeps a Factory phase open when typed verification evid
   });
 
   submission.phaseExecution?.phases.forEach((phase) => {
-    delete phase.approvalGate;
-
     if (phase.id === "factory-intake") {
       phase.userStories.forEach((story) => {
         story.validationGates = [
@@ -1023,7 +1119,7 @@ test("persistent runtime keeps a Factory phase open when typed verification evid
             kind: "all_tasks_completed"
           }
         ];
-      story.tasks.forEach((task) => {
+        story.tasks.forEach((task) => {
           task.expectedOutcome = "Completed work.";
           task.validationGates = [
             {
