@@ -33,6 +33,11 @@ import {
   normalizeFactoryStagePlans,
   syncFactoryStagePlans
 } from "./factoryBacklog";
+import {
+  buildFactoryAutonomyApprovalGate,
+  buildFactoryAutonomyPolicy,
+  summarizeFactoryAutonomyPolicy
+} from "./factoryAutonomy";
 import { syncFactoryDelegationState } from "./factoryDelegation";
 import { syncFactoryQualityGateState } from "./factoryQualityGates";
 
@@ -239,6 +244,9 @@ export function createFactoryRunState(options: {
     repository,
     deployment
   });
+  const autonomyPolicy = buildFactoryAutonomyPolicy({
+    appSpec: completionContract.appSpec
+  });
   const stagePlans = buildInitialFactoryStagePlans({
     appSpec: completionContract.appSpec,
     completionContract,
@@ -254,6 +262,7 @@ export function createFactoryRunState(options: {
     repository,
     deployment,
     completionContract,
+    autonomyPolicy,
     stagePlans,
     expansionDecisions: [],
     ownershipPlans: [],
@@ -381,6 +390,9 @@ export function normalizeFactoryRunState(
     repository,
     deployment
   });
+  const autonomyPolicy = buildFactoryAutonomyPolicy({
+    appSpec: completionContract.appSpec
+  });
   const createdAt = value.createdAt?.trim() || new Date().toISOString();
   const updatedAt = value.updatedAt?.trim() || value.createdAt?.trim() || new Date().toISOString();
   const stagePlans = normalizeFactoryStagePlans({
@@ -399,6 +411,7 @@ export function normalizeFactoryRunState(
     repository,
     deployment,
     completionContract,
+    autonomyPolicy,
     stagePlans,
     expansionDecisions,
     ownershipPlans: [],
@@ -494,6 +507,9 @@ export function syncFactoryRunState(options: {
     repository,
     deployment
   });
+  const autonomyPolicy = buildFactoryAutonomyPolicy({
+    appSpec: completionContract.appSpec
+  });
   const stagePlans = syncFactoryStagePlans({
     stagePlans: normalized.stagePlans,
     phaseExecution: options.phaseExecution ?? null,
@@ -506,6 +522,7 @@ export function syncFactoryRunState(options: {
     repository,
     deployment,
     completionContract,
+    autonomyPolicy,
     stagePlans,
     ownershipPlans: [],
     dependencyGraphs: [],
@@ -573,6 +590,9 @@ export function compileFactoryTaskSubmission(options: {
       environment: normalizedFactory.deployment.environment ?? null
     }
   });
+  const autonomyPolicy = buildFactoryAutonomyPolicy({
+    appSpec: completionContract.appSpec
+  });
   const projectLinks = mergeProjectLinks(
     options.input.project?.links,
     normalizedFactory.deployment.url?.trim()
@@ -611,9 +631,14 @@ export function compileFactoryTaskSubmission(options: {
     context: buildFactoryRunContext(
       options.input.context,
       normalizedFactory,
-      completionContract
+      completionContract,
+      autonomyPolicy
     ),
-    phaseExecution: buildFactoryPhaseExecution(normalizedFactory, completionContract),
+    phaseExecution: buildFactoryPhaseExecution(
+      normalizedFactory,
+      completionContract,
+      autonomyPolicy
+    ),
     factory: normalizedFactory
   };
 }
@@ -621,7 +646,8 @@ export function compileFactoryTaskSubmission(options: {
 function buildFactoryRunContext(
   base: SubmitTaskInput["context"],
   factory: FactoryRunInput,
-  completionContract: FactoryCompletionContract
+  completionContract: FactoryCompletionContract,
+  autonomyPolicy: ReturnType<typeof buildFactoryAutonomyPolicy>
 ): RunContextInput {
   const stack = getFactoryStackSummary(factory.stackTemplateId);
   const existing = base ?? {
@@ -640,6 +666,7 @@ function buildFactoryRunContext(
       ...existing.constraints,
       "Operate only inside the connected runtime folder for this factory run.",
       "Treat this as a greenfield application bootstrap, not an edit to the Shipyard control repository.",
+      "Continue automatically by default in Factory Mode unless a defined risk escalation rule or failed quality gate requires a stop.",
       `Use the selected stack template: ${stack.label}.`,
       `Repository target: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}.`,
       `Deployment target: ${factory.deployment.provider}.`
@@ -663,6 +690,14 @@ function buildFactoryRunContext(
         kind: "spec",
         title: "Factory completion contract",
         content: summarizeFactoryCompletionContract(completionContract),
+        source: "factory-mode",
+        format: "markdown"
+      },
+      {
+        id: "factory-autonomy-policy",
+        kind: "spec",
+        title: "Factory autonomy policy",
+        content: summarizeFactoryAutonomyPolicy(autonomyPolicy),
         source: "factory-mode",
         format: "markdown"
       },
@@ -715,7 +750,8 @@ function buildFactoryRunContext(
 
 function buildFactoryPhaseExecution(
   factory: FactoryRunInput,
-  completionContract: FactoryCompletionContract
+  completionContract: FactoryCompletionContract,
+  autonomyPolicy: ReturnType<typeof buildFactoryAutonomyPolicy>
 ): PhaseExecutionInput {
   const stack = getFactoryStackSummary(factory.stackTemplateId);
   const intakeCriteria = getFactoryPhaseCriteria(completionContract, "factory-intake");
@@ -761,12 +797,12 @@ function buildFactoryPhaseExecution(
         description: `Scaffold the repository foundation for ${factory.appName}.`,
         completionCriteria: bootstrapCriteria.completionCriteria,
         verificationCriteria: bootstrapCriteria.verificationCriteria,
-        approvalGate: {
-          kind: "architecture",
-          title: "Architecture bootstrap review",
-          instructions:
-            "Review the bootstrap plan and repository foundation before implementation starts."
-        },
+        approvalGate:
+          buildFactoryAutonomyApprovalGate({
+            policy: autonomyPolicy,
+            phaseId: "factory-bootstrap",
+            phaseName: "Bootstrap"
+          }) ?? undefined,
         userStories: [
           {
             id: "story-repository-bootstrap",
@@ -791,12 +827,12 @@ function buildFactoryPhaseExecution(
         description: `Build the initial product slice for ${factory.appName}.`,
         completionCriteria: implementationCriteria.completionCriteria,
         verificationCriteria: implementationCriteria.verificationCriteria,
-        approvalGate: {
-          kind: "implementation",
-          title: "Implementation review",
-          instructions:
-            "Review the bootstrap output before the implementation stories begin."
-        },
+        approvalGate:
+          buildFactoryAutonomyApprovalGate({
+            policy: autonomyPolicy,
+            phaseId: "factory-implementation",
+            phaseName: "Implementation"
+          }) ?? undefined,
         userStories: buildImplementationStories(factory)
       },
       {
@@ -805,12 +841,12 @@ function buildFactoryPhaseExecution(
         description: `Prepare the delivery handoff for ${factory.appName}.`,
         completionCriteria: deliveryCriteria.completionCriteria,
         verificationCriteria: deliveryCriteria.verificationCriteria,
-        approvalGate: {
-          kind: "deployment",
-          title: "Delivery review",
-          instructions:
-            "Review the implementation output before the delivery handoff is finalized."
-        },
+        approvalGate:
+          buildFactoryAutonomyApprovalGate({
+            policy: autonomyPolicy,
+            phaseId: "factory-delivery",
+            phaseName: "Delivery"
+          }) ?? undefined,
         userStories: [
           {
             id: "story-delivery-handoff",
