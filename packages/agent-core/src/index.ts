@@ -98,6 +98,13 @@ export {
   syncFactoryStagePlans
 } from "./runtime/factoryBacklog";
 export {
+  buildFactoryAutonomyApprovalGate,
+  buildFactoryAutonomyPolicy,
+  findFactoryPauseReason,
+  findFactoryRiskEscalationRules,
+  summarizeFactoryAutonomyPolicy
+} from "./runtime/factoryAutonomy";
+export {
   buildFactoryTaskDelegationRuntimeContext,
   findFactoryDelegationBrief,
   findFactoryDependencyGraph,
@@ -289,6 +296,7 @@ export type {
   FactoryBacklogItem,
   FactoryBacklogItemSource,
   FactoryBacklogItemStatus,
+  FactoryAutonomyPolicy,
   FactoryDelegationBrief,
   FactoryDelegationPath,
   FactoryDelegationStatus,
@@ -308,9 +316,11 @@ export type {
   FactoryPhaseVerificationStatus,
   FactoryQualityGateResult,
   FactoryQualityGateStatus,
+  PauseReason,
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
+  RiskEscalationRule,
   FactoryRunInput,
   FactoryRunState,
   FactoryStagePlan,

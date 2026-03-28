@@ -687,7 +687,10 @@ export async function createPersistentRuntimeService(
                 status: "completed",
                 outputSummary: result.summary,
                 metadata: {
-                  pausedReason: result.paused.reason,
+                  pausedReason:
+                    result.paused.reason === "approval_gate"
+                      ? result.paused.pauseReason ?? result.paused.reason
+                      : result.paused.pauseReason,
                   gateId: result.paused.reason === "approval_gate" ? result.paused.gateId : null,
                   decisionId:
                     result.paused.reason === "factory_quality_gate"

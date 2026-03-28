@@ -46,9 +46,9 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
   );
   assert.equal(compiled.factory?.appName, "Ops Portal");
   assert.equal(compiled.phaseExecution?.phases.length, 4);
-  assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate?.kind, "architecture");
-  assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate?.kind, "implementation");
-  assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate?.kind, "deployment");
+  assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate ?? null, null);
+  assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate ?? null, null);
+  assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate ?? null, null);
   assert.ok((compiled.phaseExecution?.phases[2]?.completionCriteria?.length ?? 0) > 2);
   assert.deepEqual(compiled.phaseExecution?.phases[0]?.completionCriteria, [
     "Product brief captured.",
@@ -70,6 +70,48 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
       (item) =>
         item.id === "factory-completion-contract" &&
         item.content.includes("Definition of done:")
+    )
+  );
+  assert.ok(
+    compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-autonomy-policy" &&
+        item.content.includes("Autonomy default: auto_continue.")
+    )
+  );
+});
+
+test("compileFactoryTaskSubmission adds risk-driven Factory approval gates only when needed", () => {
+  const compiled = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a public launch site with a manual release handoff.",
+      factory: {
+        appName: "Launch Site",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "launch-site",
+          visibility: "public",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "manual"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/launch-site-20260328"
+  });
+
+  assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate?.kind, "architecture");
+  assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate ?? null, null);
+  assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate?.kind, "deployment");
+  assert.ok(
+    compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-autonomy-policy" &&
+        item.content.includes("high_risk_repository_target") &&
+        item.content.includes("high_risk_deployment_target")
     )
   );
 });
@@ -110,6 +152,15 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.ok(state.delegationBriefs.length > 0);
   assert.equal(state.phaseVerificationResults.length, 4);
   assert.equal(state.phaseUnlockDecisions.length, 4);
+  assert.equal(state.autonomyPolicy.defaultBehavior, "auto_continue");
+  assert.equal(state.autonomyPolicy.riskEscalationRules.length, 0);
+  assert.deepEqual(state.autonomyPolicy.autoContinuePhaseIds, [
+    "factory-intake",
+    "factory-bootstrap",
+    "factory-implementation",
+    "factory-delivery"
+  ]);
+  assert.equal(state.autonomyPolicy.qualityGatePauseReason, "failed_quality_gate");
   assert.equal(state.phaseVerificationResults[0]?.status, "pending");
   assert.equal(state.phaseUnlockDecisions[0]?.outcome, "blocked");
   assert.equal(
@@ -450,6 +501,7 @@ test("normalizeFactoryRunState backfills the completion contract for legacy stat
   assert.equal(normalized?.completionContract.phases[1]?.phaseId, "factory-bootstrap");
   assert.equal(normalized?.stagePlans.length, 4);
   assert.deepEqual(normalized?.expansionDecisions, []);
+  assert.equal(normalized?.autonomyPolicy.defaultBehavior, "auto_continue");
   assert.ok(
     normalized?.completionContract.definitionOfDone.verificationCriteria.some(
       (criterion) => criterion.evidenceKind === "delivery_summary"

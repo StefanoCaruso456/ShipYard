@@ -1235,6 +1235,19 @@ export type FactoryQualityGateStatus = "pending" | "passed" | "failed";
 
 export type FactoryPhaseVerificationStatus = "pending" | "passed" | "failed";
 
+export type PauseReason =
+  | "ambiguous_repository_target"
+  | "high_risk_repository_target"
+  | "ambiguous_deployment_target"
+  | "high_risk_deployment_target"
+  | "failed_quality_gate";
+
+export type RiskEscalationTrigger =
+  | "repository_owner_missing"
+  | "repository_visibility_public"
+  | "deployment_project_missing"
+  | "deployment_provider_manual";
+
 export type FactoryPhaseRecoveryAction =
   | "retry_current_phase"
   | "reassign_owner"
@@ -1336,6 +1349,31 @@ export type FactoryCompletionContract = {
   appSpec: FactoryAppSpec;
   definitionOfDone: FactoryDefinitionOfDone;
   phases: FactoryPhaseContract[];
+};
+
+export type RiskEscalationRule = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  title: string;
+  summary: string;
+  rationale: string;
+  trigger: RiskEscalationTrigger;
+  pauseReason: Exclude<PauseReason, "failed_quality_gate">;
+  approvalGateKind: ApprovalGateKind;
+  gateTitle: string;
+  gateInstructions: string;
+};
+
+export type FactoryAutonomyPolicy = {
+  version: 1;
+  mode: "factory";
+  defaultBehavior: "auto_continue";
+  summary: string;
+  autoContinuePhaseIds: string[];
+  autoContinueRules: string[];
+  riskEscalationRules: RiskEscalationRule[];
+  qualityGatePauseReason: Extract<PauseReason, "failed_quality_gate">;
 };
 
 export type FactoryBacklogItemStatus = "planned" | "active" | "completed" | "failed";
@@ -1563,6 +1601,7 @@ export type FactoryRunState = {
   repository: FactoryRepositoryState;
   deployment: FactoryDeploymentState;
   completionContract: FactoryCompletionContract;
+  autonomyPolicy: FactoryAutonomyPolicy;
   stagePlans: FactoryStagePlan[];
   expansionDecisions: FactoryExpansionDecision[];
   ownershipPlans: FactoryOwnershipPlan[];
@@ -1782,9 +1821,11 @@ export type AgentRunResult = {
     gateId: string;
     gateKind: ApprovalGateKind;
     phaseId: string;
+    pauseReason?: Exclude<PauseReason, "failed_quality_gate"> | null;
     summary: string;
   } | {
     reason: "factory_quality_gate";
+    pauseReason: Extract<PauseReason, "failed_quality_gate">;
     phaseId: string;
     decisionId: string;
     summary: string;

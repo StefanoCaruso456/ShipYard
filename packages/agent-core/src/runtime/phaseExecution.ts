@@ -23,6 +23,10 @@ import {
 } from "./types";
 import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
+import {
+  buildFactoryAutonomyApprovalGate,
+  findFactoryPauseReason
+} from "./factoryAutonomy";
 import { applyFactoryStageExpansion } from "./factoryPlanner";
 import { buildFactoryTaskDelegationRuntimeContext } from "./factoryDelegation";
 import {
@@ -244,6 +248,8 @@ export async function executePhaseExecutionRun(
       phaseIndex += 1;
       continue;
     }
+
+    syncFactoryApprovalGate(workingRun, phaseExecution, phase);
 
     const pauseResult = await maybePauseForApprovalGate({
       run: workingRun,
@@ -732,6 +738,9 @@ async function maybePauseForApprovalGate(options: {
   }
 
   const now = new Date().toISOString();
+  const pauseReason = options.run.factory
+    ? findFactoryPauseReason(options.run.factory.autonomyPolicy, options.phase.id)
+    : null;
   const summary =
     gate.status === "rejected"
       ? latestApprovalComment(gate) ?? `Approval rejected for ${options.phase.name}.`
@@ -786,6 +795,7 @@ async function maybePauseForApprovalGate(options: {
       gateId: gate.id,
       gateKind: gate.kind,
       phaseId: options.phase.id,
+      pauseReason,
       summary
     }
   } satisfies AgentRunResult;
@@ -875,6 +885,7 @@ async function maybePauseForFactoryQualityGate(options: {
       }),
       paused: {
         reason: "factory_quality_gate",
+        pauseReason: "failed_quality_gate",
         phaseId: options.phase.id,
         decisionId: unlockDecision.id,
         summary: unlockDecision.summary,
@@ -1294,6 +1305,47 @@ function evaluateGate(
         `Execution evidence includes "${gate.expectedValue ?? ""}".`
       );
   }
+}
+
+function syncFactoryApprovalGate(
+  run: AgentRunRecord,
+  phaseExecution: PhaseExecutionState,
+  phase: Phase
+) {
+  if (!run.factory) {
+    return;
+  }
+
+  const existingGateId = phase.approvalGate?.id ?? null;
+  const existingGate = phase.approvalGate;
+  const nextGate = buildFactoryAutonomyApprovalGate({
+    policy: run.factory.autonomyPolicy,
+    phaseId: phase.id,
+    phaseName: phase.name
+  });
+
+  if (!nextGate) {
+    phase.approvalGate = null;
+
+    if (existingGateId && phaseExecution.activeApprovalGateId === existingGateId) {
+      phaseExecution.activeApprovalGateId = null;
+    }
+
+    return;
+  }
+
+  const preservedGate =
+    existingGate && existingGate.id === nextGate.id
+      ? {
+          ...nextGate,
+          status: existingGate.status,
+          waitingAt: existingGate.waitingAt,
+          resolvedAt: existingGate.resolvedAt,
+          decisions: existingGate.decisions
+        }
+      : nextGate;
+
+  phase.approvalGate = normalizeApprovalGate(preservedGate, phase.id, phase.name);
 }
 
 function createGateResult(
