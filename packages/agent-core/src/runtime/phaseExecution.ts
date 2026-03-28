@@ -27,6 +27,10 @@ import {
   buildFactoryAutonomyApprovalGate,
   findFactoryPauseReason
 } from "./factoryAutonomy";
+import {
+  completeFactoryParallelExecutionWindow,
+  openFactoryParallelExecutionWindow
+} from "./factoryParallelism";
 import { applyFactoryStageExpansion } from "./factoryPlanner";
 import { buildFactoryTaskDelegationRuntimeContext } from "./factoryDelegation";
 import {
@@ -269,150 +273,28 @@ export async function executePhaseExecutionRun(
     let phaseComplete = false;
 
     while (!phaseComplete) {
-      for (const story of phase.userStories) {
-        if (story.status === "completed") {
-          continue;
-        }
-
-        let storyComplete = false;
-
-        while (!storyComplete) {
-          beginStory(workingRun, phaseExecution, phase, story);
-          await persist(options.persistRun, workingRun);
-
-          for (const task of story.tasks) {
-            if (task.status === "completed") {
-              continue;
-            }
-
-            await executeTask({
-              run: workingRun,
-              phaseExecution,
-              phase,
-              story,
-              task,
-              instructionRuntime: options.instructionRuntime,
-              contextAssembler: options.contextAssembler,
-              executeRun: options.executeRun,
-              persistRun: options.persistRun,
-              getRuntimeStatus: options.getRuntimeStatus
-            });
-          }
-
-          const storyGateResults = evaluateStoryGates(story);
-          story.lastValidationResults = storyGateResults;
-
-          if (storyGateResults.every((gate) => gate.success)) {
-            story.status = "completed";
-            story.failureReason = null;
-            recordStoryCompleted(workingRun.controlPlane ?? null, story, storyGateResults);
-            appendRunEvents(
-              workingRun,
-              ...createGateEvents({
-                type: "validation_gate_passed",
-                phaseId: phase.id,
-                storyId: story.id,
-                taskId: null,
-                results: storyGateResults
-              }),
-              {
-                at: new Date().toISOString(),
-                type: "story_completed",
-                phaseId: phase.id,
-                storyId: story.id,
-                taskId: null,
-                message: `Story ${story.title} completed.`,
-                retryCount: story.retryCount
-              }
-            );
-            updateProgress(phaseExecution);
-            workingRun.rollingSummary = {
-              text: `Story completed: ${story.title}`,
-              updatedAt: new Date().toISOString(),
-              source: "result"
-            };
-            await persist(options.persistRun, workingRun);
-            storyComplete = true;
-            continue;
-          }
-
-          const storyFailureMessage = storyGateResults
-            .filter((gate) => !gate.success)
-            .map((gate) => gate.message)
-            .join(" ");
-
-          story.status = "failed";
-          story.failureReason = storyFailureMessage;
-          recordStoryFailed(workingRun.controlPlane ?? null, story, storyFailureMessage, storyGateResults);
-          appendRunEvents(
-            workingRun,
-            ...createGateEvents({
-              type: "validation_gate_failed",
-              phaseId: phase.id,
-              storyId: story.id,
-              taskId: null,
-              results: storyGateResults
-            }),
-            {
-              at: new Date().toISOString(),
-              type: "story_failed",
-              phaseId: phase.id,
-              storyId: story.id,
-              taskId: null,
-              message: storyFailureMessage,
-              retryCount: story.retryCount
-            }
-          );
-          updateProgress(phaseExecution);
-          workingRun.rollingSummary = {
-            text: `Story validation failed: ${storyFailureMessage}`,
-            updatedAt: new Date().toISOString(),
-            source: "failure"
-          };
-          await persist(options.persistRun, workingRun);
-
-          if (story.retryCount >= phaseExecution.retryPolicy.maxStoryRetries) {
-            phase.status = "failed";
-            phase.failureReason = storyFailureMessage;
-            phaseExecution.status = "failed";
-            phaseExecution.lastFailureReason = storyFailureMessage;
-            recordPhaseFailed(
-              workingRun.controlPlane ?? null,
-              phase,
-              storyFailureMessage,
-              phase.lastValidationResults ?? []
-            );
-            updateProgress(phaseExecution);
-            await persist(options.persistRun, workingRun);
-            throw createExecutionFailure(storyFailureMessage);
-          }
-
-          story.retryCount += 1;
-          resetStoryTasks(story);
-          story.status = "pending";
-          recordStoryRetry(
-            workingRun.controlPlane ?? null,
-            story,
-            story.retryCount,
-            `Retrying story ${story.title} after validation gate failure.`
-          );
-          appendRunEvents(workingRun, {
-            at: new Date().toISOString(),
-            type: "retry_scheduled",
-            phaseId: phase.id,
-            storyId: story.id,
-            taskId: null,
-            message: `Retrying story ${story.title} after validation gate failure.`,
-            retryCount: story.retryCount
-          });
-          updateProgress(phaseExecution);
-          workingRun.rollingSummary = {
-            text: `Retry scheduled for story ${story.title}`,
-            updatedAt: new Date().toISOString(),
-            source: "retry"
-          };
-          await persist(options.persistRun, workingRun);
-        }
+      if (workingRun.factory) {
+        await executeFactoryPhaseStories({
+          run: workingRun,
+          phaseExecution,
+          phase,
+          instructionRuntime: options.instructionRuntime,
+          contextAssembler: options.contextAssembler,
+          executeRun: options.executeRun,
+          persistRun: options.persistRun,
+          getRuntimeStatus: options.getRuntimeStatus
+        });
+      } else {
+        await executePhaseStoriesSequential({
+          run: workingRun,
+          phaseExecution,
+          phase,
+          instructionRuntime: options.instructionRuntime,
+          contextAssembler: options.contextAssembler,
+          executeRun: options.executeRun,
+          persistRun: options.persistRun,
+          getRuntimeStatus: options.getRuntimeStatus
+        });
       }
 
       const factoryExpansion =
@@ -646,6 +528,625 @@ export function resolvePhaseExecutionApproval(options: {
     outcome: "retry_requested" as const,
     summary: comment ?? `Retry requested before ${phase.name}.`
   };
+}
+
+async function executePhaseStoriesSequential(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
+  executeRun: ExecuteRun;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+  getRuntimeStatus: () => AgentRuntimeStatus;
+}) {
+  for (const story of options.phase.userStories) {
+    if (story.status === "completed") {
+      continue;
+    }
+
+    await executeStoryLifecycle({
+      run: options.run,
+      phaseExecution: options.phaseExecution,
+      phase: options.phase,
+      story,
+      instructionRuntime: options.instructionRuntime,
+      contextAssembler: options.contextAssembler,
+      executeRun: options.executeRun,
+      persistRun: options.persistRun,
+      getRuntimeStatus: options.getRuntimeStatus
+    });
+  }
+}
+
+async function executeFactoryPhaseStories(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
+  executeRun: ExecuteRun;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+  getRuntimeStatus: () => AgentRuntimeStatus;
+}) {
+  while (options.phase.userStories.some((story) => story.status !== "completed")) {
+    const selection = openFactoryParallelExecutionWindow({
+      factory: options.run.factory ?? nullThrows(),
+      phase: options.phase,
+      phaseExecution: options.phaseExecution,
+      controlPlane: options.run.controlPlane ?? null,
+      updatedAt: new Date().toISOString()
+    });
+
+    if (!selection.window || selection.selectedPackets.length === 0) {
+      const nextStory = options.phase.userStories.find((story) => story.status !== "completed");
+
+      if (!nextStory) {
+        return;
+      }
+
+      await executeStoryLifecycle({
+        run: options.run,
+        phaseExecution: options.phaseExecution,
+        phase: options.phase,
+        story: nextStory,
+        instructionRuntime: options.instructionRuntime,
+        contextAssembler: options.contextAssembler,
+        executeRun: options.executeRun,
+        persistRun: options.persistRun,
+        getRuntimeStatus: options.getRuntimeStatus
+      });
+      continue;
+    }
+
+    options.run.factory = selection.factory;
+    options.phaseExecution.current = {
+      phaseId: options.phase.id,
+      storyId:
+        selection.selectedPackets.length === 1
+          ? selection.selectedPackets[0]?.storyId ?? null
+          : null,
+      taskId: null
+    };
+    options.run.rollingSummary = {
+      text:
+        selection.window.executionMode === "parallel"
+          ? `Executing ${selection.selectedPackets.length} Factory work packets in parallel for ${options.phase.name}.`
+          : `Executing a serialized Factory work packet for ${options.phase.name}.`,
+      updatedAt: selection.window.startedAt,
+      source: "result"
+    };
+    await persist(options.persistRun, options.run);
+
+    let executionFailure: ExecutionFailure | null = null;
+
+    if (selection.selectedPackets.length === 1) {
+      const packetStory = options.phase.userStories.find(
+        (story) => story.id === selection.selectedPackets[0]?.storyId
+      );
+
+      if (packetStory) {
+        try {
+          await executeStoryLifecycle({
+            run: options.run,
+            phaseExecution: options.phaseExecution,
+            phase: options.phase,
+            story: packetStory,
+            instructionRuntime: options.instructionRuntime,
+            contextAssembler: options.contextAssembler,
+            executeRun: options.executeRun,
+            persistRun: options.persistRun,
+            getRuntimeStatus: options.getRuntimeStatus
+          });
+        } catch (error) {
+          executionFailure = normalizeExecutionFailure(error);
+        }
+      }
+    } else {
+      executionFailure = await executeParallelFactoryStories({
+        run: options.run,
+        phaseExecution: options.phaseExecution,
+        phase: options.phase,
+        storyIds: selection.selectedPackets.map((packet) => packet.storyId),
+        instructionRuntime: options.instructionRuntime,
+        contextAssembler: options.contextAssembler,
+        executeRun: options.executeRun,
+        getRuntimeStatus: options.getRuntimeStatus
+      });
+    }
+
+    options.run.factory = completeFactoryParallelExecutionWindow({
+      factory: options.run.factory ?? nullThrows(),
+      windowId: selection.window.id,
+      phaseExecution: options.phaseExecution,
+      controlPlane: options.run.controlPlane ?? null,
+      updatedAt: new Date().toISOString()
+    });
+    syncFactoryExecutionState(options.run, new Date().toISOString());
+    await persist(options.persistRun, options.run);
+
+    if (executionFailure) {
+      throw executionFailure;
+    }
+  }
+}
+
+async function executeStoryLifecycle(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  story: UserStory;
+  instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
+  executeRun: ExecuteRun;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+  getRuntimeStatus: () => AgentRuntimeStatus;
+}) {
+  let storyComplete = false;
+
+  while (!storyComplete) {
+    beginStory(options.run, options.phaseExecution, options.phase, options.story);
+    await persist(options.persistRun, options.run);
+
+    for (const task of options.story.tasks) {
+      if (task.status === "completed") {
+        continue;
+      }
+
+      await executeTask({
+        run: options.run,
+        phaseExecution: options.phaseExecution,
+        phase: options.phase,
+        story: options.story,
+        task,
+        instructionRuntime: options.instructionRuntime,
+        contextAssembler: options.contextAssembler,
+        executeRun: options.executeRun,
+        persistRun: options.persistRun,
+        getRuntimeStatus: options.getRuntimeStatus
+      });
+    }
+
+    const storyGateResults = evaluateStoryGates(options.story);
+    options.story.lastValidationResults = storyGateResults;
+
+    if (storyGateResults.every((gate) => gate.success)) {
+      options.story.status = "completed";
+      options.story.failureReason = null;
+      recordStoryCompleted(options.run.controlPlane ?? null, options.story, storyGateResults);
+      appendRunEvents(
+        options.run,
+        ...createGateEvents({
+          type: "validation_gate_passed",
+          phaseId: options.phase.id,
+          storyId: options.story.id,
+          taskId: null,
+          results: storyGateResults
+        }),
+        {
+          at: new Date().toISOString(),
+          type: "story_completed",
+          phaseId: options.phase.id,
+          storyId: options.story.id,
+          taskId: null,
+          message: `Story ${options.story.title} completed.`,
+          retryCount: options.story.retryCount
+        }
+      );
+      updateProgress(options.phaseExecution);
+      options.run.rollingSummary = {
+        text: `Story completed: ${options.story.title}`,
+        updatedAt: new Date().toISOString(),
+        source: "result"
+      };
+      await persist(options.persistRun, options.run);
+      storyComplete = true;
+      continue;
+    }
+
+    const storyFailureMessage = storyGateResults
+      .filter((gate) => !gate.success)
+      .map((gate) => gate.message)
+      .join(" ");
+
+    options.story.status = "failed";
+    options.story.failureReason = storyFailureMessage;
+    recordStoryFailed(
+      options.run.controlPlane ?? null,
+      options.story,
+      storyFailureMessage,
+      storyGateResults
+    );
+    appendRunEvents(
+      options.run,
+      ...createGateEvents({
+        type: "validation_gate_failed",
+        phaseId: options.phase.id,
+        storyId: options.story.id,
+        taskId: null,
+        results: storyGateResults
+      }),
+      {
+        at: new Date().toISOString(),
+        type: "story_failed",
+        phaseId: options.phase.id,
+        storyId: options.story.id,
+        taskId: null,
+        message: storyFailureMessage,
+        retryCount: options.story.retryCount
+      }
+    );
+    updateProgress(options.phaseExecution);
+    options.run.rollingSummary = {
+      text: `Story validation failed: ${storyFailureMessage}`,
+      updatedAt: new Date().toISOString(),
+      source: "failure"
+    };
+    await persist(options.persistRun, options.run);
+
+    if (options.story.retryCount >= options.phaseExecution.retryPolicy.maxStoryRetries) {
+      options.phase.status = "failed";
+      options.phase.failureReason = storyFailureMessage;
+      options.phaseExecution.status = "failed";
+      options.phaseExecution.lastFailureReason = storyFailureMessage;
+      recordPhaseFailed(
+        options.run.controlPlane ?? null,
+        options.phase,
+        storyFailureMessage,
+        options.phase.lastValidationResults ?? []
+      );
+      updateProgress(options.phaseExecution);
+      await persist(options.persistRun, options.run);
+      throw createExecutionFailure(storyFailureMessage);
+    }
+
+    options.story.retryCount += 1;
+    resetStoryTasks(options.story);
+    options.story.status = "pending";
+    recordStoryRetry(
+      options.run.controlPlane ?? null,
+      options.story,
+      options.story.retryCount,
+      `Retrying story ${options.story.title} after validation gate failure.`
+    );
+    appendRunEvents(options.run, {
+      at: new Date().toISOString(),
+      type: "retry_scheduled",
+      phaseId: options.phase.id,
+      storyId: options.story.id,
+      taskId: null,
+      message: `Retrying story ${options.story.title} after validation gate failure.`,
+      retryCount: options.story.retryCount
+    });
+    updateProgress(options.phaseExecution);
+    options.run.rollingSummary = {
+      text: `Retry scheduled for story ${options.story.title}`,
+      updatedAt: new Date().toISOString(),
+      source: "retry"
+    };
+    await persist(options.persistRun, options.run);
+  }
+}
+
+async function executeParallelFactoryStories(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  storyIds: string[];
+  instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
+  executeRun: ExecuteRun;
+  getRuntimeStatus: () => AgentRuntimeStatus;
+}) {
+  const baseEventCount = options.run.events.length;
+  const outcomes = await Promise.all(
+    options.storyIds.map((storyId) =>
+      executeIsolatedFactoryStory({
+        run: options.run,
+        phaseId: options.phase.id,
+        storyId,
+        baseEventCount,
+        instructionRuntime: options.instructionRuntime,
+        contextAssembler: options.contextAssembler,
+        executeRun: options.executeRun,
+        getRuntimeStatus: options.getRuntimeStatus
+      })
+    )
+  );
+  let executionFailure: ExecutionFailure | null = null;
+
+  options.phaseExecution.current = {
+    phaseId: options.phase.id,
+    storyId: null,
+    taskId: null
+  };
+
+  for (const outcome of outcomes) {
+    mergeFactoryStoryPacketOutcome({
+      run: options.run,
+      phaseExecution: options.phaseExecution,
+      phase: options.phase,
+      outcome
+    });
+
+    if (!executionFailure && outcome.error) {
+      executionFailure = outcome.error;
+    }
+  }
+
+  updateProgress(options.phaseExecution);
+  options.run.controlPlane = syncControlPlaneState(
+    options.run.controlPlane ?? createControlPlaneState(options.phaseExecution),
+    options.phaseExecution
+  );
+
+  return executionFailure;
+}
+
+async function executeIsolatedFactoryStory(options: {
+  run: AgentRunRecord;
+  phaseId: string;
+  storyId: string;
+  baseEventCount: number;
+  instructionRuntime: AgentInstructionRuntime;
+  contextAssembler?: ContextAssembler;
+  executeRun: ExecuteRun;
+  getRuntimeStatus: () => AgentRuntimeStatus;
+}) {
+  const packetRun = cloneRunRecord(options.run);
+  const packetPhaseExecution = normalizePhaseExecutionState(packetRun.phaseExecution);
+
+  if (!packetPhaseExecution) {
+    throw new Error("Factory packet phase execution state is missing.");
+  }
+
+  packetRun.phaseExecution = packetPhaseExecution;
+  const packetPhase = packetPhaseExecution.phases.find((phase) => phase.id === options.phaseId);
+  const packetStory = packetPhase?.userStories.find((story) => story.id === options.storyId);
+
+  if (!packetPhase || !packetStory) {
+    throw new Error(`Factory packet story ${options.storyId} was not found.`);
+  }
+
+  let error: ExecutionFailure | null = null;
+
+  try {
+    await executeStoryLifecycle({
+      run: packetRun,
+      phaseExecution: packetPhaseExecution,
+      phase: packetPhase,
+      story: packetStory,
+      instructionRuntime: options.instructionRuntime,
+      contextAssembler: options.contextAssembler,
+      executeRun: options.executeRun,
+      persistRun: async () => {},
+      getRuntimeStatus: options.getRuntimeStatus
+    });
+  } catch (caughtError) {
+    error = normalizeExecutionFailure(caughtError);
+  }
+
+  return {
+    storyId: options.storyId,
+    phaseId: options.phaseId,
+    packetRun,
+    eventDelta: packetRun.events.slice(options.baseEventCount),
+    error
+  };
+}
+
+function mergeFactoryStoryPacketOutcome(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  outcome: {
+    storyId: string;
+    phaseId: string;
+    packetRun: AgentRunRecord;
+    eventDelta: RunEvent[];
+    error: ExecutionFailure | null;
+  };
+}) {
+  const sourcePhaseExecution = options.outcome.packetRun.phaseExecution;
+
+  if (!sourcePhaseExecution) {
+    return;
+  }
+
+  const sourcePhase = sourcePhaseExecution.phases.find(
+    (phase) => phase.id === options.outcome.phaseId
+  );
+  const sourceStory = sourcePhase?.userStories.find(
+    (story) => story.id === options.outcome.storyId
+  );
+  const targetStory = options.phase.userStories.find(
+    (story) => story.id === options.outcome.storyId
+  );
+
+  if (!sourcePhase || !sourceStory || !targetStory) {
+    return;
+  }
+
+  copyStoryState(targetStory, sourceStory);
+
+  if (sourcePhase.status === "failed") {
+    options.phase.status = "failed";
+    options.phase.failureReason = sourcePhase.failureReason;
+    options.phase.lastValidationResults = sourcePhase.lastValidationResults;
+    options.phaseExecution.status = sourcePhaseExecution.status;
+    options.phaseExecution.lastFailureReason = sourcePhaseExecution.lastFailureReason;
+  }
+
+  options.run.events = [...options.run.events, ...options.outcome.eventDelta];
+  options.run.orchestration = options.outcome.packetRun.orchestration;
+  options.run.result = options.outcome.packetRun.result;
+  options.run.error = options.outcome.packetRun.error;
+  options.run.validationStatus = options.outcome.packetRun.validationStatus;
+  options.run.lastValidationResult = options.outcome.packetRun.lastValidationResult;
+  options.run.rollingSummary = options.outcome.packetRun.rollingSummary;
+  options.run.controlPlane = mergeControlPlanePacketOutcome({
+    target: options.run.controlPlane,
+    source: options.outcome.packetRun.controlPlane,
+    phaseExecution: options.phaseExecution,
+    phaseId: options.phase.id,
+    storyId: options.outcome.storyId,
+    taskIds: sourceStory.tasks.map((task) => task.id),
+    includePhase: sourcePhase.status === "failed"
+  });
+}
+
+function copyStoryState(target: UserStory, source: UserStory) {
+  target.status = source.status;
+  target.retryCount = source.retryCount;
+  target.failureReason = source.failureReason;
+  target.lastValidationResults = source.lastValidationResults
+    ? structuredClone(source.lastValidationResults)
+    : null;
+
+  for (const targetTask of target.tasks) {
+    const sourceTask = source.tasks.find((candidate) => candidate.id === targetTask.id);
+
+    if (!sourceTask) {
+      continue;
+    }
+
+    copyTaskState(targetTask, sourceTask);
+  }
+}
+
+function copyTaskState(target: Task, source: Task) {
+  target.status = source.status;
+  target.retryCount = source.retryCount;
+  target.failureReason = source.failureReason;
+  target.lastValidationResults = source.lastValidationResults
+    ? structuredClone(source.lastValidationResults)
+    : null;
+  target.result = source.result ? structuredClone(source.result) : null;
+}
+
+function mergeControlPlanePacketOutcome(options: {
+  target: AgentRunRecord["controlPlane"];
+  source: AgentRunRecord["controlPlane"];
+  phaseExecution: PhaseExecutionState;
+  phaseId: string;
+  storyId: string;
+  taskIds: string[];
+  includePhase: boolean;
+}) {
+  if (!options.source) {
+    return options.target ?? null;
+  }
+
+  if (!options.target) {
+    return syncControlPlaneState(options.source, options.phaseExecution);
+  }
+
+  const relevantEntityIds = new Set<string>([
+    options.storyId,
+    ...options.taskIds,
+    ...(options.includePhase ? [options.phaseId] : [])
+  ]);
+
+  mergeCollectionsById(
+    options.target.artifacts,
+    options.source.artifacts.filter((artifact) => relevantEntityIds.has(artifact.entityId))
+  );
+  mergeCollectionsById(
+    options.target.handoffs,
+    options.source.handoffs.filter((handoff) => relevantEntityIds.has(handoff.entityId))
+  );
+  mergeCollectionsById(
+    options.target.conflicts,
+    options.source.conflicts.filter((conflict) => relevantEntityIds.has(conflict.entityId))
+  );
+  mergeCollectionsById(
+    options.target.mergeDecisions,
+    options.source.mergeDecisions.filter((decision) => relevantEntityIds.has(decision.entityId))
+  );
+  mergeCollectionsById(
+    options.target.interventions,
+    options.source.interventions.filter((intervention) => relevantEntityIds.has(intervention.entityId))
+  );
+  mergeCollectionsById(
+    options.target.blockers,
+    options.source.blockers.filter((blocker) => relevantEntityIds.has(blocker.entityId))
+  );
+
+  const targetPhase = options.target.phases.find((phase) => phase.id === options.phaseId);
+  const sourcePhase = options.source.phases.find((phase) => phase.id === options.phaseId);
+  const sourceStory = sourcePhase?.userStories.find((story) => story.id === options.storyId);
+
+  if (targetPhase && sourcePhase) {
+    targetPhase.artifactIds = uniqueStrings([
+      ...targetPhase.artifactIds,
+      ...sourcePhase.artifactIds
+    ]);
+    targetPhase.handoffIds = uniqueStrings([
+      ...targetPhase.handoffIds,
+      ...sourcePhase.handoffIds
+    ]);
+    targetPhase.conflictIds = uniqueStrings([
+      ...targetPhase.conflictIds,
+      ...sourcePhase.conflictIds
+    ]);
+    targetPhase.mergeDecisionIds = uniqueStrings([
+      ...targetPhase.mergeDecisionIds,
+      ...sourcePhase.mergeDecisionIds
+    ]);
+    targetPhase.interventionIds = uniqueStrings([
+      ...targetPhase.interventionIds,
+      ...sourcePhase.interventionIds
+    ]);
+    targetPhase.blockerIds = uniqueStrings([
+      ...targetPhase.blockerIds,
+      ...sourcePhase.blockerIds
+    ]);
+
+    if (options.includePhase) {
+      targetPhase.status = sourcePhase.status;
+      targetPhase.failureReason = sourcePhase.failureReason;
+      targetPhase.validation = structuredClone(sourcePhase.validation);
+    }
+
+    if (sourceStory) {
+      const storyIndex = targetPhase.userStories.findIndex(
+        (story) => story.id === options.storyId
+      );
+
+      if (storyIndex >= 0) {
+        targetPhase.userStories[storyIndex] = structuredClone(sourceStory);
+      }
+    }
+  }
+
+  return syncControlPlaneState(options.target, options.phaseExecution);
+}
+
+function mergeCollectionsById<T extends { id: string }>(target: T[], source: T[]) {
+  const sourceById = new Map(source.map((item) => [item.id, structuredClone(item)]));
+
+  for (let index = 0; index < target.length; index += 1) {
+    const replacement = sourceById.get(target[index]?.id ?? "");
+
+    if (replacement) {
+      target[index] = replacement;
+      sourceById.delete(replacement.id);
+    }
+  }
+
+  for (const item of sourceById.values()) {
+    target.push(item);
+  }
+}
+
+function normalizeExecutionFailure(error: unknown) {
+  return createExecutionFailure(
+    error instanceof Error ? error.message : "Task execution failed unexpectedly."
+  );
+}
+
+function nullThrows(): never {
+  throw new Error("Factory state is required.");
 }
 
 async function maybeRewindForFactoryUnlock(options: {

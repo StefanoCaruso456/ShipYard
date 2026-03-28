@@ -39,6 +39,7 @@ import {
   summarizeFactoryAutonomyPolicy
 } from "./factoryAutonomy";
 import { syncFactoryDelegationState } from "./factoryDelegation";
+import { syncFactoryParallelismState } from "./factoryParallelism";
 import { syncFactoryQualityGateState } from "./factoryQualityGates";
 
 const DEFAULT_REPOSITORY_PROVIDER: FactoryRepositoryProviderId = "github";
@@ -270,6 +271,9 @@ export function createFactoryRunState(options: {
     delegationBriefs: [],
     phaseVerificationResults: [],
     phaseUnlockDecisions: [],
+    workPackets: [],
+    scopeLocks: [],
+    parallelExecutionWindows: [],
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -331,11 +335,21 @@ export function createFactoryRunState(options: {
     })
   };
 
-  return {
+  const qualityGateFactory = {
     ...delegatedFactory,
     ...syncFactoryQualityGateState({
       factory: delegatedFactory,
       phaseExecution: options.phaseExecution ?? null,
+      updatedAt: createdAt
+    })
+  };
+
+  return {
+    ...qualityGateFactory,
+    ...syncFactoryParallelismState({
+      factory: qualityGateFactory,
+      phaseExecution: options.phaseExecution ?? null,
+      controlPlane: null,
       updatedAt: createdAt
     })
   };
@@ -419,6 +433,15 @@ export function normalizeFactoryRunState(
     delegationBriefs: [],
     phaseVerificationResults: [],
     phaseUnlockDecisions: [],
+    workPackets: Array.isArray(value.workPackets)
+      ? value.workPackets.map((packet) => ({ ...packet }))
+      : [],
+    scopeLocks: Array.isArray(value.scopeLocks)
+      ? value.scopeLocks.map((lock) => ({ ...lock }))
+      : [],
+    parallelExecutionWindows: Array.isArray(value.parallelExecutionWindows)
+      ? value.parallelExecutionWindows.map((window) => ({ ...window }))
+      : [],
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -448,10 +471,20 @@ export function normalizeFactoryRunState(
     })
   };
 
-  return {
+  const qualityGateFactory = {
     ...delegatedFactory,
     ...syncFactoryQualityGateState({
       factory: delegatedFactory,
+      updatedAt
+    })
+  };
+
+  return {
+    ...qualityGateFactory,
+    ...syncFactoryParallelismState({
+      factory: qualityGateFactory,
+      phaseExecution: null,
+      controlPlane: null,
       updatedAt
     })
   };
@@ -529,6 +562,9 @@ export function syncFactoryRunState(options: {
     delegationBriefs: [],
     phaseVerificationResults: [],
     phaseUnlockDecisions: [],
+    workPackets: normalized.workPackets,
+    scopeLocks: normalized.scopeLocks,
+    parallelExecutionWindows: normalized.parallelExecutionWindows,
     currentStage,
     deliverySummary,
     updatedAt
@@ -551,11 +587,21 @@ export function syncFactoryRunState(options: {
     })
   };
 
-  return {
+  const qualityGateFactory = {
     ...delegatedFactory,
     ...syncFactoryQualityGateState({
       factory: delegatedFactory,
       phaseExecution: options.phaseExecution ?? null,
+      updatedAt
+    })
+  };
+
+  return {
+    ...qualityGateFactory,
+    ...syncFactoryParallelismState({
+      factory: qualityGateFactory,
+      phaseExecution: options.phaseExecution ?? null,
+      controlPlane: options.controlPlane ?? null,
       updatedAt
     })
   };

@@ -332,6 +332,33 @@ export function syncControlPlaneState(
   return next;
 }
 
+export function findControlPlaneHandoff(
+  controlPlane: ControlPlaneState | null | undefined,
+  handoffId: string
+) {
+  if (!controlPlane) {
+    return null;
+  }
+
+  return findHandoff(controlPlane, handoffId);
+}
+
+export function findOpenScopeConflictsForHandoff(
+  controlPlane: ControlPlaneState | null | undefined,
+  handoffId: string
+) {
+  if (!controlPlane) {
+    return [];
+  }
+
+  return controlPlane.conflicts.filter(
+    (conflict) =>
+      conflict.kind === "scope_overlap" &&
+      conflict.status === "open" &&
+      conflict.relatedHandoffIds.includes(handoffId)
+  );
+}
+
 export function recordApprovalGateWaiting(
   controlPlane: ControlPlaneState | null,
   phase: Phase,
