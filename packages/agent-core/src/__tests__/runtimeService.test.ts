@@ -958,6 +958,159 @@ test("persistent runtime injects factory delegation context into live task execu
   );
 });
 
+test("persistent runtime executes independent Factory packets in parallel when scope does not overlap", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  let activePackets = 0;
+  let maxActivePackets = 0;
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      activePackets += 1;
+      maxActivePackets = Math.max(maxActivePackets, activePackets);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      activePackets -= 1;
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  const run = await runtimeService.submitTask(submission);
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.ok(maxActivePackets >= 2);
+  assert.ok(
+    completedRun.factory?.parallelExecutionWindows.some(
+      (window) =>
+        window.phaseId === "factory-implementation" &&
+        window.executionMode === "parallel" &&
+        window.packetIds.length === 2
+    )
+  );
+  assert.ok(
+    completedRun.factory?.scopeLocks.every((lock) => lock.status === "released")
+  );
+  assert.ok(
+    completedRun.factory?.workPackets
+      .filter((packet) => packet.phaseId === "factory-implementation")
+      .every((packet) => packet.status === "completed")
+  );
+});
+
+test("persistent runtime serializes overlapping Factory packets and preserves explicit conflict data", async () => {
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  let activePackets = 0;
+  let maxActivePackets = 0;
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: async (run, context) => {
+      activePackets += 1;
+      maxActivePackets = Math.max(maxActivePackets, activePackets);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      activePackets -= 1;
+
+      return {
+        mode: "placeholder-execution",
+        summary: run.instruction,
+        instructionEcho: run.instruction,
+        skillId: context.instructionRuntime.skill.meta.id,
+        completedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260327"
+  });
+
+  submission.phaseExecution?.phases
+    .find((phase) => phase.id === "factory-implementation")
+    ?.userStories.forEach((story) => {
+      story.tasks[0]!.context = {
+        objective: null,
+        constraints: [],
+        relevantFiles: [
+          {
+            path: "apps/client/src/App.tsx"
+          }
+        ],
+        validationTargets: []
+      };
+    });
+
+  const run = await runtimeService.submitTask(submission);
+  const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+  assert.equal(maxActivePackets, 1);
+  assert.ok(
+    completedRun.factory?.parallelExecutionWindows.some(
+      (window) =>
+        window.phaseId === "factory-implementation" &&
+        window.executionMode === "sequential" &&
+        window.blockedPacketIds.length >= 1 &&
+        window.conflictIds.length >= 1
+    )
+  );
+  assert.ok(
+    completedRun.controlPlane?.conflicts.some((conflict) => conflict.kind === "scope_overlap")
+  );
+});
+
 test("persistent runtime pauses Factory only for defined autonomy risks", async () => {
   const instructionRuntime = await createInstructionRuntimeForTests();
   const startedInstructions: string[] = [];
@@ -1377,9 +1530,12 @@ async function createInstructionRuntimeForTests() {
 async function waitForRunStatus(
   runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
-  expectedStatus: "running" | "paused" | "completed" | "failed"
+  expectedStatus: "running" | "paused" | "completed" | "failed",
+  timeoutMs = 5000
 ) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
     const run = runtimeService.getRun(runId);
 
     if (run?.status === expectedStatus) {
@@ -1389,7 +1545,7 @@ async function waitForRunStatus(
     await tick();
   }
 
-  assert.fail(`Timed out waiting for run ${runId} to reach ${expectedStatus}.`);
+  assert.fail(`Timed out waiting for run ${runId} to reach ${expectedStatus} within ${timeoutMs}ms.`);
 }
 
 async function tick() {

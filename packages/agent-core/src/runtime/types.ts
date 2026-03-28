@@ -1580,6 +1580,72 @@ export type FactoryExpansionDecision = {
   decidedAt: string;
 };
 
+export type FactoryWorkPacketStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "blocked"
+  | "completed";
+
+export type ScopeLockTargetKind = "file" | "domain";
+
+export type ScopeLockStatus = "held" | "released";
+
+export type ParallelExecutionMode = "sequential" | "parallel";
+
+export type ParallelExecutionWindowStatus = "running" | "completed";
+
+export type FactoryWorkPacket = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  storyId: string;
+  handoffId: string;
+  ownerRole: Extract<ControlPlaneRole, "specialist_dev">;
+  ownerAgentId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  taskIds: string[];
+  dependencyIds: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  fileTargets: string[];
+  domainTargets: string[];
+  conflictIds: string[];
+  blockedByPacketIds: string[];
+  scopeLockIds: string[];
+  status: FactoryWorkPacketStatus;
+  statusSummary: string;
+  updatedAt: string;
+};
+
+export type ScopeLock = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  packetId: string;
+  targetKind: ScopeLockTargetKind;
+  target: string;
+  status: ScopeLockStatus;
+  reason: string;
+  conflictIds: string[];
+  createdAt: string;
+  releasedAt: string | null;
+};
+
+export type ParallelExecutionWindow = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  packetIds: string[];
+  blockedPacketIds: string[];
+  scopeLockIds: string[];
+  conflictIds: string[];
+  executionMode: ParallelExecutionMode;
+  status: ParallelExecutionWindowStatus;
+  startedAt: string;
+  completedAt: string | null;
+};
+
 export type FactoryArtifact = {
   id: string;
   kind: FactoryArtifactKind;
@@ -1609,6 +1675,9 @@ export type FactoryRunState = {
   delegationBriefs: FactoryDelegationBrief[];
   phaseVerificationResults: FactoryPhaseVerificationResult[];
   phaseUnlockDecisions: FactoryPhaseUnlockDecision[];
+  workPackets: FactoryWorkPacket[];
+  scopeLocks: ScopeLock[];
+  parallelExecutionWindows: ParallelExecutionWindow[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;

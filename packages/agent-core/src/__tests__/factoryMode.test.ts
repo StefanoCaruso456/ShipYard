@@ -152,6 +152,9 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.ok(state.delegationBriefs.length > 0);
   assert.equal(state.phaseVerificationResults.length, 4);
   assert.equal(state.phaseUnlockDecisions.length, 4);
+  assert.deepEqual(state.workPackets, []);
+  assert.deepEqual(state.scopeLocks, []);
+  assert.deepEqual(state.parallelExecutionWindows, []);
   assert.equal(state.autonomyPolicy.defaultBehavior, "auto_continue");
   assert.equal(state.autonomyPolicy.riskEscalationRules.length, 0);
   assert.deepEqual(state.autonomyPolicy.autoContinuePhaseIds, [
@@ -501,6 +504,9 @@ test("normalizeFactoryRunState backfills the completion contract for legacy stat
   assert.equal(normalized?.completionContract.phases[1]?.phaseId, "factory-bootstrap");
   assert.equal(normalized?.stagePlans.length, 4);
   assert.deepEqual(normalized?.expansionDecisions, []);
+  assert.deepEqual(normalized?.workPackets, []);
+  assert.deepEqual(normalized?.scopeLocks, []);
+  assert.deepEqual(normalized?.parallelExecutionWindows, []);
   assert.equal(normalized?.autonomyPolicy.defaultBehavior, "auto_continue");
   assert.ok(
     normalized?.completionContract.definitionOfDone.verificationCriteria.some(
