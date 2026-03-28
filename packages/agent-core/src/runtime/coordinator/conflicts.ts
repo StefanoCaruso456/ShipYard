@@ -2,7 +2,12 @@ import { getActiveTraceScope } from "../../observability/traceScope";
 import type { TraceMetadata } from "../../observability/types";
 import type { RunEvent } from "../../validation/types";
 import type { ExecutorAgentOutput } from "../agents/types";
-import type { AgentRunRecord, PlannerStepResult, VerifierStepResult } from "../types";
+import type {
+  AgentRunRecord,
+  PlannerStepResult,
+  TeamSkillId,
+  VerifierStepResult
+} from "../types";
 
 type AppendEvents = (run: AgentRunRecord, ...events: RunEvent[]) => void;
 
@@ -116,6 +121,36 @@ export function createConflictRecord(input: {
     reason: input.reason,
     detectedAt: Date.now(),
     metadata: input.metadata
+  };
+}
+
+export function buildParallelSpecialistConflictMetadata(input: {
+  leftHandoffId: string;
+  rightHandoffId: string;
+  leftEntityId: string;
+  rightEntityId: string;
+  leftOwnerAgentTypeId: TeamSkillId | null;
+  rightOwnerAgentTypeId: TeamSkillId | null;
+  overlappingPaths: string[];
+  overlappingDomains: string[];
+  leftAcceptanceTargetIds: string[];
+  rightAcceptanceTargetIds: string[];
+  leftDependencyIds: string[];
+  rightDependencyIds: string[];
+}): TraceMetadata {
+  return {
+    leftHandoffId: input.leftHandoffId,
+    rightHandoffId: input.rightHandoffId,
+    leftEntityId: input.leftEntityId,
+    rightEntityId: input.rightEntityId,
+    leftOwnerAgentTypeId: input.leftOwnerAgentTypeId,
+    rightOwnerAgentTypeId: input.rightOwnerAgentTypeId,
+    overlappingPaths: input.overlappingPaths,
+    overlappingDomains: input.overlappingDomains,
+    leftAcceptanceTargetIds: input.leftAcceptanceTargetIds,
+    rightAcceptanceTargetIds: input.rightAcceptanceTargetIds,
+    leftDependencyIds: input.leftDependencyIds,
+    rightDependencyIds: input.rightDependencyIds
   };
 }
 

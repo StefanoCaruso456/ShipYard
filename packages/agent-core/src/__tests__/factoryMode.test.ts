@@ -4,10 +4,13 @@ import test from "node:test";
 import {
   applyFactoryStageExpansion,
   compileFactoryTaskSubmission,
+  createControlPlaneState,
   createFactoryRunState,
   normalizeFactoryRunInput,
   normalizeFactoryRunState,
   normalizePhaseExecutionInput,
+  recordPhaseStarted,
+  recordStoryCompleted,
   syncFactoryRunState
 } from "../index";
 
@@ -155,6 +158,9 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.deepEqual(state.workPackets, []);
   assert.deepEqual(state.scopeLocks, []);
   assert.deepEqual(state.parallelExecutionWindows, []);
+  assert.deepEqual(state.mergeDecisions, []);
+  assert.deepEqual(state.integrationBlockers, []);
+  assert.deepEqual(state.reassignmentDecisions, []);
   assert.equal(state.autonomyPolicy.defaultBehavior, "auto_continue");
   assert.equal(state.autonomyPolicy.riskEscalationRules.length, 0);
   assert.deepEqual(state.autonomyPolicy.autoContinuePhaseIds, [
@@ -376,6 +382,120 @@ test("syncFactoryRunState advances stage and artifact status from phase executio
   );
 });
 
+test("syncFactoryRunState records Factory merge decisions, blockers, and reassignments", () => {
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "ops-portal",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260328"
+  });
+  const phaseExecution = normalizePhaseExecutionInput(submission.phaseExecution);
+  const factoryInput = normalizeFactoryRunInput(submission.factory);
+
+  assert.ok(phaseExecution);
+  assert.ok(factoryInput);
+
+  const implementationPhase = phaseExecution.phases.find(
+    (phase) => phase.id === "factory-implementation"
+  );
+
+  assert.ok(implementationPhase);
+
+  implementationPhase.userStories[0]!.tasks[0]!.context = {
+    objective: implementationPhase.userStories[0]!.tasks[0]!.context?.objective ?? null,
+    constraints: implementationPhase.userStories[0]!.tasks[0]!.context?.constraints ?? [],
+    relevantFiles: [
+      {
+        path: "apps/client/src/App.tsx"
+      }
+    ],
+    externalContext: implementationPhase.userStories[0]!.tasks[0]!.context?.externalContext,
+    validationTargets:
+      implementationPhase.userStories[0]!.tasks[0]!.context?.validationTargets ?? []
+  };
+  implementationPhase.userStories[1]!.tasks[0]!.context = {
+    objective: implementationPhase.userStories[1]!.tasks[0]!.context?.objective ?? null,
+    constraints: implementationPhase.userStories[1]!.tasks[0]!.context?.constraints ?? [],
+    relevantFiles: [
+      {
+        path: "apps/client/src/App.tsx"
+      }
+    ],
+    externalContext: implementationPhase.userStories[1]!.tasks[0]!.context?.externalContext,
+    validationTargets:
+      implementationPhase.userStories[1]!.tasks[0]!.context?.validationTargets ?? []
+  };
+
+  const factory = createFactoryRunState({
+    input: factoryInput,
+    productBrief: submission.instruction,
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260328",
+    phaseExecution
+  });
+  const controlPlane = createControlPlaneState(phaseExecution);
+
+  recordPhaseStarted(controlPlane, implementationPhase, factory);
+
+  implementationPhase.userStories[0]!.status = "completed";
+
+  for (const task of implementationPhase.userStories[0]!.tasks) {
+    task.status = "completed";
+  }
+
+  recordStoryCompleted(controlPlane, implementationPhase.userStories[0]!, []);
+
+  const synced = syncFactoryRunState({
+    factory,
+    phaseExecution,
+    controlPlane,
+    updatedAt: "2026-03-28T03:10:00.000Z"
+  });
+
+  assert.ok(
+    synced?.mergeDecisions.some(
+      (decision) =>
+        decision.packetId === "factory-work-packet:story-nextjs-shell" &&
+        decision.outcome === "accept"
+    )
+  );
+  assert.ok(synced?.mergeDecisions.some((decision) => decision.outcome === "reassign"));
+  assert.ok(
+    synced?.integrationBlockers.some(
+      (blocker) =>
+        blocker.packetId === "factory-work-packet:story-supabase-flow" &&
+        blocker.kind === "scope_overlap" &&
+        blocker.status === "open"
+    )
+  );
+  assert.ok(
+    synced?.reassignmentDecisions.some(
+      (decision) =>
+        decision.packetId === "factory-work-packet:story-supabase-flow" &&
+        decision.toAgentTypeId !== null
+    )
+  );
+});
+
 test("applyFactoryStageExpansion adds implementation backlog items for uncovered contract scope", () => {
   const compiled = compileFactoryTaskSubmission({
     input: {
@@ -507,6 +627,9 @@ test("normalizeFactoryRunState backfills the completion contract for legacy stat
   assert.deepEqual(normalized?.workPackets, []);
   assert.deepEqual(normalized?.scopeLocks, []);
   assert.deepEqual(normalized?.parallelExecutionWindows, []);
+  assert.deepEqual(normalized?.mergeDecisions, []);
+  assert.deepEqual(normalized?.integrationBlockers, []);
+  assert.deepEqual(normalized?.reassignmentDecisions, []);
   assert.equal(normalized?.autonomyPolicy.defaultBehavior, "auto_continue");
   assert.ok(
     normalized?.completionContract.definitionOfDone.verificationCriteria.some(

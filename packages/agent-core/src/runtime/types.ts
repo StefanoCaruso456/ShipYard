@@ -1646,6 +1646,73 @@ export type ParallelExecutionWindow = {
   completedAt: string | null;
 };
 
+export type FactoryMergeDecision = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  storyId: string;
+  packetId: string;
+  handoffId: string;
+  sourceDecisionId: string | null;
+  conflictIds: string[];
+  blockerIds: string[];
+  dependencyIds: string[];
+  acceptanceTargetIds: string[];
+  verificationTargetIds: string[];
+  outcome: ControlPlaneMergeResolution;
+  summary: string;
+  ownerRole: Extract<ControlPlaneRole, "production_lead">;
+  ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  targetHandoffId: string | null;
+  reassignedToAgentTypeId: TeamSkillId | null;
+  notes: string | null;
+  decidedAt: string;
+};
+
+export type FactoryIntegrationBlockerKind =
+  | "scope_overlap"
+  | "retry_required"
+  | "reassignment_required"
+  | "rejected_output";
+
+export type FactoryIntegrationBlocker = {
+  id: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  storyId: string;
+  packetId: string;
+  handoffId: string;
+  windowId: string | null;
+  sourceDecisionId: string | null;
+  sourceConflictIds: string[];
+  sourceBlockerIds: string[];
+  kind: FactoryIntegrationBlockerKind;
+  summary: string;
+  status: "open" | "resolved";
+  blockingPacketIds: string[];
+  scopeLockIds: string[];
+  ownerRole: Extract<ControlPlaneRole, "production_lead">;
+  ownerId: string;
+  ownerAgentTypeId: TeamSkillId | null;
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
+export type FactoryReassignmentDecision = {
+  id: string;
+  mergeDecisionId: string;
+  phaseId: string;
+  stageId: FactoryStageId;
+  storyId: string;
+  packetId: string;
+  handoffId: string;
+  fromAgentTypeId: TeamSkillId | null;
+  toAgentTypeId: TeamSkillId;
+  reason: string;
+  createdAt: string;
+};
+
 export type FactoryArtifact = {
   id: string;
   kind: FactoryArtifactKind;
@@ -1678,6 +1745,9 @@ export type FactoryRunState = {
   workPackets: FactoryWorkPacket[];
   scopeLocks: ScopeLock[];
   parallelExecutionWindows: ParallelExecutionWindow[];
+  mergeDecisions: FactoryMergeDecision[];
+  integrationBlockers: FactoryIntegrationBlocker[];
+  reassignmentDecisions: FactoryReassignmentDecision[];
   currentStage: FactoryStageId;
   artifacts: FactoryArtifact[];
   deliverySummary: string | null;
