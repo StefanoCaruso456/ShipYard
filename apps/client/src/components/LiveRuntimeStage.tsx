@@ -28,7 +28,8 @@ export function LiveRuntimeStage({
   const operatorView = liveRuntime?.operatorView;
   const hasActivity = (thread.activity?.length ?? 0) > 0;
   const shouldShowOperatorOverview =
-    Boolean(operatorView) && (!hasActivity || Boolean(operatorView?.approval?.activeGate));
+    Boolean(operatorView) &&
+    (Boolean(operatorView?.factory) || !hasActivity || Boolean(operatorView?.approval?.activeGate));
 
   if (!liveRuntime || !focusedRun) {
     return null;

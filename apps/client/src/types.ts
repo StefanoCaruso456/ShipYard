@@ -751,6 +751,98 @@ export type RuntimeOperatorMergeDecision = {
   notes: string | null;
 };
 
+export type RuntimeFactoryDeliveryCheckStatus = "passed" | "failed" | "pending" | "manual";
+
+export type RuntimeFactoryDeliveryArtifact = {
+  status: "completed" | "failed" | "in_progress";
+  headline: string;
+  repository: {
+    label: string;
+    branch: string;
+    url: string | null;
+    path: string | null;
+    status: "ready" | "failed" | "pending";
+    summary: string;
+  };
+  deployment: {
+    provider: string;
+    environment: string | null;
+    url: string | null;
+    status: "ready" | "failed" | "pending" | "manual";
+    summary: string;
+  };
+  build: {
+    status: RuntimeFactoryDeliveryCheckStatus;
+    summary: string;
+  };
+  test: {
+    status: RuntimeFactoryDeliveryCheckStatus;
+    summary: string;
+  };
+  shipped: string[];
+  passedChecks: string[];
+  failedChecks: string[];
+  pendingActions: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type RuntimeFactoryScorecard = {
+  overallStatus: "completed" | "failed" | "in_progress";
+  totalStages: number;
+  completedStages: number;
+  verifiedStages: number;
+  totalBacklogItems: number;
+  completedBacklogItems: number;
+  totalWorkPackets: number;
+  completedWorkPackets: number;
+  retryCount: number;
+  mergeDecisionCount: number;
+  reassignmentCount: number;
+  openIntegrationBlockerCount: number;
+  openConflictCount: number;
+  repositoryStatus: RuntimeFactoryDeliveryArtifact["repository"]["status"];
+  buildStatus: RuntimeFactoryDeliveryArtifact["build"]["status"];
+  testStatus: RuntimeFactoryDeliveryArtifact["test"]["status"];
+  deploymentStatus: RuntimeFactoryDeliveryArtifact["deployment"]["status"];
+};
+
+export type RuntimeFactoryFailureReport = {
+  status: "failed" | "blocked";
+  headline: string;
+  summary: string;
+  failedChecks: string[];
+  blockers: string[];
+  conflicts: string[];
+  recommendedActions: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type RuntimeFactoryRunViewStage = {
+  stageId: RuntimeFactoryRunState["currentStage"];
+  label: string;
+  status: "pending" | "active" | "blocked" | "completed" | "failed";
+  summary: string;
+  completedBacklogItems: number;
+  totalBacklogItems: number;
+  verified: boolean;
+};
+
+export type RuntimeFactoryRunView = {
+  status: "completed" | "failed" | "in_progress";
+  appName: string;
+  stackLabel: string;
+  currentStage: RuntimeFactoryRunState["currentStage"];
+  headline: string;
+  stages: RuntimeFactoryRunViewStage[];
+  deliveryArtifact: RuntimeFactoryDeliveryArtifact | null;
+  scorecard: RuntimeFactoryScorecard;
+  failureReport: RuntimeFactoryFailureReport | null;
+  pendingActions: string[];
+  updatedAt: string | null;
+};
+
 export type RuntimeOperatorDeliveryLink = {
   kind: string;
   label: string;
@@ -920,6 +1012,7 @@ export type RuntimeOperatorView = {
   blockers: RuntimeOperatorBlocker[];
   conflicts: RuntimeOperatorConflict[];
   mergeDecisions: RuntimeOperatorMergeDecision[];
+  factory: RuntimeFactoryRunView | null;
   delivery: RuntimeOperatorDeliverySummary | null;
   evaluation: RuntimeOperatorEvaluation | null;
   comparativeAnalysis: RuntimeOperatorComparativeAnalysis | null;

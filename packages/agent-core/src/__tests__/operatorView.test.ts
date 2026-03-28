@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  compileFactoryTaskSubmission,
   createControlPlaneState,
+  createFactoryRunState,
   deriveOperatorRunView,
   normalizePhaseExecutionInput,
   recordMergeGovernanceDecision,
@@ -12,6 +14,7 @@ import {
   recordStoryStarted,
   recordTaskCompleted,
   recordTaskStarted,
+  syncFactoryRunState,
   type AgentRunRecord
 } from "../index";
 
@@ -599,4 +602,250 @@ test("operator view assembles delivery summary and evaluation for completed runs
       .find((section) => section.id === "recommended_improvements")
       ?.highlights.some((highlight) => highlight.includes("Retry pressure"))
   );
+});
+
+test("operator view assembles a dedicated Factory delivery artifact from typed runtime evidence", () => {
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer intake app for service teams.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live"
+      },
+      factory: {
+        appName: "Client Intake",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "client-intake",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "client-intake",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/client-intake-20260328"
+  });
+  const phaseExecution = normalizePhaseExecutionInput(submission.phaseExecution);
+
+  assert.ok(phaseExecution);
+  assert.ok(submission.factory);
+
+  const factoryState = createFactoryRunState({
+    input: submission.factory,
+    productBrief: submission.instruction,
+    workspacePath: "/tmp/factory-workspaces/client-intake-20260328",
+    phaseExecution
+  });
+  const controlPlane = createControlPlaneState(phaseExecution);
+
+  for (const phase of phaseExecution.phases) {
+    phase.status = "completed";
+
+    recordPhaseStarted(controlPlane, phase, factoryState);
+
+    for (const story of phase.userStories) {
+      story.status = "completed";
+      recordStoryStarted(controlPlane, story);
+
+      for (const task of story.tasks) {
+        task.status = "completed";
+        task.result = {
+          mode: "phase-execution",
+          summary: task.expectedOutcome,
+          instructionEcho: task.instruction,
+          skillId: "execution_subagent",
+          completedAt: "2026-03-28T04:10:00.000Z"
+        };
+        task.lastValidationResults = [
+          {
+            gateId: `${task.id}:complete`,
+            description: "Task completed",
+            kind: "task_completed",
+            success: true,
+            message: `${task.expectedOutcome} verified.`
+          }
+        ];
+        recordTaskStarted(controlPlane, story, task);
+        recordTaskCompleted(controlPlane, task, task.result, task.lastValidationResults);
+      }
+
+      recordStoryCompleted(controlPlane, story, [
+        {
+          gateId: `${story.id}:complete`,
+          description: "Story completed",
+          kind: "all_tasks_completed",
+          success: true,
+          message: `${story.title} completed cleanly.`
+        }
+      ]);
+    }
+
+    recordPhaseCompleted(controlPlane, phase, [
+      {
+        gateId: `${phase.id}:complete`,
+        description: "Phase completed",
+        kind: "all_user_stories_completed",
+        success: true,
+        message: `${phase.name} completed cleanly.`
+      }
+    ]);
+  }
+
+  phaseExecution.status = "completed";
+  phaseExecution.current = {
+    phaseId: null,
+    storyId: null,
+    taskId: null
+  };
+
+  const factory = syncFactoryRunState({
+    factory: factoryState,
+    phaseExecution,
+    controlPlane,
+    project: {
+      id: "shipyard-runtime",
+      kind: "live",
+      links: [
+        {
+          kind: "repository",
+          url: "https://github.com/acme/client-intake",
+          title: "Repository"
+        },
+        {
+          kind: "deployment",
+          url: "https://client-intake.vercel.app",
+          title: "Deployment",
+          provider: "vercel"
+        }
+      ],
+      folder: {
+        provider: "runtime",
+        displayPath: "/tmp/factory-workspaces/client-intake-20260328",
+        status: "connected"
+      }
+    },
+    status: "completed",
+    resultSummary: "Client Intake shipped through Factory Mode.",
+    updatedAt: "2026-03-28T04:15:00.000Z"
+  });
+
+  const operatorView = deriveOperatorRunView(
+    createRun({
+      status: "completed",
+      startedAt: "2026-03-28T04:00:00.000Z",
+      completedAt: "2026-03-28T04:15:00.000Z",
+      phaseExecution,
+      controlPlane,
+      factory,
+      result: {
+        mode: "phase-execution",
+        summary: "Client Intake shipped through Factory Mode.",
+        instructionEcho: submission.instruction,
+        skillId: "production_lead",
+        completedAt: "2026-03-28T04:15:00.000Z",
+        phaseExecution,
+        controlPlane,
+        factory
+      }
+    })
+  );
+
+  assert.ok(operatorView.factory);
+  assert.equal(operatorView.factory?.deliveryArtifact?.repository.status, "ready");
+  assert.equal(operatorView.factory?.deliveryArtifact?.build.status, "passed");
+  assert.equal(operatorView.factory?.deliveryArtifact?.test.status, "passed");
+  assert.equal(operatorView.factory?.deliveryArtifact?.deployment.status, "ready");
+  assert.ok((operatorView.factory?.deliveryArtifact?.shipped.length ?? 0) >= 1);
+  assert.equal(operatorView.factory?.scorecard.completedStages, 4);
+  assert.equal(operatorView.factory?.failureReport ?? null, null);
+});
+
+test("operator view surfaces a Factory failure report when closeout evidence fails", () => {
+  const submission = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a customer onboarding portal for operations teams.",
+      factory: {
+        appName: "Ops Portal",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "ops-portal",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "manual"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260328"
+  });
+  const phaseExecution = normalizePhaseExecutionInput(submission.phaseExecution);
+
+  assert.ok(phaseExecution);
+  assert.ok(submission.factory);
+
+  const baseFactory = createFactoryRunState({
+    input: submission.factory,
+    productBrief: submission.instruction,
+    workspacePath: "/tmp/factory-workspaces/ops-portal-20260328",
+    phaseExecution
+  });
+  const factory: typeof baseFactory = {
+    ...baseFactory,
+    integrationBlockers: [
+      {
+        id: "factory-integration-blocker:test",
+        phaseId: "factory-delivery",
+        stageId: "delivery",
+        storyId: "story-delivery-handoff",
+        packetId: "factory-work-packet:story-delivery-handoff",
+        handoffId: "handoff:story:story-delivery-handoff",
+        windowId: null,
+        sourceDecisionId: null,
+        sourceConflictIds: [],
+        sourceBlockerIds: [],
+        kind: "rejected_output",
+        summary: "Factory delivery evidence is incomplete and needs another pass.",
+        status: "open",
+        blockingPacketIds: [],
+        scopeLockIds: [],
+        ownerRole: "production_lead",
+        ownerId: "agent:production-lead",
+        ownerAgentTypeId: "production_lead",
+        createdAt: "2026-03-28T04:20:00.000Z",
+        resolvedAt: null
+      }
+    ],
+    mergeDecisions: [],
+    reassignmentDecisions: []
+  };
+  const operatorView = deriveOperatorRunView(
+    createRun({
+      status: "failed",
+      startedAt: "2026-03-28T04:00:00.000Z",
+      completedAt: "2026-03-28T04:25:00.000Z",
+      phaseExecution,
+      factory,
+      error: {
+        message: "Factory delivery evidence is incomplete."
+      }
+    })
+  );
+
+  assert.ok(operatorView.factory?.failureReport);
+  assert.equal(operatorView.factory?.failureReport?.status, "failed");
+  assert.ok(
+    operatorView.factory?.failureReport?.recommendedActions.some((action) =>
+      action.toLowerCase().includes("delivery")
+    )
+  );
+  assert.match(operatorView.nextAction ?? "", /factory/i);
 });

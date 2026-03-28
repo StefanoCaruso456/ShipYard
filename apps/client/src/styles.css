@@ -1361,6 +1361,66 @@ a {
   border-color: rgba(154, 96, 96, 0.38);
 }
 
+.factory-run-view {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.factory-run-view__hero {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(101, 134, 173, 0.26);
+  background:
+    radial-gradient(circle at top right, rgba(101, 134, 173, 0.18), transparent 48%),
+    rgba(101, 134, 173, 0.08);
+}
+
+.factory-run-view__hero-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.factory-run-view__hero-copy strong {
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.factory-run-view__hero-copy p {
+  margin: 0;
+  color: #d1d6df;
+  line-height: 1.58;
+}
+
+.factory-run-view__status-card {
+  min-height: 10rem;
+}
+
+.factory-run-view__stage--active {
+  border-color: rgba(88, 110, 139, 0.32);
+}
+
+.factory-run-view__stage--blocked {
+  border-color: rgba(176, 143, 80, 0.34);
+  background: rgba(176, 143, 80, 0.08);
+}
+
+.factory-run-view__stage--failed {
+  border-color: rgba(154, 96, 96, 0.34);
+  background: rgba(154, 96, 96, 0.1);
+}
+
+.factory-run-view__stage--completed {
+  border-color: rgba(116, 153, 124, 0.28);
+}
+
+.factory-run-view__failure {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .live-runtime-stage__eyebrow,
 .live-runtime-stage__title-row,
 .live-runtime-stage__meta,

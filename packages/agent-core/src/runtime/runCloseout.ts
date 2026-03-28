@@ -4,6 +4,12 @@ import type {
   ControlPlaneDeliverySummaryArtifactPayload,
   ControlPlaneFailureReportArtifactPayload,
   ExternalRecordLink,
+  FactoryDeliveryArtifact,
+  FactoryFailureReport,
+  FactoryPhaseVerificationResult,
+  FactoryRunView,
+  FactoryRunViewStage,
+  FactoryScorecard,
   OperatorRunComparativeAnalysis,
   OperatorRunDeliveryLink,
   OperatorRunDeliverySummary,
@@ -15,14 +21,18 @@ export function deriveRunCloseout(run: AgentRunRecord): {
   delivery: OperatorRunDeliverySummary | null;
   evaluation: OperatorRunEvaluation | null;
   comparativeAnalysis: OperatorRunComparativeAnalysis | null;
+  factory: FactoryRunView | null;
 } {
   const delivery = deriveDeliverySummary(run);
   const evaluation = deriveEvaluation(run);
+  const comparativeAnalysis = deriveComparativeAnalysis(run, delivery, evaluation);
+  const factory = deriveFactoryRunView(run, delivery, evaluation);
 
   return {
     delivery,
     evaluation,
-    comparativeAnalysis: deriveComparativeAnalysis(run, delivery, evaluation)
+    comparativeAnalysis,
+    factory
   };
 }
 
@@ -336,6 +346,372 @@ function deriveComparativeAnalysis(
   };
 }
 
+function deriveFactoryRunView(
+  run: AgentRunRecord,
+  delivery: OperatorRunDeliverySummary | null,
+  evaluation: OperatorRunEvaluation | null
+): FactoryRunView | null {
+  if (!run.factory) {
+    return null;
+  }
+
+  const deliveryArtifact = deriveFactoryDeliveryArtifact(run, delivery);
+  const scorecard = deriveFactoryScorecard(run, deliveryArtifact);
+  const failureReport = deriveFactoryFailureReport(run, deliveryArtifact);
+  const stages = deriveFactoryStages(run);
+  const pendingActions = uniqueStrings([
+    ...(failureReport?.recommendedActions ?? []),
+    ...(deliveryArtifact?.pendingActions ?? []),
+    ...deriveFollowUpsFromRun(run)
+  ]).slice(0, 6);
+  const updatedAt =
+    deliveryArtifact?.updatedAt ??
+    failureReport?.updatedAt ??
+    run.factory.updatedAt ??
+    run.completedAt ??
+    run.rollingSummary?.updatedAt ??
+    null;
+
+  return {
+    status:
+      run.status === "completed" ? "completed" : run.status === "failed" ? "failed" : "in_progress",
+    appName: run.factory.appName,
+    stackLabel: run.factory.stack.label,
+    currentStage: run.factory.currentStage,
+    headline:
+      deliveryArtifact?.headline ??
+      failureReport?.headline ??
+      delivery?.headline ??
+      run.factory.deliverySummary ??
+      run.rollingSummary?.text ??
+      `${run.factory.appName} factory run is currently in ${humanizeKey(run.factory.currentStage)}.`,
+    stages,
+    deliveryArtifact,
+    scorecard,
+    failureReport,
+    pendingActions,
+    updatedAt
+  };
+}
+
+function deriveFactoryDeliveryArtifact(
+  run: AgentRunRecord,
+  delivery: OperatorRunDeliverySummary | null
+): FactoryDeliveryArtifact | null {
+  if (!run.factory) {
+    return null;
+  }
+
+  const repositoryArtifact =
+    run.factory.artifacts.find((artifact) => artifact.kind === "repository") ?? null;
+  const deploymentArtifact =
+    run.factory.artifacts.find((artifact) => artifact.kind === "deployment_handoff") ?? null;
+  const implementationVerification = findFactoryVerification(run, "implementation");
+  const deliveryVerification = findFactoryVerification(run, "delivery");
+  const validationArtifactCount =
+    run.controlPlane?.artifacts.filter((artifact) => artifact.kind === "validation_report").length ?? 0;
+  const failureArtifacts = getArtifactsByPayloadKind<ControlPlaneFailureReportArtifactPayload>(
+    run,
+    "failure_report"
+  );
+  const repositoryStatus =
+    repositoryArtifact?.status === "completed" || Boolean(run.factory.repository.url || run.factory.repository.localPath)
+      ? "ready"
+      : run.status === "failed" && run.factory.currentStage !== "intake"
+        ? "failed"
+        : "pending";
+  const buildStatus =
+    implementationVerification?.status === "passed"
+      ? "passed"
+      : implementationVerification?.status === "failed"
+        ? "failed"
+        : "pending";
+  const testStatus =
+    run.validationStatus === "failed" ||
+    run.validationStatus === "rolled_back" ||
+    run.validationStatus === "rollback_failed" ||
+    failureArtifacts.length > 0
+      ? "failed"
+      : validationArtifactCount > 0 && implementationVerification?.status === "passed"
+        ? "passed"
+        : run.status === "completed"
+          ? "passed"
+          : "pending";
+  const deploymentStatus =
+    run.factory.deployment.provider === "manual" && !run.factory.deployment.url
+      ? "manual"
+      : deploymentArtifact?.status === "completed" || Boolean(run.factory.deployment.url)
+        ? "ready"
+        : run.status === "failed" && run.factory.currentStage === "delivery"
+          ? "failed"
+          : "pending";
+  const repositoryLabel = [
+    run.factory.repository.owner,
+    run.factory.repository.name
+  ]
+    .filter(isNonEmptyString)
+    .join("/");
+  const shipped = uniqueStrings([
+    ...(delivery?.outputs ?? []),
+    ...getCompletedFactoryBacklogTitles(run, "implementation")
+  ]).slice(0, 6);
+  const failedChecks = uniqueStrings([
+    ...run.factory.phaseVerificationResults
+      .filter((result) => result.status === "failed")
+      .map((result) => result.summary),
+    ...(failureArtifacts.map((artifact) => artifact.payload.headline) ?? [])
+  ]).slice(0, 6);
+  const passedChecks = compactHighlights([
+    repositoryStatus === "ready"
+      ? `Repository ${repositoryLabel || run.factory.repository.name} is connected.`
+      : null,
+    buildStatus === "passed" ? implementationVerification?.summary ?? "Implementation verified." : null,
+    testStatus === "passed"
+      ? validationArtifactCount > 0
+        ? `${validationArtifactCount} validation artifact${validationArtifactCount === 1 ? "" : "s"} passed.`
+        : "Typed validation evidence passed."
+      : null,
+    deploymentStatus === "ready"
+      ? `Deployment handoff for ${run.factory.deployment.provider} is ready.`
+      : deploymentStatus === "manual"
+        ? "Manual deployment handoff prepared."
+        : null,
+    delivery?.status === "completed" ? delivery.headline : null
+  ]);
+  const pendingActions = compactHighlights([
+    ...(delivery?.followUps ?? []),
+    ...getOpenBlockerSummaries(run),
+    ...getOpenConflictSummaries(run),
+    deploymentStatus === "manual"
+      ? `Complete the manual deployment handoff for ${run.factory.appName}.`
+      : null,
+    buildStatus === "failed" ? "Resolve the failed implementation verification checks." : null,
+    testStatus === "failed" ? "Fix the failed validation evidence before rerunning Factory." : null
+  ]);
+  const sourceArtifactIds = uniqueStrings([
+    ...(delivery?.sourceArtifactIds ?? []),
+    ...failureArtifacts.map((artifact) => artifact.id),
+    ...(run.controlPlane?.artifacts
+      .filter((artifact) => artifact.kind === "validation_report")
+      .map((artifact) => artifact.id) ?? [])
+  ]);
+  const updatedAt =
+    delivery?.updatedAt ??
+    deploymentArtifact?.updatedAt ??
+    repositoryArtifact?.updatedAt ??
+    run.completedAt ??
+    run.factory.updatedAt ??
+    null;
+
+  return {
+    status:
+      run.status === "completed" ? "completed" : run.status === "failed" ? "failed" : "in_progress",
+    headline:
+      delivery?.headline ??
+      (run.status === "completed"
+        ? `${run.factory.appName} is ready with a factory delivery artifact.`
+        : run.status === "failed"
+          ? `${run.factory.appName} did not clear the factory closeout checks.`
+          : `${run.factory.appName} is progressing through Factory Mode.`),
+    repository: {
+      label: repositoryLabel || run.factory.repository.name,
+      branch: run.factory.repository.baseBranch,
+      url: run.factory.repository.url,
+      path: run.factory.repository.localPath,
+      status: repositoryStatus,
+      summary:
+        repositoryStatus === "ready"
+          ? `Repository ${repositoryLabel || run.factory.repository.name} is connected on ${run.factory.repository.baseBranch}.`
+          : repositoryStatus === "failed"
+            ? `Repository setup stalled before Factory could finish ${run.factory.appName}.`
+            : `Repository setup is still pending for ${run.factory.repository.name}.`
+    },
+    deployment: {
+      provider: run.factory.deployment.provider,
+      environment: run.factory.deployment.environment,
+      url: run.factory.deployment.url,
+      status: deploymentStatus,
+      summary:
+        deploymentStatus === "ready"
+          ? `Deployment evidence is attached for ${run.factory.deployment.provider}.`
+          : deploymentStatus === "manual"
+            ? "Deployment requires a manual handoff before the app is fully live."
+            : deploymentStatus === "failed"
+              ? "Deployment evidence was not completed before the run failed."
+              : "Deployment evidence is still being prepared."
+    },
+    build: {
+      status: buildStatus,
+      summary:
+        implementationVerification?.summary ??
+        (buildStatus === "passed"
+          ? "Implementation verification passed."
+          : buildStatus === "failed"
+            ? "Implementation verification failed."
+            : "Implementation verification is still pending.")
+    },
+    test: {
+      status: testStatus,
+      summary:
+        testStatus === "passed"
+          ? validationArtifactCount > 0
+            ? `${validationArtifactCount} validation artifact${validationArtifactCount === 1 ? "" : "s"} support the final closeout.`
+            : "Typed validation evidence passed for the Factory run."
+          : testStatus === "failed"
+            ? failedChecks[0] ?? "Validation evidence failed during Factory closeout."
+            : "Validation evidence is still pending."
+    },
+    shipped: shipped.length > 0 ? shipped : [run.factory.appName],
+    passedChecks,
+    failedChecks,
+    pendingActions,
+    sourceArtifactIds,
+    updatedAt
+  };
+}
+
+function deriveFactoryScorecard(
+  run: AgentRunRecord,
+  deliveryArtifact: FactoryDeliveryArtifact | null
+): FactoryScorecard {
+  if (!run.factory) {
+    throw new Error("Factory scorecard requested without factory state.");
+  }
+
+  const totalBacklogItems = run.factory.stagePlans.reduce(
+    (total, plan) => total + plan.backlog.length,
+    0
+  );
+  const completedBacklogItems = run.factory.stagePlans.reduce(
+    (total, plan) => total + plan.backlog.filter((item) => item.status === "completed").length,
+    0
+  );
+
+  return {
+    overallStatus:
+      run.status === "completed" ? "completed" : run.status === "failed" ? "failed" : "in_progress",
+    totalStages: run.factory.stagePlans.length,
+    completedStages: run.factory.stagePlans.filter((plan) => plan.status === "completed").length,
+    verifiedStages: run.factory.phaseVerificationResults.filter((result) => result.status === "passed").length,
+    totalBacklogItems,
+    completedBacklogItems,
+    totalWorkPackets: run.factory.workPackets.length,
+    completedWorkPackets: run.factory.workPackets.filter((packet) => packet.status === "completed").length,
+    retryCount: countRetries(run),
+    mergeDecisionCount: run.factory.mergeDecisions.length,
+    reassignmentCount: run.factory.reassignmentDecisions.length,
+    openIntegrationBlockerCount: run.factory.integrationBlockers.filter((blocker) => blocker.status === "open").length,
+    openConflictCount: run.controlPlane?.conflicts.filter((conflict) => conflict.status === "open").length ?? 0,
+    repositoryStatus: deliveryArtifact?.repository.status ?? "pending",
+    buildStatus: deliveryArtifact?.build.status ?? "pending",
+    testStatus: deliveryArtifact?.test.status ?? "pending",
+    deploymentStatus: deliveryArtifact?.deployment.status ?? "pending"
+  };
+}
+
+function deriveFactoryFailureReport(
+  run: AgentRunRecord,
+  deliveryArtifact: FactoryDeliveryArtifact | null
+): FactoryFailureReport | null {
+  if (!run.factory) {
+    return null;
+  }
+
+  const blockers = uniqueStrings([
+    ...run.factory.integrationBlockers
+      .filter((blocker) => blocker.status === "open")
+      .map((blocker) => blocker.summary),
+    ...getOpenBlockerSummaries(run)
+  ]).slice(0, 6);
+  const conflicts = getOpenConflictSummaries(run).slice(0, 6);
+  const failedChecks = uniqueStrings([
+    ...(deliveryArtifact?.failedChecks ?? []),
+    ...run.factory.phaseVerificationResults
+      .filter((result) => result.status === "failed")
+      .map((result) => result.summary)
+  ]).slice(0, 6);
+
+  if (run.status !== "failed" && blockers.length === 0 && conflicts.length === 0 && failedChecks.length === 0) {
+    return null;
+  }
+
+  const failureArtifacts = getArtifactsByPayloadKind<ControlPlaneFailureReportArtifactPayload>(
+    run,
+    "failure_report"
+  );
+  const recommendedActions = compactHighlights([
+    ...blockers.map((blocker) => `Resolve Factory blocker: ${blocker}`),
+    ...conflicts.map((conflict) => `Review Factory conflict: ${conflict}`),
+    ...(deliveryArtifact?.pendingActions ?? []),
+    failedChecks[0] ? `Clear the Factory closeout failure: ${failedChecks[0]}` : null,
+    ...deriveFollowUpsFromRun(run),
+    run.error?.message?.trim() ? `Investigate Factory failure: ${run.error.message.trim()}` : null
+  ]);
+  const sourceArtifactIds = uniqueStrings([
+    ...failureArtifacts.map((artifact) => artifact.id),
+    ...(deliveryArtifact?.sourceArtifactIds ?? [])
+  ]);
+  const updatedAt =
+    failureArtifacts[0]?.createdAt ??
+    deliveryArtifact?.updatedAt ??
+    run.completedAt ??
+    run.factory.updatedAt ??
+    null;
+
+  return {
+    status: run.status === "failed" ? "failed" : "blocked",
+    headline:
+      failureArtifacts[0]?.payload.headline ??
+      run.error?.message?.trim() ??
+      (blockers[0] ?? conflicts[0] ?? "Factory requires operator intervention before delivery can close."),
+    summary:
+      run.status === "failed"
+        ? `${run.factory.appName} closed with failed Factory evidence.`
+        : `${run.factory.appName} is blocked on unresolved Factory governance or quality checks.`,
+    failedChecks,
+    blockers,
+    conflicts,
+    recommendedActions,
+    sourceArtifactIds,
+    updatedAt
+  };
+}
+
+function deriveFactoryStages(run: AgentRunRecord): FactoryRunViewStage[] {
+  if (!run.factory) {
+    return [];
+  }
+
+  return run.factory.stagePlans.map((plan) => {
+    const verification =
+      run.factory?.phaseVerificationResults.find((result) => result.phaseId === plan.phaseId) ?? null;
+    const totalBacklogItems = plan.backlog.length;
+    const completedBacklogItems = plan.backlog.filter((item) => item.status === "completed").length;
+    const status =
+      verification?.status === "failed"
+        ? "failed"
+        : verification?.status !== "passed" && plan.status === "completed"
+          ? "blocked"
+          : plan.status === "completed"
+            ? "completed"
+            : plan.status === "active"
+              ? "active"
+              : "pending";
+
+    return {
+      stageId: plan.stageId,
+      label: humanizeKey(plan.stageId),
+      status,
+      summary:
+        verification?.summary ??
+        `${completedBacklogItems}/${totalBacklogItems} backlog item${totalBacklogItems === 1 ? "" : "s"} completed.`,
+      completedBacklogItems,
+      totalBacklogItems,
+      verified: verification?.verified ?? false
+    };
+  });
+}
+
 function buildBottlenecks(
   run: AgentRunRecord,
   scorecard: OperatorRunEvaluation["scorecard"]
@@ -545,6 +921,27 @@ function getOpenConflictSummaries(run: AgentRunRecord) {
   return (run.controlPlane?.conflicts ?? [])
     .filter((conflict) => conflict.status === "open")
     .map((conflict) => conflict.summary);
+}
+
+function getCompletedFactoryBacklogTitles(
+  run: AgentRunRecord,
+  stageId: NonNullable<AgentRunRecord["factory"]>["currentStage"]
+) {
+  return (
+    run.factory?.stagePlans
+      .find((plan) => plan.stageId === stageId)
+      ?.backlog.filter((item) => item.status === "completed")
+      .map((item) => item.title) ?? []
+  );
+}
+
+function findFactoryVerification(
+  run: AgentRunRecord,
+  stageId: NonNullable<AgentRunRecord["factory"]>["currentStage"]
+): FactoryPhaseVerificationResult | null {
+  return (
+    run.factory?.phaseVerificationResults.find((result) => result.stageId === stageId) ?? null
+  );
 }
 
 function countRetries(run: AgentRunRecord) {

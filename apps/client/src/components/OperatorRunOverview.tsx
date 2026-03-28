@@ -7,6 +7,7 @@ import type {
   RuntimeOperatorStageStatus,
   RuntimeOperatorView
 } from "../types";
+import { FactoryRunView } from "./FactoryRunView";
 
 type OperatorRunOverviewProps = {
   runId: string;
@@ -19,30 +20,13 @@ type OperatorRunOverviewProps = {
   ) => Promise<void>;
 };
 
-type OperatorRunComparativeAnalysis = {
-  status: "completed" | "failed";
-  headline: string;
-  sections: Array<{
-    id: string;
-    title: string;
-    summary: string;
-    highlights: string[];
-  }>;
-  sourceArtifactIds: string[];
-  updatedAt: string | null;
-};
-
-type OperatorRunViewWithComparativeAnalysis = RuntimeOperatorView & {
-  comparativeAnalysis?: OperatorRunComparativeAnalysis | null;
-};
-
 export function OperatorRunOverview({
   runId,
   operatorView,
   onApprovalDecision
 }: OperatorRunOverviewProps) {
-  const comparativeAnalysis =
-    (operatorView as OperatorRunViewWithComparativeAnalysis).comparativeAnalysis ?? null;
+  const comparativeAnalysis = operatorView.comparativeAnalysis ?? null;
+  const factoryView = operatorView.factory;
   const visibleJournal = operatorView.journal.slice(0, 8);
   const visiblePlanningArtifacts = operatorView.planningArtifacts.slice(0, 6);
   const visibleDelegationPackets = operatorView.delegationPackets.slice(0, 6);
@@ -186,7 +170,9 @@ export function OperatorRunOverview({
         </section>
       ) : null}
 
-      {operatorView.delivery ? (
+      {factoryView ? (
+        <FactoryRunView factoryView={factoryView} />
+      ) : operatorView.delivery ? (
         <section className="operator-overview__delivery">
           <div className="operator-overview__section-head">
             <strong>Delivery summary</strong>
@@ -265,7 +251,7 @@ export function OperatorRunOverview({
         </section>
       ) : null}
 
-      {operatorView.evaluation ? (
+      {!factoryView && operatorView.evaluation ? (
         <section className="operator-overview__evaluation">
           <div className="operator-overview__section-head">
             <strong>Operator evaluation</strong>
@@ -331,7 +317,7 @@ export function OperatorRunOverview({
         </section>
       ) : null}
 
-      {comparativeAnalysis ? (
+      {!factoryView && comparativeAnalysis ? (
         <section className="operator-overview__comparison">
           <div className="operator-overview__section-head">
             <strong>Comparative analysis</strong>
