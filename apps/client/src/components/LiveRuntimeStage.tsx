@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import type {
   RuntimeOperatorApprovalDecision,
   RuntimeThreadFocusedRun,
@@ -29,6 +31,13 @@ export function LiveRuntimeStage({
   const hasActivity = (thread.activity?.length ?? 0) > 0;
   const shouldShowOperatorOverview =
     Boolean(operatorView) && (!hasActivity || Boolean(operatorView?.approval?.activeGate));
+  const activeGate = operatorView?.approval?.activeGate ?? null;
+  const canResolveGate =
+    activeGate !== null &&
+    (activeGate.status === "waiting" || activeGate.status === "rejected");
+  const [approvalComment, setApprovalComment] = useState("");
+  const [submittingDecision, setSubmittingDecision] =
+    useState<RuntimeOperatorApprovalDecision | null>(null);
 
   if (!liveRuntime || !focusedRun) {
     return null;
@@ -37,6 +46,7 @@ export function LiveRuntimeStage({
   const queuedFollowUps = liveRuntime.queuedFollowUps;
   const canSteer = thread.status === "running" || thread.status === "pending";
   const factory = focusedRun.factory;
+  const focusedRunId = focusedRun.id;
   const isActiveRunVisible =
     thread.status === "running" || thread.status === "pending" || thread.status === "paused";
   const runtimeMetaLabel =
@@ -69,6 +79,24 @@ export function LiveRuntimeStage({
             ? `${operatorView.approval.activeGate.title} is waiting for a human decision before the run can continue.`
             : "The run is paused until the next approval decision is recorded."
         : "The run is paused until the next approval decision is recorded.";
+
+  async function handleApprovalDecision(decision: RuntimeOperatorApprovalDecision) {
+    if (!activeGate) {
+      return;
+    }
+
+    setSubmittingDecision(decision);
+
+    try {
+      await onApprovalDecision(focusedRunId, activeGate.id, decision, approvalComment);
+
+      if (decision !== "reject") {
+        setApprovalComment("");
+      }
+    } finally {
+      setSubmittingDecision(null);
+    }
+  }
 
   return (
     <section className="live-runtime-stage">
@@ -121,6 +149,63 @@ export function LiveRuntimeStage({
             </div>
           ) : null}
 
+          {activeGate ? (
+            <div className="live-runtime-stage__approval-card">
+              <div className="live-runtime-stage__approval-head">
+                <strong>{activeGate.title}</strong>
+                <span>{humanizeApprovalStatus(activeGate.status)}</span>
+              </div>
+              <p className="live-runtime-stage__approval-copy">
+                {activeGate.instructions?.trim() ||
+                  `${activeGate.ownerLabel} is waiting on a decision before this phase can continue.`}
+              </p>
+              <div className="live-runtime-stage__meta">
+                <span>
+                  {activeGate.phaseName} · {humanizeApprovalKind(activeGate.kind)}
+                </span>
+                {activeGate.waitingAt ? <span>{activeGate.waitingAt}</span> : null}
+              </div>
+
+              {canResolveGate ? (
+                <div className="live-runtime-stage__approval-actions">
+                  <textarea
+                    className="live-runtime-stage__approval-comment"
+                    rows={3}
+                    value={approvalComment}
+                    onChange={(event) => setApprovalComment(event.target.value)}
+                    placeholder="Add optional approval notes for the runtime."
+                  />
+                  <div className="live-runtime-stage__approval-buttons">
+                    <button
+                      type="button"
+                      className="live-runtime-stage__approval-button live-runtime-stage__approval-button--approve"
+                      disabled={submittingDecision !== null}
+                      onClick={() => void handleApprovalDecision("approve")}
+                    >
+                      {submittingDecision === "approve" ? "Approving..." : "Approve"}
+                    </button>
+                    <button
+                      type="button"
+                      className="live-runtime-stage__approval-button live-runtime-stage__approval-button--retry"
+                      disabled={submittingDecision !== null}
+                      onClick={() => void handleApprovalDecision("request_retry")}
+                    >
+                      {submittingDecision === "request_retry" ? "Requesting..." : "Request retry"}
+                    </button>
+                    <button
+                      type="button"
+                      className="live-runtime-stage__approval-button live-runtime-stage__approval-button--reject"
+                      disabled={submittingDecision !== null}
+                      onClick={() => void handleApprovalDecision("reject")}
+                    >
+                      {submittingDecision === "reject" ? "Rejecting..." : "Reject"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="live-runtime-stage__meta">
             {focusedRun.attachmentsCount > 0 ? (
               <span>
@@ -160,5 +245,29 @@ function humanizeFactoryStage(stage: NonNullable<RuntimeThreadFocusedRun["factor
       return "Delivery";
     default:
       return "Intake";
+  }
+}
+
+function humanizeApprovalStatus(status: "waiting" | "approved" | "rejected" | "pending") {
+  switch (status) {
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    case "pending":
+      return "Pending";
+    default:
+      return "Waiting";
+  }
+}
+
+function humanizeApprovalKind(kind: "architecture" | "implementation" | "deployment") {
+  switch (kind) {
+    case "architecture":
+      return "Architecture approval";
+    case "implementation":
+      return "Implementation approval";
+    default:
+      return "Deployment approval";
   }
 }
