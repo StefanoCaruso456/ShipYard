@@ -26,6 +26,9 @@ import {
   type AgentRuntimeStatus,
   type ExecuteRun,
   type ExecutorStepResult,
+  type FactoryPhaseContract,
+  type FactoryPhaseUnlockDecision,
+  type FactoryPhaseVerificationResult,
   type OrchestrationAction,
   type OrchestrationState,
   type PlannerStep,
@@ -60,6 +63,38 @@ type VerificationInput = {
   executionResult: AgentRunResult | null;
   payload: RoleContextPayload | null;
 };
+
+export function decideCoordinatorFactoryPhaseUnlock(options: {
+  verificationResult: FactoryPhaseVerificationResult;
+  nextPhase: Pick<FactoryPhaseContract, "phaseId" | "stageId" | "name"> | null;
+  decidedAt: string;
+}): FactoryPhaseUnlockDecision {
+  const blockingCriterionIds = uniqueStrings([
+    ...options.verificationResult.missingCompletionCriterionIds,
+    ...options.verificationResult.pendingVerificationCriterionIds,
+    ...options.verificationResult.failedVerificationCriterionIds
+  ]);
+  const verified = options.verificationResult.status === "passed";
+  const nextPhaseLabel = options.nextPhase?.name ?? "run completion";
+
+  return {
+    id: `factory-phase-unlock:${options.verificationResult.phaseId}`,
+    phaseId: options.verificationResult.phaseId,
+    stageId: options.verificationResult.stageId,
+    nextPhaseId: options.nextPhase?.phaseId ?? null,
+    nextStageId: options.nextPhase?.stageId ?? null,
+    verificationResultId: options.verificationResult.id,
+    verificationStatus: options.verificationResult.status,
+    outcome: verified ? "unlocked" : "blocked",
+    decidedBy: "coordinator",
+    summary: verified
+      ? `${options.verificationResult.phaseId} is verified and ${nextPhaseLabel} is unlocked.`
+      : `${options.verificationResult.phaseId} is not verified, so ${nextPhaseLabel} remains locked.`,
+    blockingCriterionIds,
+    recoveryActions: options.verificationResult.recoveryActions,
+    decidedAt: options.decidedAt
+  };
+}
 
 export async function executeOrchestrationLoop(
   options: ExecuteOrchestrationLoopOptions

@@ -25,6 +25,10 @@ import type { ValidationResult } from "../validation/types";
 import { executeOrchestrationLoop } from "./orchestration";
 import { applyFactoryStageExpansion } from "./factoryPlanner";
 import { buildFactoryTaskDelegationRuntimeContext } from "./factoryDelegation";
+import {
+  findFactoryPhaseUnlockDecision,
+  findFactoryPhaseVerificationResult
+} from "./factoryQualityGates";
 import { syncFactoryRunState } from "./factoryMode";
 import {
   createControlPlaneState,
@@ -214,10 +218,30 @@ export async function executePhaseExecutionRun(
   workingRun.phaseExecution = phaseExecution;
   workingRun.controlPlane =
     syncControlPlaneState(workingRun.controlPlane ?? createControlPlaneState(phaseExecution), phaseExecution);
+  syncFactoryExecutionState(workingRun, options.run.createdAt);
   phaseExecution.status = "in_progress";
 
-  for (const phase of phaseExecution.phases) {
+  for (let phaseIndex = 0; phaseIndex < phaseExecution.phases.length; ) {
+    const rewindPhaseIndex = await maybeRewindForFactoryUnlock({
+      run: workingRun,
+      phaseExecution,
+      phaseIndex,
+      persistRun: options.persistRun
+    });
+
+    if (rewindPhaseIndex !== phaseIndex) {
+      phaseIndex = rewindPhaseIndex;
+      continue;
+    }
+
+    const phase = phaseExecution.phases[phaseIndex];
+
+    if (!phase) {
+      break;
+    }
+
     if (phase.status === "completed") {
+      phaseIndex += 1;
       continue;
     }
 
@@ -398,21 +422,15 @@ export async function executePhaseExecutionRun(
       if (factoryExpansion) {
         workingRun.factory = factoryExpansion.factory;
         workingRun.phaseExecution = factoryExpansion.phaseExecution;
-          workingRun.controlPlane = syncControlPlaneState(
-            workingRun.controlPlane ?? createControlPlaneState(factoryExpansion.phaseExecution),
-            factoryExpansion.phaseExecution
-          );
-          workingRun.factory =
-            syncFactoryRunState({
-              factory: factoryExpansion.factory,
-              phaseExecution: factoryExpansion.phaseExecution,
-              controlPlane: workingRun.controlPlane,
-              status: workingRun.status,
-              rollingSummary: workingRun.rollingSummary,
-              resultSummary: workingRun.result?.summary ?? null,
-              updatedAt: factoryExpansion.decision?.decidedAt ?? options.run.createdAt
-            }) ?? factoryExpansion.factory;
-          updateProgress(factoryExpansion.phaseExecution);
+        workingRun.controlPlane = syncControlPlaneState(
+          workingRun.controlPlane ?? createControlPlaneState(factoryExpansion.phaseExecution),
+          factoryExpansion.phaseExecution
+        );
+        syncFactoryExecutionState(
+          workingRun,
+          factoryExpansion.decision?.decidedAt ?? options.run.createdAt
+        );
+        updateProgress(factoryExpansion.phaseExecution);
 
         if (factoryExpansion.expanded && factoryExpansion.decision) {
           workingRun.rollingSummary = {
@@ -465,6 +483,24 @@ export async function executePhaseExecutionRun(
         throw createExecutionFailure(phaseFailureMessage);
       }
 
+      const factoryQualityGatePause = await maybePauseForFactoryQualityGate({
+        run: workingRun,
+        phaseExecution,
+        phase,
+        instructionRuntime: options.instructionRuntime,
+        persistRun: options.persistRun
+      });
+
+      if (factoryQualityGatePause) {
+        if ("paused" in factoryQualityGatePause) {
+          return factoryQualityGatePause.paused;
+        }
+
+        if (factoryQualityGatePause.retryScheduled) {
+          continue;
+        }
+      }
+
       phase.status = "completed";
       phase.failureReason = null;
       recordPhaseCompleted(workingRun.controlPlane ?? null, phase, phase.lastValidationResults);
@@ -495,6 +531,8 @@ export async function executePhaseExecutionRun(
       await persist(options.persistRun, workingRun);
       phaseComplete = true;
     }
+
+    phaseIndex += 1;
   }
 
   phaseExecution.status = "completed";
@@ -604,6 +642,58 @@ export function resolvePhaseExecutionApproval(options: {
   };
 }
 
+async function maybeRewindForFactoryUnlock(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phaseIndex: number;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+}) {
+  if (!options.run.factory || options.phaseIndex <= 0) {
+    return options.phaseIndex;
+  }
+
+  const previousPhase = options.phaseExecution.phases[options.phaseIndex - 1];
+
+  if (!previousPhase) {
+    return options.phaseIndex;
+  }
+
+  syncFactoryExecutionState(options.run, new Date().toISOString());
+
+  const verificationResult = findFactoryPhaseVerificationResult(options.run.factory, previousPhase.id);
+  const unlockDecision = findFactoryPhaseUnlockDecision(options.run.factory, previousPhase.id);
+
+  if (
+    previousPhase.status !== "completed" ||
+    verificationResult?.status === "passed" ||
+    unlockDecision?.outcome === "unlocked"
+  ) {
+    return options.phaseIndex;
+  }
+
+  previousPhase.status = "in_progress";
+  previousPhase.failureReason =
+    unlockDecision?.summary ??
+    verificationResult?.summary ??
+    "Factory verification must pass before the next phase can start.";
+  options.phaseExecution.status = "in_progress";
+  options.phaseExecution.current = {
+    phaseId: previousPhase.id,
+    storyId: previousPhase.userStories.find((story) => story.status !== "completed")?.id ?? null,
+    taskId: null
+  };
+  options.phaseExecution.lastFailureReason = previousPhase.failureReason;
+  updateProgress(options.phaseExecution);
+  options.run.rollingSummary = {
+    text: previousPhase.failureReason,
+    updatedAt: new Date().toISOString(),
+    source: "failure"
+  };
+  await persist(options.persistRun, options.run);
+
+  return options.phaseIndex - 1;
+}
+
 function beginPhase(run: AgentRunRecord, phaseExecution: PhaseExecutionState, phase: Phase) {
   phase.status = "in_progress";
   phase.failureReason = null;
@@ -699,6 +789,99 @@ async function maybePauseForApprovalGate(options: {
       summary
     }
   } satisfies AgentRunResult;
+}
+
+async function maybePauseForFactoryQualityGate(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  instructionRuntime: AgentInstructionRuntime;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+}): Promise<
+  | {
+      retryScheduled: true;
+    }
+  | {
+      paused: AgentRunResult;
+    }
+  | null
+> {
+  if (!options.run.factory) {
+    return null;
+  }
+
+  syncFactoryExecutionState(options.run, new Date().toISOString());
+
+  const verificationResult = findFactoryPhaseVerificationResult(options.run.factory, options.phase.id);
+  const unlockDecision = findFactoryPhaseUnlockDecision(options.run.factory, options.phase.id);
+
+  if (
+    !verificationResult ||
+    !unlockDecision ||
+    verificationResult.status === "passed" ||
+    unlockDecision.outcome === "unlocked"
+  ) {
+    return null;
+  }
+
+  const retryScheduled = await retryFactoryVerificationFailures({
+    run: options.run,
+    phaseExecution: options.phaseExecution,
+    phase: options.phase,
+    verificationResult,
+    persistRun: options.persistRun
+  });
+
+  if (retryScheduled) {
+    return {
+      retryScheduled: true
+    };
+  }
+
+  const now = new Date().toISOString();
+  options.phase.status = "blocked";
+  options.phase.failureReason = unlockDecision.summary;
+  options.phaseExecution.status = "blocked";
+  options.phaseExecution.lastFailureReason = unlockDecision.summary;
+  options.phaseExecution.current = {
+    phaseId: options.phase.id,
+    storyId: null,
+    taskId: null
+  };
+  updateProgress(options.phaseExecution);
+  options.run.rollingSummary = {
+    text: unlockDecision.summary,
+    updatedAt: now,
+    source: "failure"
+  };
+  syncFactoryExecutionState(options.run, now);
+  await persist(options.persistRun, options.run);
+
+  return {
+    paused: {
+      mode: options.run.rebuild ? "ship-rebuild" : "phase-execution",
+      summary: unlockDecision.summary,
+      instructionEcho: options.run.instruction,
+      skillId: options.instructionRuntime.skill.meta.id,
+      completedAt: now,
+      phaseExecution: options.phaseExecution,
+      controlPlane: options.run.controlPlane ?? null,
+      factory: options.run.factory ?? null,
+      rebuild: normalizeRebuildState(options.run.rebuild, {
+        phaseExecution: options.phaseExecution,
+        controlPlane: options.run.controlPlane ?? null,
+        runStatus: "paused",
+        validationStatus: options.run.validationStatus
+      }),
+      paused: {
+        reason: "factory_quality_gate",
+        phaseId: options.phase.id,
+        decisionId: unlockDecision.id,
+        summary: unlockDecision.summary,
+        recoveryActions: unlockDecision.recoveryActions
+      }
+    }
+  };
 }
 
 function beginStory(
@@ -1581,6 +1764,87 @@ function resetStoryTasks(story: UserStory) {
   }
 }
 
+async function retryFactoryVerificationFailures(options: {
+  run: AgentRunRecord;
+  phaseExecution: PhaseExecutionState;
+  phase: Phase;
+  verificationResult: NonNullable<ReturnType<typeof findFactoryPhaseVerificationResult>>;
+  persistRun: (run: AgentRunRecord) => void | Promise<void>;
+}) {
+  if (!options.verificationResult.recoveryActions.includes("retry_current_phase")) {
+    return false;
+  }
+
+  const sourceStoryIds = uniqueStrings(
+    options.verificationResult.qualityGateResults
+      .filter((result) => result.status === "failed")
+      .flatMap((result) => result.sourceStoryIds)
+  );
+
+  if (sourceStoryIds.length === 0) {
+    return false;
+  }
+
+  const stories = sourceStoryIds
+    .map((storyId) => options.phase.userStories.find((candidate) => candidate.id === storyId) ?? null)
+    .filter((story): story is UserStory => Boolean(story));
+
+  if (stories.length === 0) {
+    return false;
+  }
+
+  if (
+    stories.some((story) => story.retryCount >= options.phaseExecution.retryPolicy.maxStoryRetries)
+  ) {
+    return false;
+  }
+
+  const now = new Date().toISOString();
+
+  for (const story of stories) {
+    story.retryCount += 1;
+    story.status = "pending";
+    story.failureReason = null;
+    story.lastValidationResults = null;
+    resetStoryTasks(story);
+    recordStoryRetry(
+      options.run.controlPlane ?? null,
+      story,
+      story.retryCount,
+      `Retrying story ${story.title} after Factory verification failed.`
+    );
+    appendRunEvents(options.run, {
+      at: now,
+      type: "retry_scheduled",
+      phaseId: options.phase.id,
+      storyId: story.id,
+      taskId: null,
+      message: `Retrying story ${story.title} after Factory verification failed.`,
+      retryCount: story.retryCount
+    });
+  }
+
+  options.phase.status = "in_progress";
+  options.phase.failureReason = null;
+  options.phaseExecution.status = "in_progress";
+  options.phaseExecution.lastFailureReason = null;
+  options.phaseExecution.current = {
+    phaseId: options.phase.id,
+    storyId: stories[0]?.id ?? null,
+    taskId: null
+  };
+  updateProgress(options.phaseExecution);
+  options.run.rollingSummary = {
+    text: options.verificationResult.summary,
+    updatedAt: now,
+    source: "retry"
+  };
+  syncFactoryExecutionState(options.run, now);
+  await persist(options.persistRun, options.run);
+
+  return true;
+}
+
 function resetPhasesForApprovalRetry(
   phases: Phase[],
   startIndex: number,
@@ -1697,7 +1961,27 @@ async function persist(
     );
   }
 
+  syncFactoryExecutionState(run, new Date().toISOString());
+
   await persistRun(cloneRunRecord(run));
+}
+
+function syncFactoryExecutionState(run: AgentRunRecord, updatedAt: string) {
+  if (!run.factory) {
+    return;
+  }
+
+  run.factory =
+    syncFactoryRunState({
+      factory: run.factory,
+      phaseExecution: run.phaseExecution ?? null,
+      controlPlane: run.controlPlane ?? null,
+      project: run.project ?? null,
+      status: run.status,
+      rollingSummary: run.rollingSummary,
+      resultSummary: run.result?.summary ?? null,
+      updatedAt
+    }) ?? run.factory;
 }
 
 function createExecutionFailure(message: string) {
