@@ -71,6 +71,8 @@ export {
 } from "./runtime/agentRegistry";
 export {
   createControlPlaneState,
+  findControlPlaneHandoff,
+  findOpenScopeConflictsForHandoff,
   normalizeControlPlaneState,
   recordMergeGovernanceDecision,
   recordPhaseCompleted,
@@ -118,6 +120,11 @@ export {
   findFactoryPhaseVerificationResult,
   syncFactoryQualityGateState
 } from "./runtime/factoryQualityGates";
+export {
+  completeFactoryParallelExecutionWindow,
+  openFactoryParallelExecutionWindow,
+  syncFactoryParallelismState
+} from "./runtime/factoryParallelism";
 export {
   applyFactoryStageExpansion,
   detectFactoryStageMissingWork
@@ -320,9 +327,17 @@ export type {
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
+  FactoryWorkPacket,
+  FactoryWorkPacketStatus,
+  ParallelExecutionMode,
+  ParallelExecutionWindow,
+  ParallelExecutionWindowStatus,
   RiskEscalationRule,
   FactoryRunInput,
   FactoryRunState,
+  ScopeLock,
+  ScopeLockStatus,
+  ScopeLockTargetKind,
   FactoryStagePlan,
   FactoryStagePlanStatus,
   FactoryStackSummary,
