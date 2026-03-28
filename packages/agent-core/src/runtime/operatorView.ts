@@ -73,18 +73,19 @@ export function deriveOperatorRunView(run: AgentRunRecord): OperatorRunView {
   };
 
   return {
-    summary: deriveSummary(run, stage, blockers, conflicts, mergeDecisions, closeout.delivery),
+    summary: deriveSummary(run, stage, blockers, conflicts, mergeDecisions, closeout.delivery, closeout.factory),
     stage,
     stages,
     owner,
     current,
-    nextAction: deriveNextAction(run, stageId, current, blockers, approval, conflicts, mergeDecisions),
+    nextAction: deriveNextAction(run, stageId, current, blockers, approval, conflicts, mergeDecisions, closeout.factory),
     progress: deriveProgress(run),
     retries: deriveRetrySummary(run),
     approval,
     blockers,
     conflicts,
     mergeDecisions,
+    factory: closeout.factory,
     delivery: closeout.delivery,
     evaluation: closeout.evaluation,
     comparativeAnalysis: closeout.comparativeAnalysis,
@@ -359,8 +360,13 @@ function deriveSummary(
   blockers: OperatorRunBlocker[],
   conflicts: OperatorRunConflict[],
   mergeDecisions: OperatorRunMergeDecision[],
-  delivery: OperatorRunView["delivery"]
+  delivery: OperatorRunView["delivery"],
+  factory: OperatorRunView["factory"]
 ) {
+  if (factory?.headline) {
+    return factory.headline;
+  }
+
   if (delivery?.headline) {
     return delivery.headline;
   }
@@ -714,7 +720,8 @@ function deriveNextAction(
   blockers: OperatorRunBlocker[],
   approval: OperatorRunView["approval"],
   conflicts: OperatorRunConflict[],
-  mergeDecisions: OperatorRunMergeDecision[]
+  mergeDecisions: OperatorRunMergeDecision[],
+  factory: OperatorRunView["factory"]
 ) {
   if (approval?.activeGate) {
     return `Review ${approval.activeGate.title.toLowerCase()} for ${approval.activeGate.phaseName}.`;
@@ -736,12 +743,20 @@ function deriveNextAction(
     return `Review merge conflict: ${conflicts[0].summary}`;
   }
 
+  if (factory?.pendingActions[0]) {
+    return factory.pendingActions[0];
+  }
+
   if (run.status === "completed") {
-    return "Review the delivery summary and resulting artifacts.";
+    return run.factory
+      ? "Review the factory delivery artifact and shipped app status."
+      : "Review the delivery summary and resulting artifacts.";
   }
 
   if (run.status === "failed") {
-    return "Inspect the failure summary, resolve the issue, and retry the run.";
+    return run.factory
+      ? "Inspect the factory failure report, resolve the blocker, and rerun the workflow."
+      : "Inspect the failure summary, resolve the issue, and retry the run.";
   }
 
   switch (stageId) {

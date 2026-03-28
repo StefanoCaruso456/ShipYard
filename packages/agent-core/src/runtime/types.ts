@@ -1009,6 +1009,98 @@ export type OperatorRunMergeDecision = {
   notes: string | null;
 };
 
+export type FactoryDeliveryCheckStatus = "passed" | "failed" | "pending" | "manual";
+
+export type FactoryDeliveryArtifact = {
+  status: "completed" | "failed" | "in_progress";
+  headline: string;
+  repository: {
+    label: string;
+    branch: string;
+    url: string | null;
+    path: string | null;
+    status: "ready" | "failed" | "pending";
+    summary: string;
+  };
+  deployment: {
+    provider: string;
+    environment: string | null;
+    url: string | null;
+    status: "ready" | "failed" | "pending" | "manual";
+    summary: string;
+  };
+  build: {
+    status: FactoryDeliveryCheckStatus;
+    summary: string;
+  };
+  test: {
+    status: FactoryDeliveryCheckStatus;
+    summary: string;
+  };
+  shipped: string[];
+  passedChecks: string[];
+  failedChecks: string[];
+  pendingActions: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type FactoryScorecard = {
+  overallStatus: "completed" | "failed" | "in_progress";
+  totalStages: number;
+  completedStages: number;
+  verifiedStages: number;
+  totalBacklogItems: number;
+  completedBacklogItems: number;
+  totalWorkPackets: number;
+  completedWorkPackets: number;
+  retryCount: number;
+  mergeDecisionCount: number;
+  reassignmentCount: number;
+  openIntegrationBlockerCount: number;
+  openConflictCount: number;
+  repositoryStatus: FactoryDeliveryArtifact["repository"]["status"];
+  buildStatus: FactoryDeliveryArtifact["build"]["status"];
+  testStatus: FactoryDeliveryArtifact["test"]["status"];
+  deploymentStatus: FactoryDeliveryArtifact["deployment"]["status"];
+};
+
+export type FactoryFailureReport = {
+  status: "failed" | "blocked";
+  headline: string;
+  summary: string;
+  failedChecks: string[];
+  blockers: string[];
+  conflicts: string[];
+  recommendedActions: string[];
+  sourceArtifactIds: string[];
+  updatedAt: string | null;
+};
+
+export type FactoryRunViewStage = {
+  stageId: FactoryStageId;
+  label: string;
+  status: "pending" | "active" | "blocked" | "completed" | "failed";
+  summary: string;
+  completedBacklogItems: number;
+  totalBacklogItems: number;
+  verified: boolean;
+};
+
+export type FactoryRunView = {
+  status: "completed" | "failed" | "in_progress";
+  appName: string;
+  stackLabel: string;
+  currentStage: FactoryStageId;
+  headline: string;
+  stages: FactoryRunViewStage[];
+  deliveryArtifact: FactoryDeliveryArtifact | null;
+  scorecard: FactoryScorecard;
+  failureReport: FactoryFailureReport | null;
+  pendingActions: string[];
+  updatedAt: string | null;
+};
+
 export type OperatorRunDeliveryLink = {
   kind: DeliverySummaryLinkKind;
   label: string;
@@ -1119,6 +1211,7 @@ export type OperatorRunView = {
   blockers: OperatorRunBlocker[];
   conflicts: OperatorRunConflict[];
   mergeDecisions: OperatorRunMergeDecision[];
+  factory: FactoryRunView | null;
   delivery: OperatorRunDeliverySummary | null;
   evaluation: OperatorRunEvaluation | null;
   comparativeAnalysis: OperatorRunComparativeAnalysis | null;
