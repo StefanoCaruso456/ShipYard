@@ -39,6 +39,7 @@ import {
   summarizeFactoryAutonomyPolicy
 } from "./factoryAutonomy";
 import { syncFactoryDelegationState } from "./factoryDelegation";
+import { syncFactoryMergeGovernanceState } from "./factoryMergeGovernance";
 import { syncFactoryParallelismState } from "./factoryParallelism";
 import { syncFactoryQualityGateState } from "./factoryQualityGates";
 
@@ -274,6 +275,9 @@ export function createFactoryRunState(options: {
     workPackets: [],
     scopeLocks: [],
     parallelExecutionWindows: [],
+    mergeDecisions: [],
+    integrationBlockers: [],
+    reassignmentDecisions: [],
     currentStage: DEFAULT_FACTORY_STAGE,
     artifacts: [
       {
@@ -344,11 +348,20 @@ export function createFactoryRunState(options: {
     })
   };
 
-  return {
+  const parallelFactory = {
     ...qualityGateFactory,
     ...syncFactoryParallelismState({
       factory: qualityGateFactory,
       phaseExecution: options.phaseExecution ?? null,
+      controlPlane: null,
+      updatedAt: createdAt
+    })
+  };
+
+  return {
+    ...parallelFactory,
+    ...syncFactoryMergeGovernanceState({
+      factory: parallelFactory,
       controlPlane: null,
       updatedAt: createdAt
     })
@@ -442,6 +455,15 @@ export function normalizeFactoryRunState(
     parallelExecutionWindows: Array.isArray(value.parallelExecutionWindows)
       ? value.parallelExecutionWindows.map((window) => ({ ...window }))
       : [],
+    mergeDecisions: Array.isArray(value.mergeDecisions)
+      ? value.mergeDecisions.map((decision) => ({ ...decision }))
+      : [],
+    integrationBlockers: Array.isArray(value.integrationBlockers)
+      ? value.integrationBlockers.map((blocker) => ({ ...blocker }))
+      : [],
+    reassignmentDecisions: Array.isArray(value.reassignmentDecisions)
+      ? value.reassignmentDecisions.map((decision) => ({ ...decision }))
+      : [],
     currentStage: normalizeFactoryStageId(value.currentStage),
     artifacts: Array.isArray(value.artifacts)
       ? value.artifacts
@@ -479,11 +501,20 @@ export function normalizeFactoryRunState(
     })
   };
 
-  return {
+  const parallelFactory = {
     ...qualityGateFactory,
     ...syncFactoryParallelismState({
       factory: qualityGateFactory,
       phaseExecution: null,
+      controlPlane: null,
+      updatedAt
+    })
+  };
+
+  return {
+    ...parallelFactory,
+    ...syncFactoryMergeGovernanceState({
+      factory: parallelFactory,
       controlPlane: null,
       updatedAt
     })
@@ -565,6 +596,9 @@ export function syncFactoryRunState(options: {
     workPackets: normalized.workPackets,
     scopeLocks: normalized.scopeLocks,
     parallelExecutionWindows: normalized.parallelExecutionWindows,
+    mergeDecisions: normalized.mergeDecisions,
+    integrationBlockers: normalized.integrationBlockers,
+    reassignmentDecisions: normalized.reassignmentDecisions,
     currentStage,
     deliverySummary,
     updatedAt
@@ -596,11 +630,20 @@ export function syncFactoryRunState(options: {
     })
   };
 
-  return {
+  const parallelFactory = {
     ...qualityGateFactory,
     ...syncFactoryParallelismState({
       factory: qualityGateFactory,
       phaseExecution: options.phaseExecution ?? null,
+      controlPlane: options.controlPlane ?? null,
+      updatedAt
+    })
+  };
+
+  return {
+    ...parallelFactory,
+    ...syncFactoryMergeGovernanceState({
+      factory: parallelFactory,
       controlPlane: options.controlPlane ?? null,
       updatedAt
     })

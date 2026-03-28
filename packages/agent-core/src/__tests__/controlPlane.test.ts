@@ -404,6 +404,13 @@ test("control plane records overlap conflicts and production-lead merge decision
   assert.ok(overlapConflict?.conflictingPaths.includes("apps/client/src/App.tsx"));
   assert.ok(overlapConflict?.relatedHandoffIds.includes("handoff:story:story-frontend"));
   assert.ok(overlapConflict?.relatedHandoffIds.includes("handoff:story:story-observability"));
+  const overlapMetadata =
+    overlapConflict?.metadata && typeof overlapConflict.metadata === "object" && !Array.isArray(overlapConflict.metadata)
+      ? overlapConflict.metadata
+      : null;
+  assert.deepEqual(overlapMetadata?.leftEntityId, "story-observability");
+  assert.deepEqual(overlapMetadata?.rightEntityId, "story-frontend");
+  assert.deepEqual(overlapMetadata?.overlappingPaths, ["apps/client/src/App.tsx"]);
   assert.ok(overlapDecision);
   assert.equal(overlapDecision?.entityId, "story-observability");
   assert.ok(
@@ -444,4 +451,51 @@ test("control plane records overlap conflicts and production-lead merge decision
   assert.deepEqual(boundaryConflict?.conflictingPaths, ["apps/server/src/index.ts"]);
   assert.ok(retryDecision);
   assert.equal(boundaryConflict?.resolutionDecisionId, retryDecision?.id);
+});
+
+test("control plane records explicit production-lead accept decisions without requiring conflicts", () => {
+  const phaseExecution = normalizePhaseExecutionInput({
+    phases: [
+      {
+        id: "phase-accept",
+        name: "Accept",
+        description: "Accept integrated specialist output.",
+        userStories: [
+          {
+            id: "story-accept",
+            title: "Accept story",
+            description: "Record a production-lead merge acceptance.",
+            acceptanceCriteria: ["Integrated safely"],
+            tasks: [
+              {
+                id: "task-accept",
+                instruction: "Accept the integrated patch.",
+                expectedOutcome: "Accepted patch."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.ok(phaseExecution);
+
+  const controlPlane = createControlPlaneState(phaseExecution);
+
+  recordMergeGovernanceDecision(controlPlane, {
+    conflicts: [],
+    entityKind: "story",
+    entityId: "story-accept",
+    outcome: "accept",
+    summary: "Production lead accepted the integrated specialist output."
+  });
+
+  const decision = controlPlane.mergeDecisions.find(
+    (candidate) => candidate.entityId === "story-accept" && candidate.outcome === "accept"
+  );
+
+  assert.ok(decision);
+  assert.deepEqual(decision?.conflictIds, []);
+  assert.equal(decision?.ownerRole, "production_lead");
 });
