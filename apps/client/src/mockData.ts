@@ -2,7 +2,6 @@ import { toAttachmentCard } from "./attachments";
 import {
   stripLocalFilePlan
 } from "./localFileBridge";
-import { createRuntimeProject } from "./projects";
 import type {
   AgentActivityItem,
   AutomationItem,
@@ -39,10 +38,6 @@ export const emptyProjectBrief: ProjectPayload = {
   nextStep: "Start the runtime service and submit a task to begin.",
   agentDecisions: []
 };
-
-export const workspaceProjects: WorkspaceProject[] = [
-  createRuntimeProject()
-];
 
 export const sidebarNavigation: SidebarNavItem[] = [
   {

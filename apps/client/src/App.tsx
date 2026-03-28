@@ -20,10 +20,10 @@ import { Sidebar } from "./components/Sidebar";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import {
   buildRuntimeThread,
-  emptyProjectBrief,
-  workspaceProjects
+  emptyProjectBrief
 } from "./mockData";
 import {
+  createRuntimeProject,
   createLocalProject,
   deriveProjectCode,
   getProjectDirectoryHandle,
@@ -66,7 +66,7 @@ import type {
   WorkspaceThread
 } from "./types";
 
-const defaultRuntimeProjectId = workspaceProjects[0]?.id ?? "shipyard-runtime";
+const defaultRuntimeProjectId = "shipyard-runtime";
 
 type Feedback = {
   tone: "success" | "danger" | "info";
@@ -91,7 +91,7 @@ function App() {
   const [runtimeTracesByTaskId, setRuntimeTracesByTaskId] = useState<
     Record<string, RuntimeTraceRunLog>
   >({});
-  const [selectedProjectId, setSelectedProjectId] = useState(workspaceProjects[0]?.id ?? "");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedThreadIds, setSelectedThreadIds] = useState<Record<string, string | null>>({});
   const [draftThreadsByProject, setDraftThreadsByProject] = useState<Record<string, WorkspaceThread[]>>({});
   const [runtimeAttachmentPreviewsByTaskId, setRuntimeAttachmentPreviewsByTaskId] = useState<
@@ -344,36 +344,33 @@ function App() {
   }, [localProjects]);
 
   const runtimeProject = useMemo(() => {
-    const base = workspaceProjects[0];
-
-    if (!base) {
-      return null;
-    }
-
     return {
-      ...base,
+      ...createRuntimeProject(),
       branchLabel: runtimeRepoSnapshot?.currentBranch ?? null
     };
   }, [runtimeRepoSnapshot?.currentBranch]);
 
-  const visibleProjects = useMemo(
+  const allProjects = useMemo(
     () => (runtimeProject ? [runtimeProject, ...localProjects] : [...localProjects]),
     [localProjects, runtimeProject]
   );
+  const sidebarProjects = useMemo(() => [...localProjects], [localProjects]);
 
   useEffect(() => {
-    if (!visibleProjects.length) {
+    const nextProjectId = sidebarProjects[0]?.id ?? runtimeProject?.id ?? "";
+
+    if (!nextProjectId) {
       return;
     }
 
-    if (!visibleProjects.some((project) => project.id === selectedProjectId)) {
-      setSelectedProjectId(visibleProjects[0].id);
+    if (!allProjects.some((project) => project.id === selectedProjectId)) {
+      setSelectedProjectId(nextProjectId);
     }
-  }, [selectedProjectId, visibleProjects]);
+  }, [allProjects, runtimeProject, selectedProjectId, sidebarProjects]);
 
   const threadGroups = useMemo<ThreadGroup[]>(
     () =>
-      visibleProjects.map((candidate) => ({
+      allProjects.map((candidate) => ({
         project: candidate,
         threads: buildThreadsForProject(
           candidate,
@@ -392,12 +389,21 @@ function App() {
       runtimeAttachmentPreviewsByTaskId,
       runtimeTasks,
       runtimeTracesByTaskId,
-      visibleProjects
+      allProjects
     ]
+  );
+  const sidebarThreadGroups = useMemo(
+    () => threadGroups.filter((candidate) => candidate.project.kind === "local"),
+    [threadGroups]
   );
 
   const activeProject =
-    visibleProjects.find((candidate) => candidate.id === selectedProjectId) ?? visibleProjects[0] ?? null;
+    allProjects.find((candidate) => candidate.id === selectedProjectId) ??
+    sidebarProjects[0] ??
+    runtimeProject ??
+    null;
+  const activeSidebarProject =
+    sidebarProjects.find((candidate) => candidate.id === selectedProjectId) ?? null;
   const activeThreadId = activeProject ? selectedThreadIds[activeProject.id] ?? null : null;
   const activeGroup = activeProject
     ? threadGroups.find((candidate) => candidate.project.id === activeProject.id) ?? null
@@ -550,7 +556,7 @@ function App() {
 
   useEffect(() => {
     const localProjectsById = new Map(
-      visibleProjects
+      sidebarProjects
         .filter((project) => project.kind === "local")
         .map((project) => [project.id, project])
     );
@@ -662,7 +668,7 @@ function App() {
         }
       })();
     }
-  }, [localFileEffectsByTaskId, runtimeTasks, visibleProjects]);
+  }, [localFileEffectsByTaskId, runtimeTasks, sidebarProjects]);
 
   function buildInstructionPayload() {
     const trimmed = composerValue.trim();
@@ -802,7 +808,7 @@ function App() {
   }
 
   function handleCreateThread(projectId = activeProject?.id) {
-    const projectToUse = visibleProjects.find((candidate) => candidate.id === projectId);
+    const projectToUse = allProjects.find((candidate) => candidate.id === projectId);
 
     if (!projectToUse) {
       return;
@@ -1138,7 +1144,7 @@ function App() {
   }
 
   function handleRenameProject(projectId: string) {
-    const projectToRename = visibleProjects.find((candidate) => candidate.id === projectId);
+    const projectToRename = localProjects.find((candidate) => candidate.id === projectId);
 
     if (!projectToRename || !projectToRename.removable) {
       return;
@@ -1164,7 +1170,7 @@ function App() {
   }
 
   async function handleReconnectProjectFolder(projectId: string) {
-    const projectToReconnect = visibleProjects.find((candidate) => candidate.id === projectId);
+    const projectToReconnect = localProjects.find((candidate) => candidate.id === projectId);
 
     if (!projectToReconnect || projectToReconnect.kind !== "local") {
       return;
@@ -1198,7 +1204,7 @@ function App() {
   }
 
   async function handleRefreshProjectRepository(projectId: string) {
-    const projectToRefresh = visibleProjects.find((candidate) => candidate.id === projectId);
+    const projectToRefresh = localProjects.find((candidate) => candidate.id === projectId);
 
     if (!projectToRefresh || projectToRefresh.kind !== "local") {
       return;
@@ -1361,13 +1367,9 @@ function App() {
   }
 
   async function handleDeleteProject(projectId: string) {
-    const projectToDelete = visibleProjects.find((candidate) => candidate.id === projectId);
+    const projectToDelete = localProjects.find((candidate) => candidate.id === projectId);
 
     if (!projectToDelete?.removable) {
-      setSubmissionFeedback({
-        tone: "info",
-        text: "The live runtime workspace stays pinned in the sidebar."
-      });
       return;
     }
 
@@ -1385,7 +1387,8 @@ function App() {
     });
 
     if (selectedProjectId === projectId) {
-      const nextProject = visibleProjects.find((candidate) => candidate.id !== projectId);
+      const nextProject =
+        sidebarProjects.find((candidate) => candidate.id !== projectId) ?? runtimeProject;
 
       if (nextProject) {
         setSelectedProjectId(nextProject.id);
@@ -1412,11 +1415,13 @@ function App() {
     <>
       <main className="app-shell">
         <Sidebar
-          groups={threadGroups}
-          activeProjectId={activeProject?.id ?? null}
-          activeThreadId={activeThreadId}
+          groups={sidebarThreadGroups}
+          activeProjectId={activeSidebarProject?.id ?? null}
+          activeThreadId={
+            activeSidebarProject && activeSidebarProject.id === activeProject?.id ? activeThreadId : null
+          }
           activeNav={activeNav}
-          activeProject={activeProject}
+          activeProject={activeSidebarProject}
           onSelectProject={(projectId) => {
             setSelectedProjectId(projectId);
             setActiveNav("projects");
