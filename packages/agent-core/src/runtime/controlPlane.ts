@@ -50,6 +50,7 @@ import {
   resolveSpecialistAgentType
 } from "./agentRegistry";
 import { findFactoryDelegationBrief, findFactoryPhaseContract } from "./factoryDelegation";
+import { buildParallelSpecialistConflictMetadata } from "./coordinator/conflicts";
 import type { TraceValue } from "../observability/types";
 import { getActiveTraceScope } from "../observability/traceScope";
 
@@ -434,7 +435,7 @@ export function recordMergeGovernanceDecision(
     notes?: string | null;
   }
 ) {
-  if (!controlPlane || input.conflicts.length === 0) {
+  if (!controlPlane) {
     return;
   }
 
@@ -2406,7 +2407,7 @@ function detectHandoffScopeConflicts(controlPlane: ControlPlaneState, handoff: C
       entityKind: handoff.entityKind,
       entityId: handoff.entityId,
       stepId: null,
-      summary: `Parallel ${handoff.entityKind} handoffs overlap on ${renderScopeOverlapSummary(
+      summary: `${describeOverlappingSpecialists(handoff, other)} overlap on ${renderScopeOverlapSummary(
         overlappingPaths,
         overlappingDomains
       )}.`,
@@ -2427,11 +2428,20 @@ function detectHandoffScopeConflicts(controlPlane: ControlPlaneState, handoff: C
           other.workPacket.ownerAgentTypeId
         ].filter((value): value is TeamSkillId => value !== null)
       ),
-      metadata: {
-        overlappingDomains: overlappingDomains,
+      metadata: buildParallelSpecialistConflictMetadata({
         leftHandoffId: handoff.id,
-        rightHandoffId: other.id
-      }
+        rightHandoffId: other.id,
+        leftEntityId: handoff.entityId,
+        rightEntityId: other.entityId,
+        leftOwnerAgentTypeId: handoff.workPacket.ownerAgentTypeId,
+        rightOwnerAgentTypeId: other.workPacket.ownerAgentTypeId,
+        overlappingPaths,
+        overlappingDomains,
+        leftAcceptanceTargetIds: handoff.acceptanceTargetIds,
+        rightAcceptanceTargetIds: other.acceptanceTargetIds,
+        leftDependencyIds: handoff.dependencyIds,
+        rightDependencyIds: other.dependencyIds
+      })
     });
     const preferredAgentTypeId =
       other.status === "accepted"
@@ -2473,6 +2483,20 @@ function detectHandoffScopeConflicts(controlPlane: ControlPlaneState, handoff: C
       ownerId: PRODUCTION_LEAD_ID
     });
   }
+}
+
+function describeOverlappingSpecialists(
+  left: ControlPlaneHandoff,
+  right: ControlPlaneHandoff
+) {
+  const leftLabel = left.workPacket?.ownerAgentTypeId
+    ? humanizeSpecialistAgentType(left.workPacket.ownerAgentTypeId)
+    : left.toRole.replaceAll("_", " ");
+  const rightLabel = right.workPacket?.ownerAgentTypeId
+    ? humanizeSpecialistAgentType(right.workPacket.ownerAgentTypeId)
+    : right.toRole.replaceAll("_", " ");
+
+  return `Parallel ${left.entityKind} handoffs from ${leftLabel} and ${rightLabel}`;
 }
 
 function summarizeArtifactPayloadForTrace(payload: ControlPlaneArtifact["payload"]): TraceValue {

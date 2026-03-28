@@ -114,6 +114,7 @@ export {
   findFactoryPhaseContract,
   syncFactoryDelegationState
 } from "./runtime/factoryDelegation";
+export { syncFactoryMergeGovernanceState } from "./runtime/factoryMergeGovernance";
 export {
   evaluateFactoryPhaseVerification,
   findFactoryPhaseUnlockDecision,
@@ -314,6 +315,9 @@ export type {
   FactoryDependencyGraphNode,
   FactoryExpansionDecision,
   FactoryExpansionDecisionOutcome,
+  FactoryIntegrationBlocker,
+  FactoryIntegrationBlockerKind,
+  FactoryMergeDecision,
   FactoryOwnershipAssignment,
   FactoryOwnershipPlan,
   FactoryPhaseRecoveryAction,
@@ -327,6 +331,7 @@ export type {
   FactoryRepositoryProviderId,
   FactoryRepositoryState,
   FactoryRepositoryVisibility,
+  FactoryReassignmentDecision,
   FactoryWorkPacket,
   FactoryWorkPacketStatus,
   ParallelExecutionMode,
