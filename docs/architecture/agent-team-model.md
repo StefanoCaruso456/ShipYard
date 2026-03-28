@@ -33,6 +33,8 @@ Output:
 
 - requirements artifact
 - phase plan
+- user-flow spec
+- data-flow spec
 - user stories
 - tasks
 - constraints
@@ -51,6 +53,7 @@ Owns:
 - cross-agent conflict resolution
 
 The production lead receives orchestrator artifacts and decides which specialist dev should own each task.
+It should also reject or block delegation when required flow artifacts are missing from the handoff.
 
 The production lead should use a dedicated skill that emphasizes:
 

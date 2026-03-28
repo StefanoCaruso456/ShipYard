@@ -7,9 +7,14 @@
     "build": "pnpm -r build",
     "start": "node apps/server/dist/index.js",
     "typecheck": "pnpm -r typecheck",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "playwright:install": "playwright install chromium",
+    "validate:architecture": "pnpm typecheck && pnpm build && pnpm --filter @shipyard/agent-core test && pnpm --filter @shipyard/server test && pnpm test:e2e",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "concurrently": "^9.2.1",
     "typescript": "^6.0.2"
   }

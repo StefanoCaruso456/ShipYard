@@ -7,7 +7,8 @@ export type RepoToolName =
   | "search_repo"
   | "edit_file_region"
   | "create_file"
-  | "delete_file";
+  | "delete_file"
+  | "run_terminal_command";
 
 export type RepoToolErrorCode =
   | "already_exists"
@@ -21,6 +22,7 @@ export type RepoToolErrorCode =
   | "not_found"
   | "outside_root"
   | "rollback_failed"
+  | "timeout_exceeded"
   | "validation_failed"
   | "write_failed";
 
@@ -195,6 +197,39 @@ export type DeleteFileResult =
       }
     >
   | RepoToolFailure<"delete_file">;
+
+export type TerminalCommandCategory = "shell" | "git" | "ci" | "browser";
+
+export type RunTerminalCommandInput = {
+  commandLine: string;
+  cwd?: string;
+  timeoutMs?: number;
+  category?: TerminalCommandCategory | null;
+};
+
+export type RunTerminalCommandResult =
+  | RepoToolSuccess<
+      "run_terminal_command",
+      {
+        rootDir: string;
+        cwd: string;
+        commandLine: string;
+        command: string;
+        args: string[];
+        category: TerminalCommandCategory;
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        combinedOutput: string;
+        truncated: {
+          stdout: boolean;
+          stderr: boolean;
+          combined: boolean;
+        };
+        durationMs: number;
+      }
+    >
+  | RepoToolFailure<"run_terminal_command">;
 
 export type RepoToolMutationResult =
   | EditFileRegionResult

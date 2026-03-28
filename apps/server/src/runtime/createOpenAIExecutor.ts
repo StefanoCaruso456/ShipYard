@@ -5,7 +5,15 @@ import type {
   AgentRunResult,
   ExecuteRun
 } from "@shipyard/agent-core";
-import { countTextTokens, getActiveTraceScope, getRoleContextPolicy } from "@shipyard/agent-core";
+import {
+  countTextTokens,
+  getActiveTraceScope,
+  getOperatingModePolicy,
+  getRoleContextPolicy,
+  normalizeRequestedOperatingMode,
+  resolveOperatingMode,
+  resolveRelevantFilesForRun
+} from "@shipyard/agent-core";
 import { generateText } from "ai";
 
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
@@ -21,6 +29,7 @@ export type OpenAIExecutorConfig = {
 type CreateOpenAIExecutorOptions = {
   config: OpenAIExecutorConfig;
   generateTextImpl?: typeof generateText;
+  repoRoot?: string;
 };
 
 export function resolveOpenAIExecutorConfig(
@@ -52,6 +61,17 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       throw new Error("Simulated runtime failure.");
     }
 
+    const requestedOperatingMode = normalizeRequestedOperatingMode(run.requestedOperatingMode);
+    const operatingMode = run.operatingMode
+      ? run.operatingMode
+      : resolveOperatingMode({
+          requestedOperatingMode,
+          instruction: run.instruction,
+          toolRequest: run.toolRequest ?? null,
+          factory: run.factory ?? null
+        });
+    const operatingModePolicy = getOperatingModePolicy(operatingMode);
+
     if (!openai) {
       getActiveTraceScope()?.activeSpan.addEvent("model_unavailable", {
         message: "OPENAI_KEY is not configured on the runtime host.",
@@ -60,19 +80,32 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           modelId: options.config.modelId
         }
       });
-      return createMissingKeyResult(run, context.instructionRuntime, options.config);
+      return createMissingKeyResult(
+        run,
+        context.instructionRuntime,
+        options.config,
+        requestedOperatingMode,
+        operatingMode
+      );
     }
 
     const traceScope = getActiveTraceScope();
     const startedAtMs = Date.now();
-    const systemPrompt = buildSystemPrompt(context.instructionRuntime);
+    const systemPrompt = buildSystemPrompt(context.instructionRuntime, operatingMode);
+    const relevantFiles = resolveRelevantFilesForRun(run, options.repoRoot);
     const prompt = buildTaskPrompt(run, {
       roleContextPrompt: context.roleContextPrompt ?? null,
-      plannedStep: context.plannedStep ?? null
+      plannedStep: context.plannedStep ?? null,
+      relevantFiles,
+      requestedOperatingMode,
+      operatingMode
     });
     const promptTokenCount = countTextTokens(prompt);
     const systemPromptTokenCount = countTextTokens(systemPrompt);
-    const maxOutputTokens = context.maxOutputTokens ?? getRoleContextPolicy("executor").maxOutputTokens;
+    const maxOutputTokens =
+      context.maxOutputTokens ??
+      operatingModePolicy.defaultMaxOutputTokens ??
+      getRoleContextPolicy("executor").maxOutputTokens;
     const modelSpan = traceScope
       ? await traceScope.activeSpan.startChild({
           name: `model:${options.config.modelId}`,
@@ -82,6 +115,8 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
             provider: options.config.provider,
             modelId: options.config.modelId,
             plannedStepId: context.plannedStep?.id ?? null,
+            requestedOperatingMode,
+            operatingMode,
             roleContextSectionIds: context.roleContextSectionIds ?? [],
             roleContextSectionCount: context.roleContextSectionIds?.length ?? 0,
             attachmentCount: run.attachments.length,
@@ -159,6 +194,8 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         instructionEcho: run.instruction,
         skillId: context.instructionRuntime.skill.meta.id,
         completedAt,
+        requestedOperatingMode,
+        operatingMode,
         provider: "openai",
         modelId: options.config.modelId,
         usage
@@ -179,12 +216,20 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
   };
 }
 
-function buildSystemPrompt(instructionRuntime: AgentInstructionRuntime) {
+function buildSystemPrompt(
+  instructionRuntime: AgentInstructionRuntime,
+  operatingMode: ReturnType<typeof resolveOperatingMode>
+) {
+  const operatingModePolicy = getOperatingModePolicy(operatingMode);
+
   return [
     "You are Shipyard Runtime, the backend coding-agent executor for this repository.",
     "Honor this instruction precedence order exactly:",
     instructionRuntime.instructionPrecedence.map((layer, index) => `${index + 1}. ${layer}`).join("\n"),
     "You are acting in the executor role.",
+    `Current operating mode: ${operatingModePolicy.label}.`,
+    `Mode contract: ${operatingModePolicy.description}`,
+    `Executor directive: ${operatingModePolicy.executorDirective}`,
     "Use the following executor skill guidance while responding:",
     instructionRuntime.roleViews.executor.renderedText
   ].join("\n\n");
@@ -193,7 +238,10 @@ function buildSystemPrompt(instructionRuntime: AgentInstructionRuntime) {
 function buildTaskPrompt(
   run: AgentRunRecord,
   input: {
+    relevantFiles: AgentRunRecord["context"]["relevantFiles"];
     roleContextPrompt: string | null;
+    requestedOperatingMode: ReturnType<typeof normalizeRequestedOperatingMode>;
+    operatingMode: ReturnType<typeof resolveOperatingMode>;
     plannedStep: {
       id: string;
       title: string;
@@ -203,9 +251,12 @@ function buildTaskPrompt(
     } | null;
   }
 ) {
+  const operatingModePolicy = getOperatingModePolicy(input.operatingMode);
+
   return [
     "Produce the next execution response for the operator.",
     run.title ? `Thread title: ${run.title}` : null,
+    renderOperatingModeContext(input.requestedOperatingMode, input.operatingMode),
     `Task instruction:\n${run.instruction}`,
     input.plannedStep
       ? [
@@ -229,22 +280,50 @@ function buildTaskPrompt(
     renderProjectContext(run),
     renderPhaseExecutionContext(run),
     renderAttachmentContext(run),
-    renderRunContext(run),
+    renderRunContext(run, input.relevantFiles),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     renderLocalFilePlanInstructions(run),
     [
       "Response style:",
-      "- Start with the direct answer or outcome for the operator.",
+      `- ${operatingModePolicy.defaultResponseLead}`,
       "- Prefer short paragraphs unless multiple distinct items need to be enumerated.",
       "- When listing multiple items, use flat bullet points that are easy to scan.",
       "- Avoid internal runtime labels such as \"Runtime result\" and avoid raw trace jargon.",
-      "- Keep the reply concise, concrete, and implementation-focused."
-    ].join("\n"),
+      "- Keep the reply concise, concrete, and implementation-focused.",
+      input.operatingMode === "review"
+        ? "- Stay review-focused and read-only unless the operator explicitly requested edits."
+        : null,
+      input.operatingMode === "debug"
+        ? "- Lead with the root cause, strongest evidence, or next diagnostic step before broader fixes."
+        : null,
+      input.operatingMode === "refactor"
+        ? "- Make behavior-preserving intent explicit when proposing structural changes."
+        : null,
+      input.operatingMode === "factory"
+        ? "- Keep the response aligned to the current factory stage and delivery path."
+        : null
+    ]
+      .filter(Boolean)
+      .join("\n"),
     "Keep the answer concise, concrete, and implementation-focused.",
     "If you are blocked by missing backend capability, say so clearly."
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function renderOperatingModeContext(
+  requestedOperatingMode: ReturnType<typeof normalizeRequestedOperatingMode>,
+  operatingMode: ReturnType<typeof resolveOperatingMode>
+) {
+  const operatingModePolicy = getOperatingModePolicy(operatingMode);
+
+  return [
+    "Operating mode:",
+    `Requested: ${formatOperatingModeLabel(requestedOperatingMode)}`,
+    `Resolved: ${operatingModePolicy.label}`,
+    `Directive: ${operatingModePolicy.executorDirective}`
+  ].join("\n");
 }
 
 function renderPhaseExecutionContext(run: AgentRunRecord) {
@@ -336,14 +415,17 @@ function renderAttachmentContext(run: AgentRunRecord) {
   ].join("\n\n");
 }
 
-function renderRunContext(run: AgentRunRecord) {
+function renderRunContext(
+  run: AgentRunRecord,
+  relevantFiles: AgentRunRecord["context"]["relevantFiles"]
+) {
   const contextParts = [
     run.context.objective ? `Objective: ${run.context.objective}` : null,
     run.context.constraints.length > 0
       ? `Constraints:\n${run.context.constraints.map((constraint) => `- ${constraint}`).join("\n")}`
       : null,
-    run.context.relevantFiles.length > 0
-      ? `Relevant files:\n${run.context.relevantFiles
+    relevantFiles.length > 0
+      ? `Relevant files:\n${relevantFiles
           .map((file) => `- ${file.path}${file.reason ? ` (${file.reason})` : ""}`)
           .join("\n")}`
       : null,
@@ -387,7 +469,9 @@ function renderLocalFilePlanInstructions(run: AgentRunRecord) {
 function createMissingKeyResult(
   run: AgentRunRecord,
   instructionRuntime: AgentInstructionRuntime,
-  config: OpenAIExecutorConfig
+  config: OpenAIExecutorConfig,
+  requestedOperatingMode: ReturnType<typeof normalizeRequestedOperatingMode>,
+  operatingMode: ReturnType<typeof resolveOperatingMode>
 ): AgentRunResult {
   const completedAt = new Date().toISOString();
 
@@ -399,6 +483,8 @@ function createMissingKeyResult(
     instructionEcho: run.instruction,
     skillId: instructionRuntime.skill.meta.id,
     completedAt,
+    requestedOperatingMode,
+    operatingMode,
     provider: config.provider,
     modelId: config.modelId,
     usage: {
@@ -409,6 +495,23 @@ function createMissingKeyResult(
       estimatedCostUsd: null
     }
   };
+}
+
+function formatOperatingModeLabel(mode: ReturnType<typeof normalizeRequestedOperatingMode>) {
+  switch (mode) {
+    case "auto":
+      return "Auto mode";
+    case "build":
+      return "Build mode";
+    case "review":
+      return "Review mode";
+    case "debug":
+      return "Debug mode";
+    case "refactor":
+      return "Refactor mode";
+    case "factory":
+      return "Factory mode";
+  }
 }
 
 function summarizeResponse(text: string) {

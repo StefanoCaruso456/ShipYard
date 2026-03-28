@@ -130,11 +130,14 @@ test("operator view surfaces execution ownership for an active phase task", () =
   assert.equal(operatorView.progress?.totalTasks, 1);
   assert.equal(operatorView.retries.taskRetries, 1);
   assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "requirements"));
+  assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "user_flow_spec"));
+  assert.ok(operatorView.planningArtifacts.some((artifact) => artifact.kind === "data_flow_spec"));
   assert.ok(
     operatorView.delegationPackets.some(
       (packet) =>
         packet.entityKind === "task" &&
-        packet.workPacket?.scopeSummary.includes("Implement the operator overview")
+        packet.workPacket?.scopeSummary.includes("Implement the operator overview") &&
+        packet.workPacket.flowArtifactIds.length === 2
     )
   );
   assert.ok(operatorView.journal.some((entry) => entry.label === "Task Started"));
@@ -573,5 +576,27 @@ test("operator view assembles delivery summary and evaluation for completed runs
   assert.equal(operatorView.evaluation?.scorecard.retryCount, 1);
   assert.ok(
     operatorView.evaluation?.bottlenecks.some((bottleneck) => bottleneck.id === "retry-pressure")
+  );
+  assert.equal(operatorView.comparativeAnalysis?.status, "completed");
+  assert.equal(operatorView.comparativeAnalysis?.sections.length, 7);
+  assert.deepEqual(
+    operatorView.comparativeAnalysis?.sections.map((section) => section.id),
+    [
+      "executive_summary",
+      "delivery_and_outputs",
+      "validation_and_quality",
+      "interventions_and_retries",
+      "blockers_and_conflicts",
+      "risks_and_follow_ups",
+      "recommended_improvements"
+    ]
+  );
+  assert.ok(
+    (operatorView.comparativeAnalysis?.sourceArtifactIds.length ?? 0) >= 1
+  );
+  assert.ok(
+    operatorView.comparativeAnalysis?.sections
+      .find((section) => section.id === "recommended_improvements")
+      ?.highlights.some((highlight) => highlight.includes("Retry pressure"))
   );
 });

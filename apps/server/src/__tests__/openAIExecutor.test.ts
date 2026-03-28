@@ -148,6 +148,55 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
   assert.equal(result.summary, "Scaffold plan ready.");
 });
 
+test("createOpenAIExecutor injects operating mode guidance into prompts", async () => {
+  let capturedSystem = "";
+  let capturedPrompt = "";
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { system?: string; prompt?: string }) => {
+      capturedSystem = input.system ?? "";
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Findings ready.",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  await executor(
+    createRun("Review the runtime task route for risks.", {
+      requestedOperatingMode: "review",
+      operatingMode: "review"
+    }),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedSystem, /Current operating mode: Review mode\./);
+  assert.match(capturedPrompt, /Requested: Review mode/);
+  assert.match(capturedPrompt, /Resolved: Review mode/);
+  assert.match(capturedPrompt, /Stay review-focused and read-only/);
+});
+
 test("createOpenAIExecutor uses a local file plan summary when the response is plan-only", async () => {
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -180,6 +229,57 @@ test("createOpenAIExecutor uses a local file plan summary when the response is p
   });
 
   assert.equal(result.summary, "Prepared a local file plan for the connected workspace.");
+});
+
+test("createOpenAIExecutor injects repo-intelligence relevant files when none are attached", async () => {
+  let capturedPrompt = "";
+  const skillPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "../../../../skill.md"
+  );
+  const repoRoot = path.dirname(skillPath);
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    repoRoot,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Focused on the runtime service.",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18
+        },
+        totalUsage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  await executor(
+    createRun("Update createPersistentRuntimeService queue handling."),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Relevant files:/);
+  assert.match(
+    capturedPrompt,
+    /packages\/agent-core\/src\/runtime\/createPersistentRuntimeService\.ts/
+  );
 });
 
 async function createInstructionRuntimeForTests() {

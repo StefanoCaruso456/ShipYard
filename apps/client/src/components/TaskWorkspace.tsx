@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import type {
   ComposerAttachment,
@@ -47,6 +47,7 @@ type TaskWorkspaceProps = {
   onVoiceCaptureError: (message: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onReconnectProjectFolder: (projectId: string) => Promise<void>;
+  onRefreshProjectRepository: (projectId: string) => Promise<void>;
   onRefreshRuntimeBranches: () => Promise<void>;
   onSwitchRuntimeBranch: (branchName: string) => Promise<void>;
   onRequestSteer: () => void;
@@ -89,12 +90,17 @@ export function TaskWorkspace({
   onVoiceCaptureError,
   onSelectSuggestion,
   onReconnectProjectFolder,
+  onRefreshProjectRepository,
   onRefreshRuntimeBranches,
   onSwitchRuntimeBranch,
   onRequestSteer,
   onApprovalDecision,
   onSubmit
 }: TaskWorkspaceProps) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(112);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const runtimeState = backendConnected
     ? runtimeStatus?.workerState === "running"
       ? "running"
@@ -113,10 +119,91 @@ export function TaskWorkspace({
           queuedFollowUps: thread.liveRuntime.queuedFollowUps
         }
       : null;
+  const threadMessageCount = thread?.messages.length ?? 0;
+  const threadProgressCount = thread?.progress.length ?? 0;
+  const threadActivityCount = thread?.activity?.length ?? 0;
+
+  useEffect(() => {
+    const composerDock = composerDockRef.current;
+
+    if (!composerDock) {
+      return;
+    }
+
+    const updateComposerHeight = () => {
+      setComposerHeight(composerDock.getBoundingClientRect().height);
+    };
+
+    updateComposerHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(updateComposerHeight);
+    observer.observe(composerDock);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const content = contentRef.current;
+
+    if (!content) {
+      setShowJumpToBottom(false);
+      return;
+    }
+
+    const updateVisibility = () => {
+      const distanceFromBottom =
+        content.scrollHeight - content.scrollTop - content.clientHeight;
+      setShowJumpToBottom(distanceFromBottom > 160);
+    };
+
+    updateVisibility();
+    content.addEventListener("scroll", updateVisibility, { passive: true });
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        content.removeEventListener("scroll", updateVisibility);
+      };
+    }
+
+    const observer = new ResizeObserver(updateVisibility);
+    observer.observe(content);
+
+    return () => {
+      content.removeEventListener("scroll", updateVisibility);
+      observer.disconnect();
+    };
+  }, [
+    activeNav,
+    thread?.id,
+    thread?.updatedLabel,
+    thread?.status,
+    threadMessageCount,
+    threadProgressCount,
+    threadActivityCount
+  ]);
+
+  function handleJumpToBottom() {
+    const content = contentRef.current;
+
+    if (!content) {
+      return;
+    }
+
+    content.scrollTo({
+      top: content.scrollHeight,
+      behavior: "smooth"
+    });
+  }
 
   return (
     <section className="workspace">
-      <div className="workspace__content">
+      <div ref={contentRef} className="workspace__content">
         {activeNav === "settings" ? (
           <section className="workspace-panel">
             <div className="workspace-panel__header">
@@ -160,6 +247,7 @@ export function TaskWorkspace({
             suggestions={suggestionCards}
             onSelectSuggestion={onSelectSuggestion}
             onReconnectProjectFolder={onReconnectProjectFolder}
+            onRefreshProjectRepository={onRefreshProjectRepository}
             onRefreshRuntimeBranches={onRefreshRuntimeBranches}
             onSwitchRuntimeBranch={onSwitchRuntimeBranch}
             onRequestSteer={onRequestSteer}
@@ -168,28 +256,42 @@ export function TaskWorkspace({
         )}
       </div>
 
-      <Composer
-        project={project}
-        backendConnected={backendConnected}
-        workflowMode={workflowMode}
-        factoryDraft={factoryDraft}
-        composerMode={composerMode}
-        composerValue={composerValue}
-        attachments={composerAttachments}
-        steerMode={steerMode}
-        focusRequestKey={composerFocusRequestKey}
-        feedback={feedback}
-        submitting={submitting}
-        transcribingAudio={transcribingAudio}
-        onWorkflowModeChange={onWorkflowModeChange}
-        onFactoryDraftChange={onFactoryDraftChange}
-        onComposerModeChange={onComposerModeChange}
-        onComposerValueChange={onComposerValueChange}
-        onAttachmentsChange={onComposerAttachmentsChange}
-        onVoiceCapture={onVoiceCapture}
-        onVoiceCaptureError={onVoiceCaptureError}
-        onSubmit={onSubmit}
-      />
+      {activeNav !== "settings" && thread && showJumpToBottom ? (
+        <button
+          type="button"
+          className="workspace__jump-to-bottom"
+          style={{ bottom: `${composerHeight + 16}px` }}
+          onClick={handleJumpToBottom}
+          aria-label="Jump to the latest message"
+        >
+          <JumpToBottomIcon />
+        </button>
+      ) : null}
+
+      <div ref={composerDockRef} className="workspace__composer-dock">
+        <Composer
+          project={project}
+          backendConnected={backendConnected}
+          workflowMode={workflowMode}
+          factoryDraft={factoryDraft}
+          composerMode={composerMode}
+          composerValue={composerValue}
+          attachments={composerAttachments}
+          steerMode={steerMode}
+          focusRequestKey={composerFocusRequestKey}
+          feedback={feedback}
+          submitting={submitting}
+          transcribingAudio={transcribingAudio}
+          onWorkflowModeChange={onWorkflowModeChange}
+          onFactoryDraftChange={onFactoryDraftChange}
+          onComposerModeChange={onComposerModeChange}
+          onComposerValueChange={onComposerValueChange}
+          onAttachmentsChange={onComposerAttachmentsChange}
+          onVoiceCapture={onVoiceCapture}
+          onVoiceCaptureError={onVoiceCaptureError}
+          onSubmit={onSubmit}
+        />
+      </div>
     </section>
   );
 }
@@ -219,4 +321,19 @@ function buildSuggestions(project: WorkspaceProject | null) {
       prompt: `Create a clear task prompt for the next coding step in ${label}.`
     }
   ];
+}
+
+function JumpToBottomIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 4.5v9m0 0-3.5-3.5M10 13.5 13.5 10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }

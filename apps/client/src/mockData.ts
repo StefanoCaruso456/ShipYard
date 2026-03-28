@@ -14,6 +14,7 @@ import type {
   RuntimeHealthResponse,
   RuntimeInstructionResponse,
   RuntimeStatusResponse,
+  RuntimeTerminalCommandEntry,
   RuntimeTraceRunLog,
   RuntimeTraceSpan,
   RuntimeTraceSpanEvent,
@@ -288,18 +289,19 @@ export function buildRuntimeThread(
     (run) => run.status === "pending" && run.id !== focusedRun.id
   );
   const threadStatus = deriveThreadStatus(orderedRuns);
-  const activity = buildThreadActivity(
-    orderedRuns,
-    focusedRun,
-    runtimeTracesByTaskId,
-    localFileEffectsByTaskId
-  );
+  const hasActiveRuntimeStage =
+    threadStatus === "running" || threadStatus === "pending" || threadStatus === "paused";
+  const activity = hasActiveRuntimeStage
+    ? buildThreadActivity(focusedRun, runtimeTracesByTaskId, localFileEffectsByTaskId)
+    : [];
   const queuedFollowUps = buildQueuedFollowUpItems(queuedRuns, optimisticFollowUps);
 
   return {
     id: firstRun.threadId,
     title: firstRun.title?.trim() || deriveThreadTitle(firstRun.instruction),
     summary: deriveRuntimeThreadSummary(threadStatus, focusedRun, latestRun, queuedRuns.length + optimisticFollowUps.length),
+    requestedOperatingMode: latestRun.requestedOperatingMode ?? null,
+    operatingMode: latestRun.operatingMode ?? null,
     status: threadStatus,
     source: "live",
     createdLabel: formatShortDate(firstRun.createdAt),
@@ -309,7 +311,10 @@ export function buildRuntimeThread(
     messages: buildRuntimeThreadMessages(
       orderedRuns,
       focusedRun,
-      runtimeAttachmentPreviewsByTaskId
+      runtimeAttachmentPreviewsByTaskId,
+      runtimeTracesByTaskId,
+      localFileEffectsByTaskId,
+      hasActiveRuntimeStage
     ),
     progress: buildRuntimeThreadProgress(orderedRuns, optimisticFollowUps, localFileEffectsByTaskId),
     activity,
@@ -321,6 +326,7 @@ export function buildRuntimeThread(
       runIds: orderedRuns.map((run) => run.id),
       focusedRun: buildFocusedRunSummary(focusedRun, runtimeAttachmentPreviewsByTaskId),
       operatorView: focusedRun.operatorView ?? null,
+      terminal: buildRuntimeTerminalEntries(orderedRuns, runtimeTracesByTaskId),
       queuedFollowUps,
       completedRunCount: orderedRuns.filter((run) => run.status === "completed").length
     }
@@ -426,7 +432,10 @@ function buildRuntimeThreadTags(
 function buildRuntimeThreadMessages(
   runs: RuntimeTask[],
   focusedRun: RuntimeTask,
-  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>
+  runtimeAttachmentPreviewsByTaskId: Record<string, ComposerAttachment[]>,
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
+  localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>,
+  hasActiveRuntimeStage: boolean
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
 
@@ -445,6 +454,20 @@ function buildRuntimeThreadMessages(
         : isFollowUp
           ? "You · follow-up"
           : "Operator";
+    const runActivity = buildRuntimeActivity(
+      run,
+      runtimeTracesByTaskId[run.id] ?? null,
+      localFileEffectsByTaskId[run.id] ?? null
+    );
+    const trace =
+      runActivity.length > 0 && (!hasActiveRuntimeStage || run.id !== focusedRun.id)
+        ? {
+            runId: run.id,
+            status: run.status,
+            items: runActivity
+          }
+        : undefined;
+    let traceAttached = false;
 
     messages.push(
       createMessage(
@@ -470,9 +493,15 @@ function buildRuntimeThreadMessages(
         isQueuedBehindFocused ? "Steer queue" : "Runtime queue",
         deriveRuntimeSystemMessage(run, focusedRun),
         formatDateTime(run.startedAt ?? run.createdAt),
-        deriveRuntimeSystemTone(run)
+        deriveRuntimeSystemTone(run),
+        [],
+        !run.result && !run.error ? trace : undefined
       )
     );
+
+    if (!run.result && !run.error && trace) {
+      traceAttached = true;
+    }
 
     if (run.result) {
       const visibleResponseText =
@@ -486,9 +515,13 @@ function buildRuntimeThreadMessages(
             "Assistant",
             visibleResponseText,
             formatDateTime(run.result.completedAt),
-            "default"
+            "default",
+            [],
+            trace,
+            trace ? "before" : "after"
           )
         );
+        traceAttached = Boolean(trace);
       }
     }
 
@@ -500,9 +533,21 @@ function buildRuntimeThreadMessages(
           "Failure",
           run.error.message,
           formatDateTime(run.completedAt ?? run.createdAt),
-          "danger"
+          "danger",
+          [],
+          trace,
+          trace ? "before" : "after"
         )
       );
+      traceAttached = Boolean(trace);
+    }
+
+    if (!traceAttached && trace) {
+      const lastMessage = messages[messages.length - 1];
+
+      if (lastMessage) {
+        lastMessage.trace = trace;
+      }
     }
   }
 
@@ -528,6 +573,10 @@ function deriveRuntimeSystemMessage(run: RuntimeTask, focusedRun: RuntimeTask) {
 
   if (run.status === "failed") {
     return "Run failed inside the runtime execution path.";
+  }
+
+  if (run.result?.mode === "repo-tool" && isTerminalToolResult(run.result.toolResult)) {
+    return "Run completed through the terminal execution lane.";
   }
 
   return run.result?.mode === "ai-sdk-openai"
@@ -694,6 +743,8 @@ function buildFocusedRunSummary(
   return {
     id: run.id,
     instruction: run.instruction,
+    requestedOperatingMode: run.requestedOperatingMode ?? null,
+    operatingMode: run.operatingMode ?? null,
     status: run.status,
     createdAt: formatDateTime(run.createdAt),
     startedAt: run.startedAt ? formatDateTime(run.startedAt) : null,
@@ -859,7 +910,9 @@ function createMessage(
   body: string,
   timestamp: string,
   tone: ThreadMessage["tone"],
-  attachments: ThreadMessage["attachments"] = []
+  attachments: ThreadMessage["attachments"] = [],
+  trace?: ThreadMessage["trace"],
+  tracePlacement: ThreadMessage["tracePlacement"] = "after"
 ): ThreadMessage {
   return {
     id,
@@ -868,7 +921,9 @@ function createMessage(
     body,
     timestamp,
     tone,
-    attachments
+    attachments,
+    trace,
+    tracePlacement
   };
 }
 
@@ -908,11 +963,11 @@ function buildRuntimeActivity(
       activity = events.map((event, index) => ({
         id: `${task.id}-event-${index}`,
         kind: "event" as const,
-        badge: deriveEventBadge(event.type),
-        label: deriveEventLabel(event.type),
+        badge: deriveEventBadge({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
+        label: deriveEventLabel({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
         detail: event.message,
         timestamp: formatDateTime(event.at),
-        tone: deriveEventTone(event.type),
+        tone: deriveEventTone({ id: `${task.id}-event-${index}`, at: event.at, name: event.type }),
         depth: 0,
         surface: "secondary" as const,
         sourceType: "summary" as const,
@@ -962,30 +1017,89 @@ function buildRuntimeActivity(
 }
 
 function buildThreadActivity(
-  runs: RuntimeTask[],
   focusedRun: RuntimeTask,
   runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>,
   localFileEffectsByTaskId: Record<string, LocalFileExecutionEffect>
 ) {
-  const displayRuns = [...runs]
-    .filter((candidate) => candidate.status !== "pending" || candidate.id === focusedRun.id)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-
-  return condenseActivityItems(
-    displayRuns.flatMap((candidate) =>
-      buildRuntimeActivity(
-        candidate,
-        runtimeTracesByTaskId[candidate.id] ?? null,
-        localFileEffectsByTaskId[candidate.id] ?? null
-      )
-    )
+  return buildRuntimeActivity(
+    focusedRun,
+    runtimeTracesByTaskId[focusedRun.id] ?? null,
+    localFileEffectsByTaskId[focusedRun.id] ?? null
   );
+}
+
+function buildRuntimeTerminalEntries(
+  runs: RuntimeTask[],
+  runtimeTracesByTaskId: Record<string, RuntimeTraceRunLog>
+) {
+  const entries: RuntimeTerminalCommandEntry[] = [];
+
+  for (const run of runs) {
+    const trace = runtimeTracesByTaskId[run.id] ?? null;
+
+    if (!trace) {
+      continue;
+    }
+
+    const spans = [...trace.spans].sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+
+    for (const span of spans) {
+      const toolName = readString(span.metadata.toolName) ?? trimTracePrefix(span.name);
+
+      if (toolName !== "run_terminal_command") {
+        continue;
+      }
+
+      const stdout = readString(span.metadata.stdout) ?? "";
+      const stderr = readString(span.metadata.stderr) ?? "";
+      const combinedOutput =
+        readString(span.metadata.combinedOutput) ?? buildCombinedTerminalOutput(stdout, stderr);
+      const truncatedMetadata = readObject(span.metadata.truncated);
+
+      entries.push({
+        id: span.id,
+        runId: run.id,
+        label: buildTerminalEntryLabel(
+          readString(span.metadata.toolCategory) ?? "shell",
+          readString(span.metadata.commandLine) ?? trimTracePrefix(span.name)
+        ),
+        commandLine: readString(span.metadata.commandLine) ?? trimTracePrefix(span.name),
+        command: readString(span.metadata.command) ?? "",
+        args: readStringArray(span.metadata.args),
+        category: normalizeTerminalCategory(readString(span.metadata.toolCategory)),
+        cwd: readString(span.metadata.cwd) ?? ".",
+        startedAt: span.startedAt,
+        endedAt: span.endedAt,
+        status: span.status,
+        exitCode: readNumber(span.metadata.exitCode),
+        durationMs: span.durationMs,
+        stdout,
+        stderr,
+        combinedOutput,
+        truncated: {
+          stdout: readBoolean(truncatedMetadata?.stdout) ?? false,
+          stderr: readBoolean(truncatedMetadata?.stderr) ?? false,
+          combined: readBoolean(truncatedMetadata?.combined) ?? false
+        }
+      });
+    }
+  }
+
+  return entries.sort((left, right) => left.startedAt.localeCompare(right.startedAt));
 }
 
 function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | null): AgentActivityItem | null {
   const traceSummary = trace?.summary ?? null;
   const timestamp = formatDateTime(task.completedAt ?? task.startedAt ?? task.createdAt);
   const meta: string[] = [];
+  const resolvedOperatingMode = traceSummary?.operatingMode ?? task.operatingMode ?? null;
+  const requestedOperatingMode = traceSummary?.requestedOperatingMode ?? task.requestedOperatingMode ?? null;
+
+  if (resolvedOperatingMode) {
+    meta.push(`${capitalize(resolvedOperatingMode)} mode`);
+  } else if (requestedOperatingMode) {
+    meta.push(`${capitalize(requestedOperatingMode)} requested`);
+  }
 
   if (traceSummary?.model.modelId) {
     meta.push(traceSummary.model.modelId);
@@ -1003,7 +1117,9 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
   }
 
   if (traceSummary?.validation.status) {
-    meta.push(`validation ${traceSummary.validation.status}`);
+    if (traceSummary.validation.status !== "not_run") {
+      meta.push(`validation ${traceSummary.validation.status}`);
+    }
   }
 
   if (traceSummary?.tools.count) {
@@ -1025,6 +1141,28 @@ function buildRunOverviewItem(task: RuntimeTask, trace: RuntimeTraceRunLog | nul
   if (traceSummary?.retries.count) {
     meta.push(
       `${traceSummary.retries.count} retr${traceSummary.retries.count === 1 ? "y" : "ies"}`
+    );
+  }
+
+  if (traceSummary?.orchestration?.nextAction) {
+    meta.push(`next ${humanizeOrchestrationAction(traceSummary.orchestration.nextAction)}`);
+  }
+
+  if (
+    traceSummary?.orchestration?.stepRetryCount != null &&
+    traceSummary.orchestration.maxStepRetries != null
+  ) {
+    meta.push(
+      `step retry ${traceSummary.orchestration.stepRetryCount}/${traceSummary.orchestration.maxStepRetries}`
+    );
+  }
+
+  if (
+    traceSummary?.orchestration?.replanCount != null &&
+    traceSummary.orchestration.maxReplans != null
+  ) {
+    meta.push(
+      `replan ${traceSummary.orchestration.replanCount}/${traceSummary.orchestration.maxReplans}`
     );
   }
 
@@ -1208,11 +1346,11 @@ function visitTraceSpan(
     activity.push({
       id: event.id,
       kind: "event",
-      badge: deriveEventBadge(event.name),
-      label: deriveEventLabel(event.name),
-      detail: event.message?.trim() || "Runtime event recorded.",
+      badge: deriveEventBadge(event),
+      label: deriveEventLabel(event),
+      detail: deriveEventDetail(event),
       timestamp: formatDateTime(event.at),
-      tone: deriveEventTone(event.name),
+      tone: deriveEventTone(event),
       depth: depth + 1,
       surface: "secondary",
       sourceType: span.spanType,
@@ -1232,6 +1370,8 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
       return capitalize(readString(span.metadata.role) ?? "Role");
     case "coordinator":
       return "Coordinator";
+    case "sync":
+      return "Sync";
     case "handoff":
       return "Handoff";
     case "merge":
@@ -1239,7 +1379,9 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
     case "context":
       return "Context";
     case "tool":
-      return "Tool";
+      return readString(span.metadata.toolName) === "run_terminal_command"
+        ? humanizeTerminalCategory(readString(span.metadata.toolCategory))
+        : "Tool";
     case "model":
       return "Model";
     case "validation":
@@ -1262,9 +1404,11 @@ function deriveSpanBadge(span: RuntimeTraceSpan) {
 function deriveSpanLabel(span: RuntimeTraceSpan) {
   switch (span.spanType) {
     case "role":
-      return deriveRoleLabel(readString(span.metadata.role) ?? parseRoleFromSpanName(span.name));
+      return deriveRoleLabel(span);
     case "coordinator":
       return "Coordinator decision";
+    case "sync":
+      return "Mirrored external records";
     case "handoff":
       return "Created role handoff";
     case "merge":
@@ -1272,7 +1416,9 @@ function deriveSpanLabel(span: RuntimeTraceSpan) {
     case "context":
       return `Built ${readString(span.metadata.role) ?? "runtime"} context`;
     case "tool":
-      return `Used ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
+      return readString(span.metadata.toolName) === "run_terminal_command"
+        ? `Ran ${readString(span.metadata.commandLine) ?? "terminal command"}`
+        : `Used ${readString(span.metadata.toolName) ?? trimTracePrefix(span.name)}`;
     case "model":
       return `Used ${readString(span.metadata.modelId) ?? trimTracePrefix(span.name)}`;
     case "phase":
@@ -1303,6 +1449,10 @@ function deriveSpanDetail(span: RuntimeTraceSpan) {
     return span.outputSummary?.trim() || "Recorded the next runtime branch decision.";
   }
 
+  if (span.spanType === "sync") {
+    return span.outputSummary?.trim() || "Synced the latest runtime state to external records.";
+  }
+
   if (span.spanType === "handoff") {
     return span.outputSummary?.trim() || "Passed a bounded payload to the next role.";
   }
@@ -1313,6 +1463,10 @@ function deriveSpanDetail(span: RuntimeTraceSpan) {
 
   if (span.spanType === "model") {
     return "Generated the response draft for the active step.";
+  }
+
+  if (span.spanType === "tool" && readString(span.metadata.toolName) === "run_terminal_command") {
+    return span.outputSummary?.trim() || "Executed a workspace terminal command.";
   }
 
   if (span.spanType === "context") {
@@ -1343,6 +1497,26 @@ function deriveSpanTone(span: RuntimeTraceSpan): AgentActivityItem["tone"] {
     return "info";
   }
 
+  if (span.spanType === "role") {
+    const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
+
+    if (role === "verifier") {
+      const decision = readString(span.metadata.decision);
+
+      if (decision === "continue") {
+        return "success";
+      }
+
+      if (decision === "retry_step" || decision === "replan") {
+        return "warning";
+      }
+
+      if (decision === "fail") {
+        return "danger";
+      }
+    }
+  }
+
   if (
     span.spanType === "tool" ||
     span.spanType === "model" ||
@@ -1363,7 +1537,17 @@ function deriveSpanSurface(span: RuntimeTraceSpan): AgentActivityItem["surface"]
   return span.spanType === "role" || span.spanType === "coordinator" ? "primary" : "secondary";
 }
 
-function deriveEventBadge(eventName: string) {
+function deriveEventBadge(event: RuntimeTraceSpanEvent) {
+  const eventName = event.name;
+
+  if (eventName === "coordinator_decision") {
+    return "Decision";
+  }
+
+  if (eventName.includes("terminal")) {
+    return "Terminal";
+  }
+
   if (eventName.includes("validation")) {
     return "Validation";
   }
@@ -1419,7 +1603,9 @@ function deriveEventBadge(eventName: string) {
   return "Event";
 }
 
-function deriveEventLabel(eventName: string) {
+function deriveEventLabel(event: RuntimeTraceSpanEvent) {
+  const eventName = event.name;
+
   switch (eventName) {
     case "coordination_conflict_detected":
       return "Coordination conflict";
@@ -1457,12 +1643,18 @@ function deriveEventLabel(eventName: string) {
       return "Merge conflict recorded";
     case "control_plane_merge_decision_recorded":
       return "Merge decision recorded";
+    case "terminal_command_started":
+      return "Started terminal command";
+    case "terminal_command_completed":
+      return "Completed terminal command";
+    case "terminal_command_failed":
+      return "Terminal command failed";
     case "state_merged":
       return "State updated";
     case "state_merge_failed":
       return "State update failed";
     case "coordinator_decision":
-      return "Coordinator decision";
+      return `Next action: ${humanizeOrchestrationAction(readString(event.metadata?.decision) ?? "continue")}`;
     case "model_unavailable":
       return "Model unavailable";
     default:
@@ -1470,7 +1662,33 @@ function deriveEventLabel(eventName: string) {
   }
 }
 
-function deriveEventTone(eventName: string): AgentActivityItem["tone"] {
+function deriveEventDetail(event: RuntimeTraceSpanEvent) {
+  if (event.name === "coordinator_decision") {
+    return event.message?.trim() || "Recorded the next runtime action.";
+  }
+
+  return event.message?.trim() || "Runtime event recorded.";
+}
+
+function deriveEventTone(event: RuntimeTraceSpanEvent): AgentActivityItem["tone"] {
+  const eventName = event.name;
+
+  if (eventName === "coordinator_decision") {
+    const decision = readString(event.metadata?.decision);
+
+    if (decision === "continue") {
+      return "success";
+    }
+
+    if (decision === "retry_step" || decision === "replan") {
+      return "warning";
+    }
+
+    if (decision === "fail") {
+      return "danger";
+    }
+  }
+
   if (eventName.includes("conflict")) {
     return "warning";
   }
@@ -1499,7 +1717,15 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const path = readString(span.metadata.path);
   const modelId = readString(span.metadata.modelId);
   const toolName = readString(span.metadata.toolName);
+  const commandLine = readString(span.metadata.commandLine);
+  const cwd = readString(span.metadata.cwd);
   const validationStatus = readString(span.metadata.validationStatus);
+  const decision = readString(span.metadata.decision);
+  const executionMode = readString(span.metadata.mode);
+  const intentMatched = readBoolean(span.metadata.intentMatched);
+  const targetMatched = readBoolean(span.metadata.targetMatched);
+  const validationPassed = readBoolean(span.metadata.validationPassed);
+  const sideEffectsDetected = readBoolean(span.metadata.sideEffectsDetected);
   const sectionIds = readStringArray(span.metadata.sectionIds);
   const truncatedSectionIds = readStringArray(span.metadata.truncatedSectionIds);
   const omittedForBudgetSectionIds = readStringArray(span.metadata.omittedForBudgetSectionIds);
@@ -1510,18 +1736,32 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
   const usedPromptTokens = readNumber(span.metadata.usedPromptTokens);
   const maxPromptTokens = readNumber(span.metadata.maxPromptTokens);
   const maxOutputTokens = readNumber(span.metadata.maxOutputTokens);
+  const externalRecordCount = readNumber(span.metadata.externalRecordCount);
+  const syncedActionCount = readNumber(span.metadata.syncedActionCount);
   const selectedFileCount = readMetadataArrayLength(span.metadata.selectedFiles);
 
   if (toolName && span.spanType !== "tool") {
     meta.push(toolName);
   }
 
+  if (commandLine && span.spanType === "tool") {
+    meta.push(commandLine);
+  }
+
   if (path) {
     meta.push(path);
   }
 
+  if (cwd && span.spanType === "tool" && toolName === "run_terminal_command") {
+    meta.push(`cwd ${cwd}`);
+  }
+
   if (modelId && span.spanType !== "model") {
     meta.push(modelId);
+  }
+
+  if (executionMode && span.spanType === "role" && readString(span.metadata.role) === "executor") {
+    meta.push(executionMode);
   }
 
   if (changedFiles.length > 0) {
@@ -1560,7 +1800,29 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     );
   }
 
-  if (validationStatus) {
+  if (decision && readString(span.metadata.role) === "verifier") {
+    meta.push(humanizeVerifierDecision(decision));
+  }
+
+  if (readString(span.metadata.role) === "verifier") {
+    if (intentMatched === false) {
+      meta.push("intent mismatch");
+    }
+
+    if (targetMatched === false) {
+      meta.push("target mismatch");
+    }
+
+    if (validationPassed === false) {
+      meta.push("validation failed");
+    }
+
+    if (sideEffectsDetected === true) {
+      meta.push("unexpected side effects");
+    }
+  }
+
+  if (validationStatus && validationStatus !== "not_run") {
     meta.push(`validation ${validationStatus}`);
   }
 
@@ -1574,8 +1836,24 @@ function buildSpanMeta(span: RuntimeTraceSpan) {
     meta.push(`max ${maxOutputTokens} output tokens`);
   }
 
+  if (span.spanType === "sync") {
+    if (typeof syncedActionCount === "number") {
+      meta.push(`${syncedActionCount} synced action${syncedActionCount === 1 ? "" : "s"}`);
+    }
+
+    if (typeof externalRecordCount === "number") {
+      meta.push(`${externalRecordCount} external record${externalRecordCount === 1 ? "" : "s"}`);
+    }
+  }
+
   if (typeof span.durationMs === "number") {
     meta.push(`${span.durationMs} ms`);
+  }
+
+  const exitCode = readNumber(span.metadata.exitCode);
+
+  if (span.spanType === "tool" && toolName === "run_terminal_command" && typeof exitCode === "number") {
+    meta.push(`exit ${exitCode}`);
   }
 
   return meta;
@@ -1585,6 +1863,9 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const meta: string[] = [];
   const path = readString(event.metadata?.path);
   const toolName = readString(event.metadata?.toolName);
+  const commandLine = readString(event.metadata?.commandLine);
+  const cwd = readString(event.metadata?.cwd);
+  const exitCode = readNumber(event.metadata?.exitCode);
   const gateId = readString(event.metadata?.gateId);
   const artifactKind = readString(event.metadata?.artifactKind);
   const conflictKind = readString(event.metadata?.conflictKind);
@@ -1593,13 +1874,26 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
   const ownerAgentTypeId = readString(event.metadata?.workPacketOwnerAgentTypeId);
   const entityKind = readString(event.metadata?.entityKind);
   const entityId = readString(event.metadata?.entityId);
+  const decision = readString(event.metadata?.decision);
 
   if (toolName) {
     meta.push(toolName);
   }
 
+  if (commandLine) {
+    meta.push(commandLine);
+  }
+
   if (path) {
     meta.push(path);
+  }
+
+  if (cwd) {
+    meta.push(`cwd ${cwd}`);
+  }
+
+  if (typeof exitCode === "number") {
+    meta.push(`exit ${exitCode}`);
   }
 
   if (gateId) {
@@ -1620,6 +1914,10 @@ function buildEventMeta(event: RuntimeTraceSpanEvent) {
 
   if (handoffStatus) {
     meta.push(handoffStatus);
+  }
+
+  if (decision) {
+    meta.push(humanizeOrchestrationAction(decision));
   }
 
   if (ownerAgentTypeId) {
@@ -1656,6 +1954,10 @@ function shouldKeepActivityItem(
   index: number
 ) {
   if (item.sourceType === "run") {
+    return false;
+  }
+
+  if (item.sourceType === "sync" && item.status !== "failed") {
     return false;
   }
 
@@ -1705,14 +2007,16 @@ function readMetadataArrayLength(value: unknown) {
   return Array.isArray(value) ? value.length : 0;
 }
 
-function deriveRoleLabel(role: string) {
+function deriveRoleLabel(span: RuntimeTraceSpan) {
+  const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
+
   switch (role) {
     case "planner":
-      return "Selected next step";
+      return "Planner proposed next step";
     case "executor":
-      return "Executed planned step";
+      return "Executor performed step";
     case "verifier":
-      return "Reviewed execution";
+      return deriveVerifierLabel(readString(span.metadata.decision));
     default:
       return `${capitalize(role)} step`;
   }
@@ -1721,21 +2025,90 @@ function deriveRoleLabel(role: string) {
 function deriveRoleDetail(span: RuntimeTraceSpan) {
   const role = readString(span.metadata.role) ?? parseRoleFromSpanName(span.name);
   const toolName = readString(span.metadata.toolName);
+  const changedFiles = readStringArray(span.metadata.changedFiles);
 
   switch (role) {
     case "planner":
-      return toolName
-        ? `Bounded the next move to a scoped ${toolName} action.`
-        : "Bounded the next move to the current request without expanding scope.";
+      return (
+        span.outputSummary?.trim() ||
+        (toolName
+          ? `Bounded the next move to a scoped ${toolName} action.`
+          : "Bounded the next move to the current request without expanding scope.")
+      );
     case "executor":
+      if (toolName === "run_terminal_command") {
+        return "Executed the planned workspace command and captured the terminal transcript.";
+      }
+
+      if (changedFiles.length > 0) {
+        return changedFiles.length === 1
+          ? `Executed the planned step and updated ${changedFiles[0]}.`
+          : `Executed the planned step and updated ${changedFiles.length} files.`;
+      }
+
       return toolName
-        ? `Executed the planned ${toolName} step and kept the change on the intended target.`
+        ? `Executed the planned ${toolName} step and captured the current result.`
         : "Executed the planned step and captured the current result.";
     case "verifier":
-      return "Checked intent match, target scope, validation state, and progression safety.";
+      return (
+        span.outputSummary?.trim() ||
+        "Checked intent match, target scope, validation state, and progression safety."
+      );
     default:
       return span.outputSummary?.trim() || span.inputSummary?.trim() || "Runtime role step recorded.";
   }
+}
+
+function normalizeTerminalCategory(value: string | null | undefined): RuntimeTerminalCommandEntry["category"] {
+  switch (value) {
+    case "git":
+    case "ci":
+    case "browser":
+      return value;
+    default:
+      return "shell";
+  }
+}
+
+function humanizeTerminalCategory(value: string | null | undefined) {
+  switch (value) {
+    case "git":
+      return "Git";
+    case "ci":
+      return "CI";
+    case "browser":
+      return "Browser";
+    default:
+      return "Terminal";
+  }
+}
+
+function buildTerminalEntryLabel(category: string, commandLine: string) {
+  return `${humanizeTerminalCategory(category)} · ${commandLine}`;
+}
+
+function buildCombinedTerminalOutput(stdout: string, stderr: string) {
+  if (stdout.trim() && stderr.trim()) {
+    return [`$ stdout`, stdout.trimEnd(), "", `$ stderr`, stderr.trimEnd()].join("\n");
+  }
+
+  if (stdout.trim()) {
+    return stdout.trimEnd();
+  }
+
+  if (stderr.trim()) {
+    return [`$ stderr`, stderr.trimEnd()].join("\n");
+  }
+
+  return "(no output)";
+}
+
+function isTerminalToolResult(value: unknown) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    (value as { toolName?: unknown }).toolName === "run_terminal_command"
+  );
 }
 
 function parseRoleFromSpanName(name: string) {
@@ -1785,10 +2158,67 @@ function readNumber(value: unknown) {
   return typeof value === "number" ? value : null;
 }
 
+function readObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
 function readStringArray(value: unknown) {
   return Array.isArray(value)
     ? value
         .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim())
     : [];
+}
+
+function deriveVerifierLabel(decision: string | null) {
+  switch (decision) {
+    case "continue":
+      return "Verifier approved step";
+    case "retry_step":
+      return "Verifier requested retry";
+    case "replan":
+      return "Verifier requested replan";
+    case "fail":
+      return "Verifier rejected step";
+    default:
+      return "Verifier reviewed execution";
+  }
+}
+
+function humanizeVerifierDecision(decision: string) {
+  switch (decision) {
+    case "continue":
+      return "approved";
+    case "retry_step":
+      return "retry requested";
+    case "replan":
+      return "replan requested";
+    case "fail":
+      return "rejected";
+    default:
+      return humanizeKey(decision).toLowerCase();
+  }
+}
+
+function humanizeOrchestrationAction(action: string) {
+  switch (action) {
+    case "retry_step":
+      return "retry step";
+    case "replan":
+      return "replan";
+    case "continue":
+      return "continue";
+    case "fail":
+      return "fail";
+    case "plan":
+      return "plan";
+    default:
+      return humanizeKey(action).toLowerCase();
+  }
 }

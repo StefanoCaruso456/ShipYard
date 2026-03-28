@@ -387,6 +387,12 @@ test("runtime trace summary captures phase execution progress and retry policy",
     assert.ok((trace?.summary.delivery?.sourceArtifactCount ?? 0) >= 1);
     assert.equal(trace?.summary.evaluation?.retryCount, 0);
     assert.equal(trace?.summary.evaluation?.openBlockerCount, 0);
+    assert.equal(trace?.summary.comparativeAnalysis?.status, "completed");
+    assert.equal(trace?.summary.comparativeAnalysis?.sectionCount, 7);
+    assert.ok((trace?.summary.comparativeAnalysis?.sourceArtifactCount ?? 0) >= 1);
+    assert.ok(
+      (trace?.summary.comparativeAnalysis?.sectionTitles ?? []).includes("Executive summary")
+    );
     assert.ok(
       (trace?.summary.evaluation?.bottlenecks ?? []).includes("Clean closeout")
     );
@@ -568,6 +574,60 @@ test("runtime traces tool and validation spans for a repo edit", async () => {
       await readFile(filePath, "utf8"),
       ["export function greet(name: string) {", "  return `Hi ${name}`;", "}"].join("\n")
     );
+  } finally {
+    await waitForTraceFlush(traceService);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime traces terminal execution spans and command transcript metadata", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-terminal-trace-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const traceService = createTraceService({
+    logPath: path.join(tempDir, "traces.jsonl"),
+    env: {}
+  });
+  const repoToolset = createRepoToolset({ rootDir: tempDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    traceService,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({}),
+      repoToolset
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Initialize the repo.",
+      toolRequest: {
+        toolName: "run_terminal_command",
+        input: {
+          commandLine: "git init -b main",
+          category: "git"
+        }
+      }
+    });
+
+    await waitForRunStatus(runtimeService, run.id, "completed");
+    await waitForTraceFlush(traceService);
+    const trace = traceService.getRunTrace(run.id);
+    const toolSpan = trace?.spans.find((span) => span.name.startsWith("tool:run_terminal_command"));
+
+    assert.ok(toolSpan);
+    assert.equal(toolSpan?.spanType, "tool");
+    assert.equal(toolSpan?.metadata.toolName, "run_terminal_command");
+    assert.equal(toolSpan?.metadata.toolCategory, "git");
+    assert.equal(toolSpan?.metadata.commandLine, "git init -b main");
+    assert.ok(
+      toolSpan?.events.some((event) => event.name === "terminal_command_started")
+    );
+    assert.ok(
+      toolSpan?.events.some((event) => event.name === "terminal_command_completed")
+    );
+    assert.equal(trace?.summary.tools.names[0], "run_terminal_command");
+    assert.equal(trace?.summary.tools.categories[0], "git");
+    assert.equal(trace?.summary.tools.byTool[0]?.successCount, 1);
   } finally {
     await waitForTraceFlush(traceService);
     await rm(tempDir, { recursive: true, force: true });

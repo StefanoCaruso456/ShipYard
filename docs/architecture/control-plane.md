@@ -67,6 +67,8 @@ A task is the smallest planned unit of work assigned to one owner.
 An artifact is a durable output such as:
 
 - requirements artifact
+- user-flow spec
+- data-flow spec
 - story breakdown
 - implementation plan
 - validation result

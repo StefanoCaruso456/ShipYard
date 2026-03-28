@@ -2,21 +2,31 @@
 
 ## Purpose
 
-This document is the canonical guide for what Shipyard has already satisfied, what is only partial, and what must be built next.
+This document is the canonical guide for Shipyard's build order, goals, and exit criteria.
 
 It exists so implementation follows one sequence and does not drift across sessions.
 
-## Requirement Status
+This document is intentionally **not** the phase completion dashboard.
 
-| Requirement | Status | Notes |
+For actual merged status, open:
+
+- [implementation-status.md](/private/tmp/shipyard-status-dashboard/docs/architecture/implementation-status.md)
+
+## Capability Snapshot
+
+This snapshot summarizes broad capability maturity.
+
+It is not the source of truth for per-phase merge status.
+
+| Capability | Status | Notes |
 |---|---|---|
 | Continuous operation | Complete | Persistent runtime loop exists and accepts work without restart. |
 | Basic tool calls | Complete | `read_file`, `read_file_range`, `search_repo`, and surgical edit tools are all routed through the live runtime task path. |
 | Surgical file editing | Complete | Anchor-based editing is implemented with validation and rollback. |
 | Context injection | Complete | External context is accepted at task submission, assembled per role, bounded by deterministic budgets, and exposed through traces/debug payloads. |
-| Multi-agent coordination | Partial | Planner/executor/verifier orchestration is real and specialist registry/skills now exist, but the broader orchestrator artifact and production-lead delegation flow is not fully implemented yet. |
-| Observability | Complete for core tracing | LangSmith plus local logs exist, but richer operator-facing query and evaluation flows can improve. |
-| Ship rebuild | Missing | No first-class rebuild execution or intervention logging exists yet. |
+| Multi-agent coordination | Complete for the current roadmap scope | Typed control plane, specialist registry, production-lead delegation, approvals, artifact routing, and merge governance are all merged. |
+| Observability | Complete for tracing and operator closeout | LangSmith plus local logs exist, and operator summary/evaluation surfaces are now merged. |
+| Ship rebuild | Complete for framework tracking | First-class rebuild execution, artifact logs, and intervention tracking are merged. |
 | Comparative analysis | Missing | No report generation pipeline exists yet. |
 
 ## Current Principles
@@ -78,10 +88,6 @@ Role execution quality depends on good context shaping. This should be hardened 
 - all role invocations consume the assembled payloads
 - context omission and truncation are deterministic and inspectable
 
-### Status
-
-Complete
-
 ## Phase 10: Typed Runtime Control Plane
 
 Detailed phase guide:
@@ -138,10 +144,6 @@ The control plane must exist before specialist identity and tool permissions can
 - control-plane ownership resolves specialist identity for stories and tasks
 - delegated tool scope is enforced objectively
 
-### Status
-
-Complete
-
 ## Phase 12: Production Lead Delegation Flow
 
 ### Goal
@@ -196,10 +198,6 @@ long-running rebuild workflow. This phase closes the highest-risk context and me
 - model-backed execution uses explicit output caps
 - runtime boundary objects are validated at runtime
 - retrieval and memory layers are defined clearly enough to build Phase 13 safely
-
-### Status
-
-In progress
 
 ## Phase 13: Ship Rebuild Framework
 
@@ -282,10 +280,6 @@ clarity.
 - current owner and blockers are visible without inspecting raw traces
 - retry and failure reasons are visible in a clear run journal
 
-### Status
-
-Complete
-
 ## Phase 16: Human Approval Gates
 
 Detailed phase guide:
@@ -312,10 +306,6 @@ The operator view should exist before the runtime starts depending on human appr
 - the runtime cannot cross defined gates without an explicit decision
 - approval and rejection history is preserved as runtime data
 - blocked and rejected work is visible to operators immediately
-
-### Status
-
-Planned
 
 ## Phase 17: Orchestrator Artifacts and Structured Decomposition
 
@@ -347,10 +337,6 @@ prompt-shaped result.
 - production lead handoffs can reference those artifacts directly
 - decomposition produces structured work packets that can be delegated safely
 
-### Status
-
-Planned
-
 ## Phase 18: External Record Sync
 
 Detailed phase guide:
@@ -377,10 +363,6 @@ External systems should reflect runtime truth, not invent it.
 - external progress updates do not duplicate on resume or retry
 - PR and deploy links stay aligned with runtime state
 - operators can follow a run from outside the core runtime UI
-
-### Status
-
-Planned
 
 ## Phase 19: Factory Mode
 
@@ -410,10 +392,6 @@ surfaces, not replace them.
 - repo, PR, and deploy surfaces are visible as part of the run
 - factory mode reuses the typed runtime instead of bypassing it
 
-### Status
-
-Planned
-
 ## Phase 20: Merge and Conflict Governance
 
 Detailed phase guide:
@@ -442,10 +420,6 @@ cases.
 - merge, retry, and reassign decisions are inspectable in runtime state
 - the production lead governs integration outcomes objectively
 
-### Status
-
-Planned
-
 ## Phase 21: Delivery Summary and Operator Evaluation
 
 Detailed phase guide:
@@ -471,10 +445,6 @@ Evaluation is most useful after the operator workflow and factory flow produce c
 - every completed run can produce a delivery summary
 - operators can review intervention and blocker patterns across runs
 - improvement opportunities are visible without replaying traces manually
-
-### Status
-
-Planned
 
 ## Implementation Discipline
 
