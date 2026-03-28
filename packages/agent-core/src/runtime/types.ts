@@ -1926,6 +1926,13 @@ export type AgentRunFailure = {
   rollback?: RollbackResult | null;
 };
 
+export type AppliedWorkspacePlanSummary = {
+  provider: "runtime";
+  summary: string;
+  changedFiles: string[];
+  operationCount: number;
+};
+
 export type AgentRunResult = {
   mode:
     | "placeholder-execution"
@@ -1955,6 +1962,7 @@ export type AgentRunResult = {
     estimatedCostUsd: number | null;
   } | null;
   toolResult?: RepoToolResult | null;
+  appliedWorkspacePlan?: AppliedWorkspacePlanSummary | null;
   paused?: {
     reason: "approval_gate";
     gateId: string;

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -140,7 +142,7 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
     }
   );
 
-  assert.match(capturedPrompt, /Local workspace file action contract/);
+  assert.match(capturedPrompt, /Workspace file action contract/);
   assert.match(capturedPrompt, /<local-file-plan>/);
   assert.match(capturedPrompt, /Response style:/);
   assert.match(capturedPrompt, /Avoid internal runtime labels such as "Runtime result"/);
@@ -229,6 +231,86 @@ test("createOpenAIExecutor uses a local file plan summary when the response is p
   });
 
   assert.equal(result.summary, "Prepared a local file plan for the connected workspace.");
+});
+
+test("createOpenAIExecutor applies workspace plans for runtime-backed projects", async () => {
+  let capturedPrompt = "";
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text:
+          "Implemented the first VendorFlow product flow.\n\nCore product flow implemented.\n\n<local-file-plan>\n{\"operations\":[{\"kind\":\"mkdir\",\"path\":\"src/app\"},{\"kind\":\"write_file\",\"path\":\"src/app/page.tsx\",\"content\":\"export default function Page() { return \\\"VendorFlow\\\"; }\\n\"}]}\n</local-file-plan>",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  try {
+    const result = await executor(
+      createRun("Implement the first product flow", {
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "local",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "vendorflow",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState("Core product flow implemented.")
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.match(capturedPrompt, /Workspace file action contract/);
+    assert.match(capturedPrompt, /runtime applies the plan during execution/);
+    assert.match(capturedPrompt, /Completion contract:/);
+    assert.match(
+      capturedPrompt,
+      /Only when the current task is actually complete, include this exact final standalone line: Core product flow implemented\./
+    );
+    assert.equal(
+      await readFile(path.join(runtimeRoot, "src/app/page.tsx"), "utf8"),
+      'export default function Page() { return "VendorFlow"; }\n'
+    );
+    assert.equal(
+      result.responseText,
+      "Implemented the first VendorFlow product flow.\n\nCore product flow implemented."
+    );
+    assert.equal(result.appliedWorkspacePlan?.provider, "runtime");
+    assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["src/app/page.tsx"]);
+    assert.equal(result.appliedWorkspacePlan?.operationCount, 2);
+    assert.match(result.summary, /Core product flow implemented/);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
 });
 
 test("createOpenAIExecutor injects repo-intelligence relevant files when none are attached", async () => {
@@ -324,5 +406,75 @@ function createRun(
     error: null,
     result: null,
     ...overrides
+  };
+}
+
+function createPhaseExecutionState(expectedOutcome: string): NonNullable<AgentRunRecord["phaseExecution"]> {
+  return {
+    status: "in_progress",
+    activeApprovalGateId: null,
+    current: {
+      phaseId: "phase-implementation",
+      storyId: "story-core-flow",
+      taskId: "task-core-flow"
+    },
+    progress: {
+      totalPhases: 1,
+      completedPhases: 0,
+      totalStories: 1,
+      completedStories: 0,
+      totalTasks: 1,
+      completedTasks: 0
+    },
+    retryPolicy: {
+      maxTaskRetries: 1,
+      maxStoryRetries: 1,
+      maxReplans: 1
+    },
+    lastFailureReason: null,
+    phases: [
+      {
+        id: "phase-implementation",
+        name: "Implementation",
+        description: "Build the first product flow.",
+        approvalGate: null,
+        status: "in_progress",
+        completionCriteria: [],
+        verificationCriteria: [],
+        failureReason: null,
+        lastValidationResults: null,
+        userStories: [
+          {
+            id: "story-core-flow",
+            title: "Core flow",
+            description: "Implement the core product flow.",
+            acceptanceCriteria: [expectedOutcome],
+            validationGates: [],
+            preferredSpecialistAgentTypeId: null,
+            status: "in_progress",
+            retryCount: 0,
+            failureReason: null,
+            lastValidationResults: null,
+            tasks: [
+              {
+                id: "task-core-flow",
+                instruction: "Implement the core product flow.",
+                expectedOutcome,
+                status: "running",
+                toolRequest: null,
+                context: null,
+                validationGates: [],
+                requiredSpecialistAgentTypeId: null,
+                allowedToolNames: null,
+                retryCount: 0,
+                failureReason: null,
+                lastValidationResults: null,
+                result: null
+              }
+            ]
+          }
+        ]
+      }
+    ]
   };
 }
