@@ -660,7 +660,7 @@ export async function createPersistentRuntimeService(
                   },
                   getRuntimeStatus: () => getStatus()
                 });
-            if (result.paused?.reason === "approval_gate") {
+            if (result.paused) {
               const latestStoredRun = normalizeRunRecord(getStoredRun(run.id) ?? runningRun);
               const pausedRun = normalizeRunRecord({
                 ...latestStoredRun,
@@ -687,8 +687,12 @@ export async function createPersistentRuntimeService(
                 status: "completed",
                 outputSummary: result.summary,
                 metadata: {
-                  pausedForApproval: true,
-                  gateId: result.paused.gateId,
+                  pausedReason: result.paused.reason,
+                  gateId: result.paused.reason === "approval_gate" ? result.paused.gateId : null,
+                  decisionId:
+                    result.paused.reason === "factory_quality_gate"
+                      ? result.paused.decisionId
+                      : null,
                   phaseId: result.paused.phaseId
                 }
               });
