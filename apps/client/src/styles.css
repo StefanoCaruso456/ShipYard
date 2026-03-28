@@ -1387,6 +1387,13 @@ a {
   font-size: 0.8rem;
 }
 
+.live-runtime-stage__eyebrow-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
 .live-runtime-stage__badge,
 .steer-queue__badge {
   display: inline-flex;
@@ -1397,6 +1404,34 @@ a {
   color: #ecece7;
   font-size: 0.72rem;
   font-weight: 620;
+}
+
+.live-runtime-stage__quick-approve {
+  border: 1px solid rgba(16, 185, 129, 0.34);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #d9ffee;
+  padding: 0.18rem 0.72rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+.live-runtime-stage__quick-approve:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: rgba(16, 185, 129, 0.46);
+  transform: translateY(-1px);
+}
+
+.live-runtime-stage__quick-approve:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .live-runtime-stage__title-row,
