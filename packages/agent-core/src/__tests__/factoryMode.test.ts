@@ -53,6 +53,7 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
   assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate ?? null, null);
   assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate ?? null, null);
   assert.ok((compiled.phaseExecution?.phases[2]?.completionCriteria?.length ?? 0) > 2);
+  assert.ok((compiled.phaseExecution?.phases[3]?.completionCriteria ?? []).includes("Production readiness gate passed."));
   assert.deepEqual(compiled.phaseExecution?.phases[0]?.completionCriteria, [
     "Product brief captured.",
     "Factory scope aligned around the first deliverable slice."
@@ -81,6 +82,14 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
         item.id === "factory-autonomy-policy" &&
         item.content.includes("Autonomy default: auto_continue.")
     )
+  );
+  assert.equal(
+    compiled.phaseExecution?.phases[3]?.userStories[0]?.tasks[0]?.id,
+    "task-production-readiness"
+  );
+  assert.equal(
+    compiled.phaseExecution?.phases[3]?.userStories[0]?.tasks[0]?.toolRequest?.toolName,
+    "run_terminal_command"
   );
 });
 
@@ -148,6 +157,11 @@ test("createFactoryRunState stores a typed completion contract", () => {
   assert.equal(state.completionContract.appSpec.appName, "Ops Portal");
   assert.equal(state.completionContract.appSpec.stack.templateId, "nextjs_supabase_vercel");
   assert.equal(state.completionContract.definitionOfDone.completionCriteria.length, 4);
+  assert.ok(
+    state.completionContract.definitionOfDone.verificationCriteria.some(
+      (criterion) => criterion.target === "task-production-readiness"
+    )
+  );
   assert.equal(state.completionContract.phases.length, 4);
   assert.equal(state.stagePlans.length, 4);
   assert.equal(state.ownershipPlans.length, 4);
@@ -206,6 +220,11 @@ test("createFactoryRunState stores a typed completion contract", () => {
       (phase) =>
         phase.completionCriteria.length > 0 && phase.verificationCriteria.length > 0
     )
+  );
+  assert.equal(
+    state.completionContract.phases.find((phase) => phase.phaseId === "factory-delivery")
+      ?.completionCriteria[0]?.description,
+    "Production readiness gate passed."
   );
 });
 

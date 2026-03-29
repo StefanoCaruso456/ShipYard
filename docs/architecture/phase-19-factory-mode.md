@@ -14,6 +14,7 @@ replacement for it.
 - a greenfield request intake flow with typed app, repo, stack, and deploy targets
 - isolated runtime workspaces under `.shipyard/factory-workspaces/`
 - staged implementation flow compiled onto the existing typed runtime
+- a delivery-stage production-readiness gate that verifies the generated app before handoff
 - deploy handoff support and delivery summary generation for factory runs
 
 ## Why It Matters
@@ -32,7 +33,7 @@ Factory mode should reuse:
 - external record sync
 
 It adds a product workflow for greenfield intake, isolated workspace bootstrap, staged execution,
-and delivery output.
+delivery output, and a readiness checkpoint before the final handoff.
 
 In the shipped Phase 19 path:
 
@@ -41,6 +42,7 @@ In the shipped Phase 19 path:
 - the server seeds a fresh runtime workspace with `README.md`, `.gitignore`, and
   `shipyard.factory.json`
 - repo-tool tasks execute against that isolated workspace instead of the Shipyard control repo
+- the delivery stage blocks on a production-readiness task before the deploy handoff can complete
 
 ## Outcome
 
@@ -48,6 +50,7 @@ After this phase:
 
 - Shipyard can run an end-to-end greenfield workflow
 - factory repository and deployment artifacts are part of the run record
+- the delivery stage can hold the run open when readiness checks are missing or failing
 - operators get a coherent factory experience on top of the existing runtime
 
 ## What This Phase Does Not Do
