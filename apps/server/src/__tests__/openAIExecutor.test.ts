@@ -282,7 +282,15 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed projects",
             provider: "runtime"
           }
         },
-        phaseExecution: createPhaseExecutionState("Core product flow implemented.")
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-implementation",
+          phaseName: "Factory implementation",
+          storyId: "story-supabase-flow",
+          storyTitle: "Supabase flow",
+          taskId: "task-supabase-flow",
+          taskInstruction: "Implement the first product flow.",
+          expectedOutcome: "Core product flow implemented."
+        })
       }),
       {
         instructionRuntime
@@ -308,6 +316,141 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed projects",
     assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["src/app/page.tsx"]);
     assert.equal(result.appliedWorkspacePlan?.operationCount, 2);
     assert.match(result.summary, /Core product flow implemented/);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("createOpenAIExecutor appends the exact Factory completion outcome after runtime workspace edits", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async () => ({
+      text:
+        "Built the Jira landing route and shared shell.\n\n<local-file-plan>\n{\"operations\":[{\"kind\":\"write_file\",\"path\":\"src/app/page.tsx\",\"content\":\"export default function Page() { return \\\"Jira\\\"; }\\n\"}]}\n</local-file-plan>",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      },
+      totalUsage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      }
+    })) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  try {
+    const result = await executor(
+      createRun("Build the Jira shell", {
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "local",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "jira",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-implementation",
+          phaseName: "Factory implementation",
+          storyId: "story-nextjs-shell",
+          storyTitle: "Next.js shell",
+          taskId: "task-nextjs-shell",
+          taskInstruction: "Build the primary Next.js application shell.",
+          expectedOutcome: "Application shell implemented."
+        })
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.equal(
+      result.responseText,
+      "Built the Jira landing route and shared shell.\n\nApplication shell implemented."
+    );
+    assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["src/app/page.tsx"]);
+    assert.match(result.summary, /Application shell implemented\./);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("createOpenAIExecutor rejects prose-only Factory implementation responses for runtime workspaces", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async () => ({
+      text: "Built the Jira landing route and shared shell.\n\nApplication shell implemented.",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      },
+      totalUsage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      }
+    })) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  try {
+    await assert.rejects(
+      executor(
+        createRun("Build the Jira shell", {
+          project: {
+            id: "project-runtime",
+            name: "Runtime project",
+            kind: "local",
+            environment: "Factory workspace",
+            description: "Connected runtime workspace",
+            folder: {
+              name: "jira",
+              displayPath: runtimeRoot,
+              status: "connected",
+              provider: "runtime"
+            }
+          },
+          phaseExecution: createPhaseExecutionState({
+            phaseId: "factory-implementation",
+            phaseName: "Factory implementation",
+            storyId: "story-nextjs-shell",
+            storyTitle: "Next.js shell",
+            taskId: "task-nextjs-shell",
+            taskInstruction: "Build the primary Next.js application shell.",
+            expectedOutcome: "Application shell implemented."
+          })
+        }),
+        {
+          instructionRuntime
+        }
+      ),
+      /must include a non-empty <local-file-plan> block/
+    );
   } finally {
     await rm(runtimeRoot, { recursive: true, force: true });
   }
@@ -409,14 +552,22 @@ function createRun(
   };
 }
 
-function createPhaseExecutionState(expectedOutcome: string): NonNullable<AgentRunRecord["phaseExecution"]> {
+function createPhaseExecutionState(input: {
+  phaseId: string;
+  phaseName: string;
+  storyId: string;
+  storyTitle: string;
+  taskId: string;
+  taskInstruction: string;
+  expectedOutcome: string;
+}): NonNullable<AgentRunRecord["phaseExecution"]> {
   return {
     status: "in_progress",
     activeApprovalGateId: null,
     current: {
-      phaseId: "phase-implementation",
-      storyId: "story-core-flow",
-      taskId: "task-core-flow"
+      phaseId: input.phaseId,
+      storyId: input.storyId,
+      taskId: input.taskId
     },
     progress: {
       totalPhases: 1,
@@ -434,8 +585,8 @@ function createPhaseExecutionState(expectedOutcome: string): NonNullable<AgentRu
     lastFailureReason: null,
     phases: [
       {
-        id: "phase-implementation",
-        name: "Implementation",
+        id: input.phaseId,
+        name: input.phaseName,
         description: "Build the first product flow.",
         approvalGate: null,
         status: "in_progress",
@@ -445,10 +596,10 @@ function createPhaseExecutionState(expectedOutcome: string): NonNullable<AgentRu
         lastValidationResults: null,
         userStories: [
           {
-            id: "story-core-flow",
-            title: "Core flow",
+            id: input.storyId,
+            title: input.storyTitle,
             description: "Implement the core product flow.",
-            acceptanceCriteria: [expectedOutcome],
+            acceptanceCriteria: [input.expectedOutcome],
             validationGates: [],
             preferredSpecialistAgentTypeId: null,
             status: "in_progress",
@@ -457,9 +608,9 @@ function createPhaseExecutionState(expectedOutcome: string): NonNullable<AgentRu
             lastValidationResults: null,
             tasks: [
               {
-                id: "task-core-flow",
-                instruction: "Implement the core product flow.",
-                expectedOutcome,
+                id: input.taskId,
+                instruction: input.taskInstruction,
+                expectedOutcome: input.expectedOutcome,
                 status: "running",
                 toolRequest: null,
                 context: null,

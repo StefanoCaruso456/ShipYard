@@ -145,11 +145,23 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       });
       const rawResponseText = generated.text.trim();
       const runtimeWorkspaceRoot = resolveRuntimeWorkspaceRoot(run);
+      const currentTask = resolveCurrentPhaseTask(run);
+      const requiresRuntimeWorkspacePlan = shouldRequireRuntimeWorkspacePlan(run, currentTask);
       const extractedWorkspacePlan =
         runtimeWorkspaceRoot != null ? extractRuntimeWorkspacePlan(rawResponseText) : null;
 
       if (runtimeWorkspaceRoot != null && extractedWorkspacePlan?.error) {
         throw new Error(extractedWorkspacePlan.error);
+      }
+
+      if (
+        runtimeWorkspaceRoot != null &&
+        requiresRuntimeWorkspacePlan &&
+        (!extractedWorkspacePlan?.plan || extractedWorkspacePlan.plan.operations.length === 0)
+      ) {
+        throw new Error(
+          `Factory task ${currentTask?.id ?? "current-task"} must include a non-empty <local-file-plan> block for the connected runtime workspace.`
+        );
       }
 
       const appliedWorkspacePlan =
@@ -161,11 +173,15 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           : null;
       const responseText =
         runtimeWorkspaceRoot != null
-          ? resolveVisibleResponseText(
+          ? normalizeRuntimeWorkspaceResponse({
+              run,
+              task: currentTask,
               rawResponseText,
-              extractedWorkspacePlan?.strippedText ?? stripLocalFilePlanBlock(rawResponseText),
-              appliedWorkspacePlan?.summary ?? null
-            )
+              strippedResponseText:
+                extractedWorkspacePlan?.strippedText ?? stripLocalFilePlanBlock(rawResponseText),
+              appliedWorkspacePlanSummary: appliedWorkspacePlan?.summary ?? null,
+              appliedWorkspacePlanOperationCount: appliedWorkspacePlan?.operationCount ?? 0
+            })
           : rawResponseText;
       const summary = summarizeResponse(
         runtimeWorkspaceRoot != null ? responseText : rawResponseText,
@@ -314,6 +330,7 @@ function buildTaskPrompt(
           .filter(Boolean)
           .join("\n")
       : null,
+    renderCompletionContract(run),
     renderFactoryContext(run),
     renderProjectContext(run),
     renderPhaseExecutionContext(run),
@@ -321,7 +338,6 @@ function buildTaskPrompt(
     renderRunContext(run, input.relevantFiles),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
     renderWorkspaceFilePlanInstructions(run),
-    renderCompletionContract(run),
     [
       "Response style:",
       `- ${operatingModePolicy.defaultResponseLead}`,
@@ -512,6 +528,9 @@ function renderWorkspaceFilePlanInstructions(run: AgentRunRecord) {
       : "- Do not claim files were already written unless they are represented in the local file plan block. The client applies the plan after your response.",
     provider === "runtime"
       ? "- For Factory mode implementation, scaffold, and build tasks, filesystem changes normally belong in this block so the verifier can inspect the actual workspace changes."
+      : null,
+    provider === "runtime"
+      ? "- If the current Factory task builds or scaffolds the app, treat the block as required. A prose-only answer will be rejected."
       : null
   ].join("\n");
 }
@@ -536,6 +555,7 @@ function renderCompletionContract(run: AgentRunRecord) {
     "Completion contract:",
     `- Only when the current task is actually complete, include this exact final standalone line: ${expectedOutcome}`,
     `- If the task is not complete yet, do not output "${expectedOutcome}". Explain what remains instead.`,
+    "- For runtime-backed Factory build tasks, the completion line must correspond to real workspace edits represented in the local file plan.",
     "- Make sure the visible response matches the actual workspace changes and execution evidence."
   ].join("\n");
 }
@@ -626,8 +646,66 @@ function resolveVisibleResponseText(
   return strippedResponseText.trim();
 }
 
+function normalizeRuntimeWorkspaceResponse(input: {
+  run: AgentRunRecord;
+  task: ReturnType<typeof resolveCurrentPhaseTask>;
+  rawResponseText: string;
+  strippedResponseText: string;
+  appliedWorkspacePlanSummary: string | null;
+  appliedWorkspacePlanOperationCount: number;
+}) {
+  const visibleResponseText = resolveVisibleResponseText(
+    input.rawResponseText,
+    input.strippedResponseText,
+    input.appliedWorkspacePlanSummary
+  );
+  const expectedOutcome = input.task?.expectedOutcome?.trim();
+
+  if (
+    !expectedOutcome ||
+    !shouldRequireRuntimeWorkspacePlan(input.run, input.task) ||
+    input.appliedWorkspacePlanOperationCount <= 0 ||
+    responseIndicatesIncompleteTask(visibleResponseText) ||
+    includesNormalized(visibleResponseText, expectedOutcome)
+  ) {
+    return visibleResponseText;
+  }
+
+  if (!visibleResponseText.trim()) {
+    return expectedOutcome;
+  }
+
+  return `${visibleResponseText.trim()}\n\n${expectedOutcome}`;
+}
+
 function hasLocalFilePlanBlock(text: string) {
   return /<local-file-plan>\s*[\s\S]*?\s*<\/local-file-plan>/i.test(text);
+}
+
+function shouldRequireRuntimeWorkspacePlan(
+  run: AgentRunRecord,
+  task: ReturnType<typeof resolveCurrentPhaseTask>
+) {
+  return (
+    run.project?.kind === "local" &&
+    run.project.folder?.provider === "runtime" &&
+    (run.phaseExecution?.current.phaseId === "factory-bootstrap" ||
+      run.phaseExecution?.current.phaseId === "factory-implementation") &&
+    Boolean(task?.expectedOutcome?.trim())
+  );
+}
+
+function resolveCurrentPhaseTask(run: AgentRunRecord) {
+  const phaseExecution = run.phaseExecution;
+
+  if (!phaseExecution) {
+    return null;
+  }
+
+  const phase = phaseExecution.phases.find((candidate) => candidate.id === phaseExecution.current.phaseId);
+  const story = phase?.userStories.find((candidate) => candidate.id === phaseExecution.current.storyId);
+
+  return story?.tasks.find((candidate) => candidate.id === phaseExecution.current.taskId) ?? null;
 }
 
 function resolveRuntimeWorkspaceRoot(run: AgentRunRecord) {
@@ -640,6 +718,35 @@ function resolveRuntimeWorkspaceRoot(run: AgentRunRecord) {
   }
 
   return run.project.folder.displayPath.trim();
+}
+
+function responseIndicatesIncompleteTask(text: string) {
+  const normalized = normalizeText(text);
+  const incompleteSignals = [
+    "next step",
+    "remaining work",
+    "still need",
+    "todo",
+    "to do",
+    "not complete",
+    "blocked",
+    "follow up",
+    "follow-up"
+  ];
+
+  return incompleteSignals.some((signal) => normalized.includes(signal));
+}
+
+function includesNormalized(source: string, target: string) {
+  if (!target.trim()) {
+    return true;
+  }
+
+  return normalizeText(source).includes(normalizeText(target));
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function summarizePrompt(run: AgentRunRecord) {
