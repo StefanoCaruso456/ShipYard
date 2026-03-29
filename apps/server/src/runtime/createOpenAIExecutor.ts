@@ -19,7 +19,7 @@ import { generateText, Output } from "ai";
 import {
   applyRuntimeWorkspacePlan,
   extractRuntimeWorkspacePlan,
-  runtimeWorkspacePlanSchema,
+  runtimeWorkspaceStructuredOutputSchema,
   type ExtractedRuntimeWorkspacePlan,
   type RuntimeWorkspacePlan
 } from "./runtimeWorkspacePlan";
@@ -221,7 +221,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
                   rawResponseText
                 }),
                 output: Output.object({
-                  schema: runtimeWorkspacePlanSchema
+                  schema: runtimeWorkspaceStructuredOutputSchema
                 })
               },
               factoryExecution ? null : 900
@@ -766,6 +766,9 @@ function buildRuntimeWorkspacePlanPrompt(input: {
     "Generate only the machine-readable runtime workspace plan for the current task.",
     "Do not repeat the visible response. The runtime will apply this plan directly.",
     "Return the exact file and directory operations needed for this task and nothing else.",
+    "Return JSON with exactly this shape: {\"operations\":[{\"kind\":\"write_file\"|\"mkdir\"|\"delete_file\",\"path\":\"...\",\"content\":\"...\"}]}",
+    "Every operation object must include kind, path, and content.",
+    "For mkdir and delete_file operations, set content to an empty string.",
     "Every operation path must stay relative to the connected runtime workspace. Never use absolute paths or .. segments.",
     "This current task requires real workspace edits. Do not return an empty operations array.",
     "Do not add deployment setup, hosted environment configuration, or live database provisioning work to this plan unless the current task explicitly asks for it.",
@@ -932,7 +935,7 @@ function hasNonEmptyRuntimeWorkspacePlan(
 function normalizeGeneratedRuntimeWorkspacePlan(
   value: unknown
 ): RuntimeWorkspacePlan | null {
-  const parsed = runtimeWorkspacePlanSchema.safeParse(value);
+  const parsed = runtimeWorkspaceStructuredOutputSchema.safeParse(value);
 
   if (!parsed.success) {
     return null;

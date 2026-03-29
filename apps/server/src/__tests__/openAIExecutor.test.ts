@@ -16,7 +16,9 @@ import {
   resolveOpenAIExecutorConfig,
   type OpenAIExecutorConfig
 } from "../runtime/createOpenAIExecutor";
-import { runtimeWorkspacePlanSchema } from "../runtime/runtimeWorkspacePlan";
+import {
+  runtimeWorkspaceStructuredOutputSchema
+} from "../runtime/runtimeWorkspacePlan";
 
 test("resolveOpenAIExecutorConfig prefers OPENAI_KEY and falls back to OPENAI_API_KEY", () => {
   const preferredConfig = resolveOpenAIExecutorConfig({
@@ -55,7 +57,7 @@ test("createOpenAIExecutor returns a placeholder result when no key is configure
 
 test("runtime workspace structured output schema avoids oneOf so provider-side validation can accept it", async () => {
   const responseFormat = await Output.object({
-    schema: runtimeWorkspacePlanSchema
+    schema: runtimeWorkspaceStructuredOutputSchema
   }).responseFormat;
   assert.ok(responseFormat);
   assert.equal(responseFormat.type, "json");
@@ -69,8 +71,12 @@ test("runtime workspace structured output schema avoids oneOf so provider-side v
               kind?: {
                 enum?: string[];
               };
+              content?: {
+                type?: string;
+              };
             };
             oneOf?: unknown;
+            required?: string[];
           };
         };
       };
@@ -82,6 +88,14 @@ test("runtime workspace structured output schema avoids oneOf so provider-side v
     "write_file",
     "delete_file"
   ]);
+  assert.equal(
+    jsonResponseFormat.schema.properties?.operations?.items?.properties?.content?.type,
+    "string"
+  );
+  assert.deepEqual(
+    jsonResponseFormat.schema.properties?.operations?.items?.required,
+    ["kind", "path", "content"]
+  );
   assert.equal("oneOf" in (jsonResponseFormat.schema.properties?.operations?.items ?? {}), false);
 });
 
@@ -704,7 +718,8 @@ test("createOpenAIExecutor generates a structured runtime workspace plan for pro
             },
             {
               kind: "mkdir",
-              path: "src/app"
+              path: "src/app",
+              content: ""
             }
           ]
         },
@@ -757,6 +772,8 @@ test("createOpenAIExecutor generates a structured runtime workspace plan for pro
     assert.equal(callCount, 2);
     assert.deepEqual(recordedMaxOutputTokens, [undefined, undefined]);
     assert.match(structuredPlanPrompt, /Generate only the machine-readable runtime workspace plan/);
+    assert.match(structuredPlanPrompt, /Every operation object must include kind, path, and content/);
+    assert.match(structuredPlanPrompt, /For mkdir and delete_file operations, set content to an empty string/);
     assert.equal(await readFile(path.join(runtimeRoot, "README.md"), "utf8"), "# Jira\n");
     assert.equal(
       result.responseText,
@@ -816,7 +833,8 @@ test("createOpenAIExecutor rewrites incomplete bootstrap drafts when the structu
                 },
                 {
                   kind: "mkdir",
-                  path: "app"
+                  path: "app",
+                  content: ""
                 }
               ]
             }
