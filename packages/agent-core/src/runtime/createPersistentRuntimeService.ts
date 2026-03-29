@@ -729,9 +729,7 @@ export async function createPersistentRuntimeService(
               providerLatencyMs: completedRun.result?.usage?.providerLatencyMs ?? null,
               estimatedCostUsd: completedRun.result?.usage?.estimatedCostUsd ?? null,
               queueDelayMs: computeQueueDelayMs(completedRun),
-              changedFiles: extractChangedFilesFromToolResult(
-                completedRun.result?.mode === "repo-tool" ? completedRun.result.toolResult : null
-              )
+              changedFiles: extractChangedFilesFromResult(completedRun.result)
             });
             await rootTrace?.end({
               status: "completed",
@@ -1250,7 +1248,17 @@ function createResultRollingSummary(
   };
 }
 
-function extractChangedFilesFromToolResult(toolResult: AgentRunResult["toolResult"] | null | undefined) {
+function extractChangedFilesFromResult(result: AgentRunResult | null | undefined) {
+  if (!result) {
+    return [];
+  }
+
+  if (result.workspacePlan) {
+    return [...new Set([...result.workspacePlan.writtenFiles, ...result.workspacePlan.deletedFiles])];
+  }
+
+  const toolResult = result.mode === "repo-tool" ? result.toolResult : null;
+
   if (!toolResult?.ok) {
     return [];
   }

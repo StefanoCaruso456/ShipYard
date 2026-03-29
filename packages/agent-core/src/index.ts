@@ -369,7 +369,8 @@ export type {
   ValidationGateKind,
   ValidationGateResult,
   VerifierDecision,
-  VerifierStepResult
+  VerifierStepResult,
+  WorkspaceFilePlanEffect
 } from "./runtime/types";
 export type {
   CreateFileInput,

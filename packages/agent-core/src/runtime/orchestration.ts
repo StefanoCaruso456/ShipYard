@@ -844,6 +844,13 @@ function deriveSuccessCriteria(run: AgentRunRecord, task: Task | null) {
 }
 
 function extractChangedFiles(result: AgentRunResult) {
+  if (result.workspacePlan) {
+    return uniqueStrings([
+      ...result.workspacePlan.writtenFiles,
+      ...result.workspacePlan.deletedFiles
+    ]);
+  }
+
   if (result.mode !== "repo-tool" || !result.toolResult?.ok) {
     return [];
   }
@@ -1112,7 +1119,8 @@ function buildTaskEvidence(result: AgentRunResult) {
   return [
     result.summary,
     result.responseText ?? null,
-    result.mode === "repo-tool" ? JSON.stringify(result.toolResult) : null
+    result.mode === "repo-tool" ? JSON.stringify(result.toolResult) : null,
+    result.workspacePlan ? JSON.stringify(result.workspacePlan) : null
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1123,6 +1131,7 @@ function buildVerificationEvidence(result: AgentRunResult | null, executorResult
     result?.summary ?? null,
     result?.responseText ?? null,
     result?.mode === "repo-tool" ? JSON.stringify(result.toolResult) : null,
+    result?.workspacePlan ? JSON.stringify(result.workspacePlan) : null,
     executorResult.summary,
     executorResult.error?.message ?? null
   ]

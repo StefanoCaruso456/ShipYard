@@ -52,6 +52,11 @@ test("compileFactoryTaskSubmission builds a typed factory run contract", () => {
       constraint.includes("connected runtime folder")
     )
   );
+  assert.ok(
+    compiled.context?.constraints.some((constraint) =>
+      constraint.includes("Do not create, connect, or publish a remote repository")
+    )
+  );
   assert.ok(compiled.context?.relevantFiles.some((file) => file.path === "README.md"));
 });
 

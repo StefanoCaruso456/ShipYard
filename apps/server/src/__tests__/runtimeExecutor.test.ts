@@ -10,6 +10,7 @@ import {
   createRepoToolset,
   type AgentRunRecord
 } from "@shipyard/agent-core";
+import { generateText } from "ai";
 
 import { resolveOpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
 import { createRuntimeExecutor } from "../runtime/createRuntimeExecutor";
@@ -329,6 +330,69 @@ test("runtime executor routes factory repo tools into the runtime workspace fold
   } finally {
     await rm(defaultDir, { recursive: true, force: true });
     await rm(factoryDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime executor applies workspace file plans for runtime-backed model responses", async () => {
+  const defaultDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-default-"));
+  const runtimeDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-runtime-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: defaultDir });
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({
+        OPENAI_KEY: "test-key"
+      }),
+      repoToolset,
+      generateTextImpl: (async () =>
+        ({
+          text:
+            'Repository foundation scaffolded.\n\n<local-file-plan>\n{"operations":[{"kind":"mkdir","path":"src"},{"kind":"write_file","path":"src/index.ts","content":"export const ready = true;\\n"}]}\n</local-file-plan>',
+          usage: {
+            inputTokens: 11,
+            outputTokens: 17,
+            totalTokens: 28
+          },
+          totalUsage: {
+            inputTokens: 11,
+            outputTokens: 17,
+            totalTokens: 28
+          }
+        })) as unknown as typeof generateText
+    })
+  });
+
+  try {
+    const run = await runtimeService.submitTask({
+      instruction: "Scaffold the runtime workspace foundation.",
+      project: {
+        id: "shipyard-runtime",
+        kind: "live",
+        folder: {
+          name: "runtime-plan-app",
+          displayPath: runtimeDir,
+          provider: "runtime",
+          status: "connected"
+        }
+      }
+    });
+
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed");
+
+    assert.equal(completedRun.result?.mode, "ai-sdk-openai");
+    assert.equal(completedRun.validationStatus, "not_run");
+    assert.equal(completedRun.result?.workspacePlan?.target, "runtime-folder");
+    assert.deepEqual(completedRun.result?.workspacePlan?.writtenFiles, ["src/index.ts"]);
+    assert.match(completedRun.result?.summary ?? "", /Applied workspace file plan/);
+    assert.equal(
+      await readFile(path.join(runtimeDir, "src/index.ts"), "utf8"),
+      "export const ready = true;\n"
+    );
+    await assert.rejects(() => readFile(path.join(defaultDir, "src/index.ts"), "utf8"));
+  } finally {
+    await rm(defaultDir, { recursive: true, force: true });
+    await rm(runtimeDir, { recursive: true, force: true });
   }
 });
 

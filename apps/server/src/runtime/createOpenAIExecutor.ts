@@ -382,11 +382,11 @@ function renderFactoryContext(run: AgentRunRecord) {
     `App: ${run.factory.appName}`,
     `Current stage: ${run.factory.currentStage}`,
     `Stack: ${run.factory.stack.label}`,
-    `Repository target: ${run.factory.repository.owner ? `${run.factory.repository.owner}/` : ""}${run.factory.repository.name}`,
     `Deployment target: ${run.factory.deployment.provider}`,
     run.factory.repository.localPath
       ? `Factory workspace: ${run.factory.repository.localPath}`
       : null,
+    "Remote repository setup is deferred until an explicit later step.",
     "Important: work only inside the connected runtime folder for this factory run. Do not modify the Shipyard control repository."
   ]
     .filter(Boolean)
@@ -438,16 +438,21 @@ function renderRunContext(
 }
 
 function renderLocalFilePlanInstructions(run: AgentRunRecord) {
+  const folderProvider = run.project?.folder?.provider;
+
   if (
-    run.project?.kind !== "local" ||
-    run.project.folder?.provider !== "browser-file-system-access"
+    folderProvider !== "browser-file-system-access" &&
+    folderProvider !== "runtime"
   ) {
     return null;
   }
 
+  const folderLabel =
+    folderProvider === "runtime" ? "connected runtime folder" : "connected local folder";
+
   return [
-    "Local workspace file action contract:",
-    "When the request requires creating, updating, or deleting files in the connected local folder, append a <local-file-plan>...</local-file-plan> block to the end of your response.",
+    "Workspace file action contract:",
+    `When the request requires creating, updating, or deleting files in the ${folderLabel}, append a <local-file-plan>...</local-file-plan> block to the end of your response.`,
     "Inside that block emit valid JSON with exactly this shape: {\"operations\":[...]}",
     "Inside the tags output raw JSON only. Do not wrap it in ``` fences. Do not prefix it with json. Do not add commentary inside the tags.",
     "Supported operations:",

@@ -1451,6 +1451,16 @@ export type AgentRunFailure = {
   rollback?: RollbackResult | null;
 };
 
+export type WorkspaceFilePlanEffect = {
+  tag: "local-file-plan";
+  target: "runtime-folder";
+  operationCount: number;
+  createdDirectories: string[];
+  writtenFiles: string[];
+  deletedFiles: string[];
+  summary: string;
+};
+
 export type AgentRunResult = {
   mode:
     | "placeholder-execution"
@@ -1480,6 +1490,7 @@ export type AgentRunResult = {
     estimatedCostUsd: number | null;
   } | null;
   toolResult?: RepoToolResult | null;
+  workspacePlan?: WorkspaceFilePlanEffect | null;
   paused?: {
     reason: "approval_gate";
     gateId: string;
