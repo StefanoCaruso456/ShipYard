@@ -86,7 +86,7 @@ const FACTORY_PHASE_STAGE_IDS = {
 const FACTORY_IMPLEMENTATION_TASK_IDS = {
   nextjs_supabase_vercel: {
     shellTaskId: "task-nextjs-shell",
-    flowTaskId: "task-supabase-flow"
+    flowTaskId: "task-product-flow"
   },
   nextjs_railway_postgres: {
     shellTaskId: "task-nextjs-shell",
@@ -1053,14 +1053,14 @@ function buildImplementationStories(factory: FactoryRunInput) {
           ]
         },
         {
-          id: "story-supabase-flow",
+          id: "story-product-flow",
           title: "Build the first interactive product flow",
           description: `Create the first usable product workflow for ${factory.appName}.`,
           acceptanceCriteria: ["Core product flow implemented."],
           preferredSpecialistAgentTypeId: "backend_dev" as const,
           tasks: [
             createFactoryTask({
-              id: "task-supabase-flow",
+              id: "task-product-flow",
               instruction: `Implement the first interactive product flow for ${factory.appName}. Use local fixtures, seeded demo content, or clear adapter seams so the application works locally while leaving Supabase wiring, auth provider setup, and hosted deployment for a later follow-up. When complete, explicitly say "Core product flow implemented."`,
               expectedOutcome: "Core product flow implemented.",
               requiredSpecialistAgentTypeId: "backend_dev"

@@ -421,9 +421,9 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed Factory pr
         phaseExecution: createPhaseExecutionState({
           phaseId: "factory-implementation",
           phaseName: "Factory implementation",
-          storyId: "story-supabase-flow",
-          storyTitle: "Supabase flow",
-          taskId: "task-supabase-flow",
+          storyId: "story-product-flow",
+          storyTitle: "Product flow",
+          taskId: "task-product-flow",
           taskInstruction: "Implement the first product flow.",
           expectedOutcome: "Core product flow implemented."
         })
@@ -1187,9 +1187,9 @@ test("createOpenAIExecutor repairs placeholder implementation plans and rewrites
         phaseExecution: createPhaseExecutionState({
           phaseId: "factory-implementation",
           phaseName: "Factory implementation",
-          storyId: "story-supabase-flow",
-          storyTitle: "Supabase flow",
-          taskId: "task-supabase-flow",
+          storyId: "story-product-flow",
+          storyTitle: "Product flow",
+          taskId: "task-product-flow",
           taskInstruction:
             "Implement the first interactive product flow for Pong. Use local fixtures, seeded demo content, or clear adapter seams so the application works locally while leaving Supabase wiring, auth provider setup, and hosted deployment for a later follow-up. When complete, explicitly say \"Core product flow implemented.\"",
           expectedOutcome: "Core product flow implemented."

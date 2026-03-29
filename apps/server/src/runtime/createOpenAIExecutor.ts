@@ -869,6 +869,7 @@ function renderImplementationRecoveryPlanGuidance(
         "- Prefer changes under app/, src/app/, components/, src/components/, pages/, or related shell styling files.",
         "- Do not write TASK-NEEDS-IMPLEMENTATION.txt, TODO notes, or README-only changes as the primary result for this task."
       ].join("\n");
+    case "task-product-flow":
     case "task-supabase-flow":
     case "task-railway-data-flow":
     case "task-api-flow":
@@ -1195,6 +1196,7 @@ function hasSubstantiveImplementationChanges(
     case "task-nextjs-shell":
     case "task-frontend-shell":
       return codeLikeFiles.some((path) => isShellImplementationPath(path));
+    case "task-product-flow":
     case "task-supabase-flow":
     case "task-railway-data-flow":
     case "task-api-flow":
@@ -1319,6 +1321,7 @@ function buildRecoveredFactoryTaskResponse(input: {
       ]
         .filter(Boolean)
         .join("\n\n");
+    case "task-product-flow":
     case "task-supabase-flow":
     case "task-railway-data-flow":
     case "task-api-flow":
