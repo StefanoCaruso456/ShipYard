@@ -99,6 +99,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           toolRequest: run.toolRequest ?? null,
           factory: run.factory ?? null
         });
+    const factoryExecution = isFactoryExecutionRun(run, operatingMode);
     const operatingModePolicy = getOperatingModePolicy(operatingMode);
 
     if (!openai) {
@@ -131,10 +132,11 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     });
     const promptTokenCount = countTextTokens(prompt);
     const systemPromptTokenCount = countTextTokens(systemPrompt);
-    const maxOutputTokens =
-      context.maxOutputTokens ??
-      operatingModePolicy.defaultMaxOutputTokens ??
-      getRoleContextPolicy("executor").maxOutputTokens;
+    const maxOutputTokens = resolveModelMaxOutputTokens({
+      factoryExecution,
+      operatingMode,
+      requestedMaxOutputTokens: context.maxOutputTokens
+    });
     const modelSpan = traceScope
       ? await traceScope.activeSpan.startChild({
           name: `model:${options.config.modelId}`,
@@ -161,12 +163,16 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
     : null;
 
     try {
-      const generated = await generateTextImpl({
-        model: openai(options.config.modelId),
-        system: systemPrompt,
-        prompt,
-        maxOutputTokens
-      });
+      const generated = await generateTextImpl(
+        withOptionalMaxOutputTokens(
+          {
+            model: openai(options.config.modelId),
+            system: systemPrompt,
+            prompt
+          },
+          maxOutputTokens
+        )
+      );
       let rawResponseText = generated.text.trim();
       const runtimeWorkspaceRoot = resolveRuntimeWorkspaceRoot(run);
       const currentTask = resolveCurrentPhaseTask(run);
@@ -195,19 +201,23 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         });
 
         try {
-          const generatedWorkspacePlan = await generateTextImpl({
-            model: openai(options.config.modelId),
-            system: systemPrompt,
-            prompt: buildRuntimeWorkspacePlanPrompt({
-              run,
-              task: currentTask,
-              rawResponseText
-            }),
-            output: Output.object({
-              schema: runtimeWorkspacePlanSchema
-            }),
-            maxOutputTokens: 900
-          });
+          const generatedWorkspacePlan = await generateTextImpl(
+            withOptionalMaxOutputTokens(
+              {
+                model: openai(options.config.modelId),
+                system: systemPrompt,
+                prompt: buildRuntimeWorkspacePlanPrompt({
+                  run,
+                  task: currentTask,
+                  rawResponseText
+                }),
+                output: Output.object({
+                  schema: runtimeWorkspacePlanSchema
+                })
+              },
+              factoryExecution ? null : 900
+            )
+          );
 
           usageTotals = mergeTokenUsageTotals(
             usageTotals,
@@ -559,10 +569,10 @@ function renderFactoryContext(run: AgentRunRecord) {
     `Current stage: ${run.factory.currentStage}`,
     `Stack: ${run.factory.stack.label}`,
     `Repository target: ${run.factory.repository.owner ? `${run.factory.repository.owner}/` : ""}${run.factory.repository.name}`,
-    `Deployment target: ${run.factory.deployment.provider}`,
     run.factory.repository.localPath
       ? `Factory workspace: ${run.factory.repository.localPath}`
       : null,
+    "Delivery policy: build and verify the application locally first. Deployment and live data-service setup are operator-managed follow-up work unless the current task explicitly requests them.",
     "Important: work only inside the connected runtime folder for this factory run. Do not modify the Shipyard control repository."
   ]
     .filter(Boolean)
@@ -701,6 +711,7 @@ function buildRuntimeWorkspacePlanPrompt(input: {
     "Return the exact file and directory operations needed for this task and nothing else.",
     "Every operation path must stay relative to the connected runtime workspace. Never use absolute paths or .. segments.",
     "This current task requires real workspace edits. Do not return an empty operations array.",
+    "Do not add deployment setup, hosted environment configuration, or live database provisioning work to this plan unless the current task explicitly asks for it.",
     input.task?.id ? `Task id: ${input.task.id}` : null,
     `Task instruction:\n${currentInstruction}`,
     expectedOutcome ? `Expected outcome:\n${expectedOutcome}` : null,
@@ -756,6 +767,47 @@ function formatOperatingModeLabel(mode: ReturnType<typeof normalizeRequestedOper
     case "factory":
       return "Factory mode";
   }
+}
+
+function resolveModelMaxOutputTokens(input: {
+  factoryExecution: boolean;
+  operatingMode: ReturnType<typeof resolveOperatingMode>;
+  requestedMaxOutputTokens: number | null | undefined;
+}) {
+  if (input.factoryExecution || input.operatingMode === "factory") {
+    return null;
+  }
+
+  return (
+    input.requestedMaxOutputTokens ??
+    getOperatingModePolicy(input.operatingMode).defaultMaxOutputTokens ??
+    getRoleContextPolicy("executor").maxOutputTokens
+  );
+}
+
+function isFactoryExecutionRun(
+  run: AgentRunRecord,
+  operatingMode: ReturnType<typeof resolveOperatingMode>
+) {
+  return (
+    operatingMode === "factory" ||
+    run.factory != null ||
+    run.phaseExecution?.current.phaseId?.startsWith("factory-") === true
+  );
+}
+
+function withOptionalMaxOutputTokens<T extends Record<string, unknown>>(
+  input: T,
+  maxOutputTokens: number | null
+) {
+  if (maxOutputTokens == null) {
+    return input;
+  }
+
+  return {
+    ...input,
+    maxOutputTokens
+  };
 }
 
 function summarizeResponse(text: string, fallbackSummary: string | null = null) {

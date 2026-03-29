@@ -155,7 +155,6 @@ export function LiveRuntimeStage({
               </p>
               <div className="live-runtime-stage__meta">
                 <span>{factory.repositoryName}</span>
-                <span>{factory.deploymentProvider}</span>
                 {factory.workspacePath ? <span>{factory.workspacePath}</span> : null}
               </div>
             </div>

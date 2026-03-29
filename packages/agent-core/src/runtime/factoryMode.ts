@@ -168,9 +168,19 @@ export function normalizeFactoryRunInput(
     : null;
   const deploymentProvider = isFactoryDeploymentProviderId(value.deployment?.provider)
     ? value.deployment.provider
-    : null;
+    : "manual";
+  const normalizedDeployment = {
+    provider: deploymentProvider,
+    projectName: value.deployment?.projectName?.trim()
+      ? value.deployment.projectName.trim()
+      : null,
+    environment: value.deployment?.environment?.trim()
+      ? value.deployment.environment.trim()
+      : null,
+    url: value.deployment?.url?.trim() ? value.deployment.url.trim() : null
+  } satisfies FactoryRunInput["deployment"];
 
-  if (!appName || !repositoryName || !stackTemplateId || !deploymentProvider) {
+  if (!appName || !repositoryName || !stackTemplateId) {
     return null;
   }
 
@@ -188,16 +198,7 @@ export function normalizeFactoryRunInput(
         ? value.repository.baseBranch.trim()
         : DEFAULT_REPOSITORY_BASE_BRANCH
     },
-    deployment: {
-      provider: deploymentProvider,
-      projectName: value.deployment.projectName?.trim()
-        ? value.deployment.projectName.trim()
-        : null,
-      environment: value.deployment.environment?.trim()
-        ? value.deployment.environment.trim()
-        : null,
-      url: value.deployment.url?.trim() ? value.deployment.url.trim() : null
-    }
+    deployment: normalizedDeployment
   };
 }
 
@@ -218,9 +219,15 @@ export function createFactoryRunState(options: {
 
   const createdAt = options.createdAt ?? new Date().toISOString();
   const repositoryUrl = options.repositoryUrl?.trim() ? options.repositoryUrl.trim() : null;
+  const normalizedDeployment = normalized.deployment ?? {
+    provider: "manual",
+    projectName: null,
+    environment: null,
+    url: null
+  };
   const deploymentUrl =
     options.deploymentUrl?.trim() ||
-    normalized.deployment.url?.trim() ||
+    normalizedDeployment.url?.trim() ||
     null;
   const stack = getFactoryStackSummary(normalized.stackTemplateId);
   const productBrief = options.productBrief.trim();
@@ -234,9 +241,9 @@ export function createFactoryRunState(options: {
     localPath: options.workspacePath.trim()
   };
   const deployment: FactoryDeploymentState = {
-    provider: normalized.deployment.provider,
-    projectName: normalized.deployment.projectName ?? null,
-    environment: normalized.deployment.environment ?? null,
+    provider: normalizedDeployment.provider,
+    projectName: normalizedDeployment.projectName ?? null,
+    environment: normalizedDeployment.environment ?? null,
     url: deploymentUrl
   };
   const repositoryLabel = formatRepositoryLabel(repository.owner, repository.name);
@@ -301,17 +308,6 @@ export function createFactoryRunState(options: {
         url: null,
         path: options.workspacePath.trim(),
         provider: null,
-        updatedAt: createdAt
-      },
-      {
-        id: "factory-artifact:deployment-handoff",
-        kind: "deployment_handoff",
-        title: "Deployment handoff",
-        summary: `Prepare the ${normalized.deployment.provider} handoff for ${normalized.appName}.`,
-        status: "planned",
-        url: deploymentUrl,
-        path: null,
-        provider: normalized.deployment.provider,
         updatedAt: createdAt
       },
       {
@@ -663,6 +659,12 @@ export function compileFactoryTaskSubmission(options: {
   }
 
   const stack = getFactoryStackSummary(normalizedFactory.stackTemplateId);
+  const normalizedDeployment = normalizedFactory.deployment ?? {
+    provider: "manual",
+    projectName: null,
+    environment: null,
+    url: null
+  };
   const completionContract = buildFactoryCompletionContract({
     appName: normalizedFactory.appName,
     productBrief: options.input.instruction,
@@ -675,9 +677,9 @@ export function compileFactoryTaskSubmission(options: {
       baseBranch: normalizedFactory.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH
     },
     deployment: {
-      provider: normalizedFactory.deployment.provider,
-      projectName: normalizedFactory.deployment.projectName ?? null,
-      environment: normalizedFactory.deployment.environment ?? null
+      provider: normalizedDeployment.provider,
+      projectName: normalizedDeployment.projectName ?? null,
+      environment: normalizedDeployment.environment ?? null
     }
   });
   const autonomyPolicy = buildFactoryAutonomyPolicy({
@@ -685,13 +687,13 @@ export function compileFactoryTaskSubmission(options: {
   });
   const projectLinks = mergeProjectLinks(
     options.input.project?.links,
-    normalizedFactory.deployment.url?.trim()
+    normalizedDeployment.url?.trim()
       ? [
           {
             kind: "deployment",
-            url: normalizedFactory.deployment.url.trim(),
+            url: normalizedDeployment.url.trim(),
             title: `${normalizedFactory.appName} deployment`,
-            provider: normalizedFactory.deployment.provider,
+            provider: normalizedDeployment.provider,
             entityKind: "run"
           }
         ]
@@ -759,7 +761,8 @@ function buildFactoryRunContext(
       "Continue automatically by default in Factory Mode unless a defined risk escalation rule or failed quality gate requires a stop.",
       `Use the selected stack template: ${stack.label}.`,
       `Repository target: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}.`,
-      `Deployment target: ${factory.deployment.provider}.`
+      "Build the application locally first. Defer hosted deployment setup, cloud infrastructure wiring, and live database provisioning to a later operator-directed follow-up.",
+      "For the first Factory slice, prefer local fixtures, seeded demo content, and adapter seams over provisioning real hosted data services."
     ]),
     relevantFiles: mergeRelevantFiles(existing.relevantFiles, [
       {
@@ -799,8 +802,8 @@ function buildFactoryRunContext(
           `Template: ${stack.label}`,
           `Frontend: ${stack.frontend}`,
           `Backend: ${stack.backend}`,
-          `Data: ${stack.data}`,
-          `Deployment: ${stack.deployment}`
+          `Suggested integration target: ${stack.data}`,
+          "Delivery path: operator-managed manual deployment after the application is working locally."
         ].join("\n"),
         source: "factory-mode",
         format: "markdown"
@@ -814,13 +817,8 @@ function buildFactoryRunContext(
           `Repository: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}`,
           `Visibility: ${factory.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY}`,
           `Base branch: ${factory.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH}`,
-          `Deployment provider: ${factory.deployment.provider}`,
-          factory.deployment.projectName?.trim()
-            ? `Deployment project: ${factory.deployment.projectName.trim()}`
-            : null,
-          factory.deployment.environment?.trim()
-            ? `Deployment environment: ${factory.deployment.environment.trim()}`
-            : null
+          "Deployment: manual follow-up after the application build is complete.",
+          "Data setup: defer hosted database provisioning until the local product flow is working."
         ]
           .filter(Boolean)
           .join("\n"),
@@ -903,7 +901,7 @@ function buildFactoryPhaseExecution(
             tasks: [
               createFactoryTask({
                 id: "task-repository-bootstrap",
-                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed for ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. When complete, explicitly say "Repository foundation scaffolded."`,
+                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed to run the application locally with ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. Do not wire hosted deployment targets or live database infrastructure in this bootstrap step. When complete, explicitly say "Repository foundation scaffolded."`,
                 expectedOutcome: "Repository foundation scaffolded.",
                 requiredSpecialistAgentTypeId: "repo_tools_dev"
               })
@@ -928,7 +926,7 @@ function buildFactoryPhaseExecution(
       {
         id: "factory-delivery",
         name: "Delivery",
-        description: `Prepare the delivery handoff for ${factory.appName}.`,
+        description: `Verify the application build and summarize the delivery state for ${factory.appName}.`,
         completionCriteria: deliveryCriteria.completionCriteria,
         verificationCriteria: deliveryCriteria.verificationCriteria,
         approvalGate:
@@ -944,7 +942,6 @@ function buildFactoryPhaseExecution(
             description: `Summarize the delivery state for ${factory.appName}.`,
             acceptanceCriteria: [
               "Production readiness gate passed.",
-              "Deployment handoff prepared.",
               "Delivery summary prepared."
             ],
             preferredSpecialistAgentTypeId: "repo_tools_dev",
@@ -957,14 +954,8 @@ function buildFactoryPhaseExecution(
                 toolRequest: buildFactoryProductionReadinessToolRequest()
               }),
               createFactoryTask({
-                id: "task-deployment-handoff",
-                instruction: `Prepare the deploy handoff for ${factory.appName} targeting ${factory.deployment.provider}. Summarize environment variables, manual setup steps, release risks, and the next operator review needed. When complete, explicitly say "Deployment handoff prepared."`,
-                expectedOutcome: "Deployment handoff prepared.",
-                requiredSpecialistAgentTypeId: "repo_tools_dev"
-              }),
-              createFactoryTask({
                 id: "task-delivery-summary",
-                instruction: `Create the final delivery summary for ${factory.appName}. Include what shipped, the repository target ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}, the deployment target ${factory.deployment.provider}, and the next operator action. When complete, explicitly say "Delivery summary prepared."`,
+                instruction: `Create the final delivery summary for ${factory.appName}. Include what shipped, the repository target ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}, what remains for manual deployment or hosted integration, and the next operator action. When complete, explicitly say "Delivery summary prepared."`,
                 expectedOutcome: "Delivery summary prepared.",
                 requiredSpecialistAgentTypeId: "repo_tools_dev"
               })
@@ -997,14 +988,14 @@ function buildImplementationStories(factory: FactoryRunInput) {
         },
         {
           id: "story-api-flow",
-          title: "Build the API and data flow",
-          description: `Create the Express and data foundation for ${factory.appName}.`,
+          title: "Build the first interactive product flow",
+          description: `Create the first usable product workflow for ${factory.appName}.`,
           acceptanceCriteria: ["Core product flow implemented."],
           preferredSpecialistAgentTypeId: "backend_dev" as const,
           tasks: [
             createFactoryTask({
               id: "task-api-flow",
-              instruction: `Implement the Express API, shared contracts, and the first end-to-end data flow for ${factory.appName}. Connect the frontend shell to the API with clear developer setup notes. When complete, explicitly say "Core product flow implemented."`,
+              instruction: `Implement the first interactive product flow for ${factory.appName}. Connect the React shell to local fixtures, lightweight in-repo data adapters, or mock service boundaries so the application works locally without hosted deployment or external database setup. When complete, explicitly say "Core product flow implemented."`,
               expectedOutcome: "Core product flow implemented.",
               requiredSpecialistAgentTypeId: "backend_dev"
             })
@@ -1030,14 +1021,14 @@ function buildImplementationStories(factory: FactoryRunInput) {
         },
         {
           id: "story-railway-data-flow",
-          title: "Build the server and data flow",
-          description: `Create the Railway-backed data flow for ${factory.appName}.`,
+          title: "Build the first interactive product flow",
+          description: `Create the first usable product workflow for ${factory.appName}.`,
           acceptanceCriteria: ["Core product flow implemented."],
           preferredSpecialistAgentTypeId: "backend_dev" as const,
           tasks: [
             createFactoryTask({
               id: "task-railway-data-flow",
-              instruction: `Implement the first server and database flow for ${factory.appName} using the Railway Postgres target. Add the data model, the first interactive flow, and setup notes for local and hosted environments. When complete, explicitly say "Core product flow implemented."`,
+              instruction: `Implement the first interactive product flow for ${factory.appName}. Use local fixtures, lightweight in-repo data adapters, or mock server boundaries so the product works locally while leaving Railway and hosted database setup for a later follow-up. When complete, explicitly say "Core product flow implemented."`,
               expectedOutcome: "Core product flow implemented.",
               requiredSpecialistAgentTypeId: "backend_dev"
             })
@@ -1064,14 +1055,14 @@ function buildImplementationStories(factory: FactoryRunInput) {
         },
         {
           id: "story-supabase-flow",
-          title: "Build the Supabase-backed flow",
-          description: `Create the first Supabase-backed product flow for ${factory.appName}.`,
+          title: "Build the first interactive product flow",
+          description: `Create the first usable product workflow for ${factory.appName}.`,
           acceptanceCriteria: ["Core product flow implemented."],
           preferredSpecialistAgentTypeId: "backend_dev" as const,
           tasks: [
             createFactoryTask({
               id: "task-supabase-flow",
-              instruction: `Implement the first end-to-end product flow for ${factory.appName} using Supabase. Add the initial data model, auth or session handling when appropriate, and the first interactive workflow. When complete, explicitly say "Core product flow implemented."`,
+              instruction: `Implement the first interactive product flow for ${factory.appName}. Use local fixtures, seeded demo content, or clear adapter seams so the application works locally while leaving Supabase wiring, auth provider setup, and hosted deployment for a later follow-up. When complete, explicitly say "Core product flow implemented."`,
               expectedOutcome: "Core product flow implemented.",
               requiredSpecialistAgentTypeId: "backend_dev"
             })
@@ -1114,7 +1105,7 @@ function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitio
   const repositoryLabel = formatRepositoryLabel(appSpec.repository.owner, appSpec.repository.name);
 
   return {
-    summary: `${appSpec.appName} is complete when ${repositoryLabel} contains a verified first delivery slice on ${appSpec.stack.label}, the production readiness gate passes, and the ${appSpec.deployment.provider} handoff is ready for operator review.`,
+    summary: `${appSpec.appName} is complete when ${repositoryLabel} contains a verified first delivery slice on ${appSpec.stack.label}, the production readiness gate passes, and the delivery summary is ready for operator review.`,
     completionCriteria: [
       {
         id: "definition-of-done:intake",
@@ -1130,7 +1121,7 @@ function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitio
       },
       {
         id: "definition-of-done:delivery",
-        description: "Production readiness is verified, and the deployment handoff plus delivery summary are prepared for operator review."
+        description: "Production readiness is verified, and the delivery summary is prepared for operator review."
       }
     ],
     verificationCriteria: [
@@ -1319,10 +1310,6 @@ function buildFactoryPhaseContracts(
           description: "Production readiness gate passed."
         },
         {
-          id: "factory-delivery:deployment-handoff",
-          description: "Deployment handoff prepared."
-        },
-        {
           id: "factory-delivery:delivery-summary",
           description: "Delivery summary prepared."
         }
@@ -1343,25 +1330,11 @@ function buildFactoryPhaseContracts(
           expectedValue: "Production readiness gate passed."
         },
         {
-          id: "factory-delivery:handoff-evidence",
-          description: 'Execution evidence includes "Deployment handoff prepared."',
-          evidenceKind: "task_evidence",
-          target: "task-deployment-handoff",
-          expectedValue: "Deployment handoff prepared."
-        },
-        {
           id: "factory-delivery:summary-evidence",
           description: 'Execution evidence includes "Delivery summary prepared."',
           evidenceKind: "task_evidence",
           target: "task-delivery-summary",
           expectedValue: "Delivery summary prepared."
-        },
-        {
-          id: "factory-delivery:handoff-artifact",
-          description: "Deployment handoff artifact is marked completed.",
-          evidenceKind: "artifact_status",
-          target: "factory-artifact:deployment-handoff",
-          expectedValue: "completed"
         },
         {
           id: "factory-delivery:summary-artifact",
@@ -1481,9 +1454,6 @@ function buildFactoryArtifacts(
   const bootstrapCompleted =
     hasTaskCompleted(input.phaseExecution, "task-repository-bootstrap") ||
     hasPhaseCompleted(input.phaseExecution, "factory-bootstrap");
-  const deploymentHandoffCompleted =
-    hasTaskCompleted(input.phaseExecution, "task-deployment-handoff") ||
-    hasPhaseCompleted(input.phaseExecution, "factory-delivery");
   const deliverySummaryCompleted =
     Boolean(factory.deliverySummary?.trim()) ||
     hasTaskCompleted(input.phaseExecution, "task-delivery-summary") ||
@@ -1513,22 +1483,6 @@ function buildFactoryArtifacts(
       url: null,
       path: factory.repository.localPath,
       provider: null,
-      updatedAt: input.updatedAt
-    },
-    {
-      id: "factory-artifact:deployment-handoff",
-      kind: "deployment_handoff",
-      title: "Deployment handoff",
-      summary: `Prepare the ${factory.deployment.provider} handoff for ${factory.appName}.`,
-      status:
-        deploymentHandoffCompleted
-          ? "completed"
-          : factory.currentStage === "delivery"
-            ? "active"
-            : "planned",
-      url: factory.deployment.url,
-      path: null,
-      provider: factory.deployment.provider,
       updatedAt: input.updatedAt
     },
     {

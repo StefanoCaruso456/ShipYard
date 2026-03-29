@@ -495,8 +495,6 @@ function artifactSourceTaskIds(artifactId: string) {
     case "factory-artifact:repository":
     case "factory-artifact:bootstrap-plan":
       return ["task-repository-bootstrap"];
-    case "factory-artifact:deployment-handoff":
-      return ["task-deployment-handoff"];
     case "factory-artifact:delivery-summary":
       return ["task-delivery-summary"];
     default:
@@ -509,7 +507,6 @@ function artifactSourceStoryIds(artifactId: string) {
     case "factory-artifact:repository":
     case "factory-artifact:bootstrap-plan":
       return ["story-repository-bootstrap"];
-    case "factory-artifact:deployment-handoff":
     case "factory-artifact:delivery-summary":
       return ["story-delivery-handoff"];
     default:

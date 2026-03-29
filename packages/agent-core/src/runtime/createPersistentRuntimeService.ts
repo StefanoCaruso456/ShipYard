@@ -334,7 +334,7 @@ export async function createPersistentRuntimeService(
             productBrief: instruction,
             workspacePath:
               input.project?.folder?.displayPath?.trim() || factoryInput.repository.name,
-            deploymentUrl: factoryInput.deployment.url ?? null,
+            deploymentUrl: factoryInput.deployment?.url ?? null,
             phaseExecution
           })
         : null,

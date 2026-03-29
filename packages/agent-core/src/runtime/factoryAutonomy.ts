@@ -57,47 +57,6 @@ export function buildFactoryAutonomyPolicy(options: {
     );
   }
 
-  if (
-    options.appSpec.deployment.provider !== "manual" &&
-    !options.appSpec.deployment.projectName?.trim()
-  ) {
-    riskEscalationRules.push(
-      createRiskEscalationRule({
-        phaseId: "factory-delivery",
-        stageId: "delivery",
-        title: "Resolve deployment destination",
-        summary: `Pause before delivery because the ${options.appSpec.deployment.provider} project target is not defined.`,
-        rationale:
-          "Factory cannot safely finalize the delivery handoff when the hosted deployment destination is ambiguous.",
-        trigger: "deployment_project_missing",
-        pauseReason: "ambiguous_deployment_target",
-        approvalGateKind: "deployment",
-        gateTitle: "Deployment target review",
-        gateInstructions:
-          `Confirm the ${options.appSpec.deployment.provider} project destination before the delivery handoff is finalized.`
-      })
-    );
-  }
-
-  if (options.appSpec.deployment.provider === "manual") {
-    riskEscalationRules.push(
-      createRiskEscalationRule({
-        phaseId: "factory-delivery",
-        stageId: "delivery",
-        title: "Approve manual deployment handoff",
-        summary: "Pause before delivery because deployment is manual and cannot be verified end-to-end automatically.",
-        rationale:
-          "Factory should pause before final delivery when release verification depends on manual deployment execution.",
-        trigger: "deployment_provider_manual",
-        pauseReason: "high_risk_deployment_target",
-        approvalGateKind: "deployment",
-        gateTitle: "Manual deployment review",
-        gateInstructions:
-          "Review the manual deployment plan and release risk before Factory finalizes the delivery handoff."
-      })
-    );
-  }
-
   return {
     version: 1,
     mode: "factory",

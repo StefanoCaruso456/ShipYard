@@ -1278,7 +1278,7 @@ export type FactoryRunInput = {
     visibility?: FactoryRepositoryVisibility | null;
     baseBranch?: string | null;
   };
-  deployment: {
+  deployment?: {
     provider: FactoryDeploymentProviderId;
     projectName?: string | null;
     environment?: string | null;

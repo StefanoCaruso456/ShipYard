@@ -86,6 +86,13 @@ function buildFactoryReadme(
   productBrief: string,
   stack: ReturnType<typeof getFactoryStackSummary>
 ) {
+  const deployment = factory.deployment ?? {
+    provider: "manual",
+    projectName: null,
+    environment: null,
+    url: null
+  };
+
   return [
     `# ${factory.appName}`,
     "",
@@ -100,8 +107,8 @@ function buildFactoryReadme(
     `- Template: ${stack.label}`,
     `- Frontend: ${stack.frontend}`,
     `- Backend: ${stack.backend}`,
-    `- Data: ${stack.data}`,
-    `- Deployment: ${stack.deployment}`,
+    `- Data target: ${stack.data}`,
+    "- Delivery path: manual operator deployment after the application works locally.",
     "",
     "## Repository Target",
     "",
@@ -111,15 +118,17 @@ function buildFactoryReadme(
     `- Visibility: ${factory.repository.visibility ?? "private"}`,
     `- Base branch: ${factory.repository.baseBranch ?? "main"}`,
     "",
-    "## Deployment Target",
+    "## Delivery Policy",
     "",
-    `- Provider: ${factory.deployment.provider}`,
-    factory.deployment.projectName?.trim()
-      ? `- Project: ${factory.deployment.projectName.trim()}`
-      : "- Project: (not set yet)",
-    factory.deployment.environment?.trim()
-      ? `- Environment: ${factory.deployment.environment.trim()}`
-      : "- Environment: (not set yet)",
+    `- Deployment: ${deployment.provider}`,
+    deployment.projectName?.trim()
+      ? `- Project hint: ${deployment.projectName.trim()}`
+      : null,
+    deployment.environment?.trim()
+      ? `- Environment hint: ${deployment.environment.trim()}`
+      : null,
+    "- Build the application locally first and leave hosted deployment setup for manual follow-up.",
+    "- Defer live database provisioning and cloud service wiring unless a later task explicitly requests it.",
     "",
     "## Notes",
     "",

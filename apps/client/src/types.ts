@@ -115,7 +115,7 @@ export type RuntimeFactoryRunInput = {
     visibility?: RuntimeFactoryRepositoryVisibility | null;
     baseBranch?: string | null;
   };
-  deployment: {
+  deployment?: {
     provider: RuntimeFactoryDeploymentProviderId;
     projectName?: string | null;
     environment?: string | null;
@@ -174,9 +174,6 @@ export type RuntimeFactoryComposerDraft = {
   repositoryOwner: string;
   repositoryName: string;
   repositoryVisibility: RuntimeFactoryRepositoryVisibility;
-  deploymentProvider: RuntimeFactoryDeploymentProviderId;
-  deploymentProjectName: string;
-  deploymentEnvironment: string;
 };
 
 export type AttachmentKind =
@@ -1084,7 +1081,6 @@ export type RuntimeThreadFocusedRun = {
         appName: string;
         stackLabel: string;
         repositoryName: string;
-        deploymentProvider: RuntimeFactoryDeploymentProviderId;
         currentStage: RuntimeFactoryRunState["currentStage"];
         workspacePath: string | null;
       }
