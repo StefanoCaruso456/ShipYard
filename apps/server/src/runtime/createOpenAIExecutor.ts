@@ -14,12 +14,14 @@ import {
   resolveOperatingMode,
   resolveRelevantFilesForRun
 } from "@shipyard/agent-core";
-import { generateText } from "ai";
+import { generateText, Output } from "ai";
 
 import {
   applyRuntimeWorkspacePlan,
   extractRuntimeWorkspacePlan,
-  type ExtractedRuntimeWorkspacePlan
+  runtimeWorkspacePlanSchema,
+  type ExtractedRuntimeWorkspacePlan,
+  type RuntimeWorkspacePlan
 } from "./runtimeWorkspacePlan";
 
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
@@ -38,7 +40,18 @@ type CreateOpenAIExecutorOptions = {
   repoRoot?: string;
 };
 
-type TextGenerationResult = Awaited<ReturnType<typeof generateText>>;
+type UsageCarrier = {
+  usage?: {
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
+  } | null;
+  totalUsage?: {
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
+  } | null;
+};
 
 type TokenUsageTotals = {
   inputTokens: number | null;
@@ -162,23 +175,18 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         runtimeWorkspaceRoot != null ? extractRuntimeWorkspacePlan(rawResponseText) : null;
       const workspaceProvider = resolveWorkspaceFilePlanProvider(run);
       let usageTotals = extractTokenUsageTotals(generated);
-      let runtimeWorkspacePlanRepairAttempted = false;
-      let runtimeWorkspacePlanRepairSucceeded = false;
+      const usesStructuredRuntimeWorkspacePlan =
+        runtimeWorkspaceRoot != null && requiresRuntimeWorkspacePlan;
+      let runtimeWorkspacePlanGenerationAttempted = false;
+      let runtimeWorkspacePlanGenerationSucceeded = false;
+      let runtimeWorkspacePlanSource: "embedded_response" | "structured_output" | "none" =
+        hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan) ? "embedded_response" : "none";
 
-      const needsRuntimeWorkspacePlanRepair =
-        runtimeWorkspaceRoot != null &&
-        requiresRuntimeWorkspacePlan &&
-        Boolean(
-          extractedWorkspacePlan?.error ||
-            !extractedWorkspacePlan?.plan ||
-            extractedWorkspacePlan.plan.operations.length === 0
-        );
-
-      if (needsRuntimeWorkspacePlanRepair) {
-        runtimeWorkspacePlanRepairAttempted = true;
-        modelSpan?.addEvent("runtime_workspace_plan_repair_requested", {
+      if (usesStructuredRuntimeWorkspacePlan && !hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan)) {
+        runtimeWorkspacePlanGenerationAttempted = true;
+        modelSpan?.addEvent("runtime_workspace_plan_generation_requested", {
           message:
-            "Initial model response did not include a valid runtime workspace plan. Running one repair pass.",
+            "Visible model response did not include a usable runtime workspace plan. Generating a structured workspace plan.",
           metadata: {
             taskId: currentTask?.id ?? null,
             workspaceProvider,
@@ -186,61 +194,60 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
           }
         });
 
-        const repairedPlanGeneration = await generateTextImpl({
-          model: openai(options.config.modelId),
-          system: systemPrompt,
-          prompt: buildRuntimeWorkspacePlanRepairPrompt({
-            run,
-            task: currentTask,
-            rawResponseText
-          }),
-          maxOutputTokens: Math.min(maxOutputTokens, 900)
-        });
-        usageTotals = mergeTokenUsageTotals(
-          usageTotals,
-          extractTokenUsageTotals(repairedPlanGeneration)
-        );
+        try {
+          const generatedWorkspacePlan = await generateTextImpl({
+            model: openai(options.config.modelId),
+            system: systemPrompt,
+            prompt: buildRuntimeWorkspacePlanPrompt({
+              run,
+              task: currentTask,
+              rawResponseText
+            }),
+            output: Output.object({
+              schema: runtimeWorkspacePlanSchema
+            }),
+            maxOutputTokens: 900
+          });
 
-        const repairedPlanBlockText = normalizeLocalFilePlanBlockText(
-          repairedPlanGeneration.text.trim()
-        );
-
-        if (repairedPlanBlockText) {
-          const repairedResponseText = replaceOrAppendLocalFilePlanBlock(
-            rawResponseText,
-            repairedPlanBlockText
+          usageTotals = mergeTokenUsageTotals(
+            usageTotals,
+            extractTokenUsageTotals(generatedWorkspacePlan)
           );
-          const repairedExtractedWorkspacePlan =
-            extractRuntimeWorkspacePlan(repairedResponseText);
 
-          if (
-            !repairedExtractedWorkspacePlan.error &&
-            repairedExtractedWorkspacePlan.plan?.operations.length
-          ) {
-            rawResponseText = repairedResponseText;
-            extractedWorkspacePlan = repairedExtractedWorkspacePlan;
-            runtimeWorkspacePlanRepairSucceeded = true;
-            modelSpan?.addEvent("runtime_workspace_plan_repair_succeeded", {
-              message: "Recovered a valid runtime workspace plan from the repair pass.",
+          const normalizedWorkspacePlan = normalizeGeneratedRuntimeWorkspacePlan(
+            generatedWorkspacePlan.output
+          );
+
+          if (normalizedWorkspacePlan && normalizedWorkspacePlan.operations.length > 0) {
+            extractedWorkspacePlan = {
+              strippedText: stripLocalFilePlanBlock(rawResponseText),
+              plan: normalizedWorkspacePlan,
+              error: null
+            };
+            runtimeWorkspacePlanGenerationSucceeded = true;
+            runtimeWorkspacePlanSource = "structured_output";
+            modelSpan?.addEvent("runtime_workspace_plan_generation_succeeded", {
+              message: "Generated a structured runtime workspace plan for the active Factory task.",
               metadata: {
                 taskId: currentTask?.id ?? null,
-                operationCount: repairedExtractedWorkspacePlan.plan.operations.length
+                operationCount: normalizedWorkspacePlan.operations.length
               }
             });
           } else {
-            modelSpan?.addEvent("runtime_workspace_plan_repair_failed", {
-              message:
-                repairedExtractedWorkspacePlan.error ??
-                "Repair pass did not produce a valid runtime workspace plan.",
+            modelSpan?.addEvent("runtime_workspace_plan_generation_failed", {
+              message: "Structured workspace plan generation returned no operations.",
               metadata: {
                 taskId: currentTask?.id ?? null,
                 workspaceProvider
               }
             });
           }
-        } else {
-          modelSpan?.addEvent("runtime_workspace_plan_repair_failed", {
-            message: "Repair pass returned no local file plan block.",
+        } catch (error) {
+          modelSpan?.addEvent("runtime_workspace_plan_generation_failed", {
+            message:
+              error instanceof Error
+                ? error.message
+                : "Structured workspace plan generation failed.",
             metadata: {
               taskId: currentTask?.id ?? null,
               workspaceProvider
@@ -252,8 +259,9 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       modelSpan?.annotate({
         workspaceProvider,
         runtimeWorkspacePlanRequired: requiresRuntimeWorkspacePlan,
-        runtimeWorkspacePlanRepairAttempted,
-        runtimeWorkspacePlanRepairSucceeded,
+        runtimeWorkspacePlanGenerationAttempted,
+        runtimeWorkspacePlanGenerationSucceeded,
+        runtimeWorkspacePlanSource,
         runtimeWorkspacePlanPresent: Boolean(extractedWorkspacePlan?.plan),
         runtimeWorkspacePlanOperationCount:
           extractedWorkspacePlan?.plan?.operations.length ?? 0
@@ -269,7 +277,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         (!extractedWorkspacePlan?.plan || extractedWorkspacePlan.plan.operations.length === 0)
       ) {
         throw new Error(
-          `Factory task ${currentTask?.id ?? "current-task"} must include a non-empty <local-file-plan> block for the connected runtime workspace.${runtimeWorkspacePlanRepairAttempted ? " The initial draft and one repair pass both failed to produce a valid workspace plan." : ""}`
+          `Factory task ${currentTask?.id ?? "current-task"} must produce a non-empty runtime workspace plan for the connected runtime workspace.${runtimeWorkspacePlanGenerationAttempted ? " The visible response and structured plan pass both failed to produce a valid workspace plan." : ""}`
         );
       }
 
@@ -607,9 +615,22 @@ function renderRunContext(
 
 function renderWorkspaceFilePlanInstructions(run: AgentRunRecord) {
   const provider = resolveWorkspaceFilePlanProvider(run);
+  const currentTask = resolveCurrentPhaseTask(run);
+  const requiresRuntimeWorkspacePlan = shouldRequireRuntimeWorkspacePlan(run, currentTask);
 
   if (!provider) {
     return null;
+  }
+
+  if (provider === "runtime" && requiresRuntimeWorkspacePlan) {
+    return [
+      "Runtime workspace execution contract:",
+      "- This Factory task writes to the connected runtime workspace.",
+      "- Do not append a <local-file-plan> block to the visible response for this task.",
+      "- The runtime will request the machine-readable workspace operations separately as structured output.",
+      "- In the visible response, describe what changed, what remains, and whether the task is complete.",
+      "- Only claim completion when the structured workspace plan represents the real edits needed for this task."
+    ].join("\n");
   }
 
   return [
@@ -661,12 +682,12 @@ function renderCompletionContract(run: AgentRunRecord) {
     "Completion contract:",
     `- Only when the current task is actually complete, include this exact final standalone line: ${expectedOutcome}`,
     `- If the task is not complete yet, do not output "${expectedOutcome}". Explain what remains instead.`,
-    "- For runtime-backed Factory build tasks, the completion line must correspond to real workspace edits represented in the local file plan.",
+    "- For runtime-backed Factory build tasks, the completion line must correspond to real workspace edits represented in the runtime workspace plan.",
     "- Make sure the visible response matches the actual workspace changes and execution evidence."
   ].join("\n");
 }
 
-function buildRuntimeWorkspacePlanRepairPrompt(input: {
+function buildRuntimeWorkspacePlanPrompt(input: {
   run: AgentRunRecord;
   task: ReturnType<typeof resolveCurrentPhaseTask>;
   rawResponseText: string;
@@ -675,16 +696,15 @@ function buildRuntimeWorkspacePlanRepairPrompt(input: {
   const expectedOutcome = input.task?.expectedOutcome?.trim();
 
   return [
-    "Your previous response for a connected runtime workspace task was missing a valid runtime workspace plan.",
-    "Return only the missing <local-file-plan>...</local-file-plan> block.",
-    "Do not include any prose, headings, code fences, or explanation outside the tags.",
-    "Inside the tags emit raw JSON with exactly this shape: {\"operations\":[...]}",
+    "Generate only the machine-readable runtime workspace plan for the current task.",
+    "Do not repeat the visible response. The runtime will apply this plan directly.",
+    "Return the exact file and directory operations needed for this task and nothing else.",
     "Every operation path must stay relative to the connected runtime workspace. Never use absolute paths or .. segments.",
     "This current task requires real workspace edits. Do not return an empty operations array.",
     input.task?.id ? `Task id: ${input.task.id}` : null,
     `Task instruction:\n${currentInstruction}`,
     expectedOutcome ? `Expected outcome:\n${expectedOutcome}` : null,
-    `Previous draft response:\n${input.rawResponseText}`
+    `Visible response draft:\n${input.rawResponseText}`
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -762,43 +782,7 @@ function stripLocalFilePlanBlock(text: string) {
   return text.replace(LOCAL_FILE_PLAN_BLOCK_PATTERN, "").trim();
 }
 
-function normalizeLocalFilePlanBlockText(text: string) {
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const taggedMatch = trimmed.match(LOCAL_FILE_PLAN_BLOCK_PATTERN);
-
-  if (taggedMatch) {
-    const taggedBlock = taggedMatch[0].trim();
-
-    if (hasNonEmptyRuntimeWorkspacePlan(extractRuntimeWorkspacePlan(taggedBlock))) {
-      return taggedBlock;
-    }
-  }
-
-  const wrappedBlock = `<local-file-plan>\n${trimmed}\n</local-file-plan>`;
-
-  return hasNonEmptyRuntimeWorkspacePlan(extractRuntimeWorkspacePlan(wrappedBlock))
-    ? wrappedBlock
-    : null;
-}
-
-function replaceOrAppendLocalFilePlanBlock(rawResponseText: string, localFilePlanBlock: string) {
-  if (!rawResponseText.trim()) {
-    return localFilePlanBlock;
-  }
-
-  if (LOCAL_FILE_PLAN_BLOCK_PATTERN.test(rawResponseText)) {
-    return rawResponseText.replace(LOCAL_FILE_PLAN_BLOCK_PATTERN, localFilePlanBlock);
-  }
-
-  return `${rawResponseText.trim()}\n\n${localFilePlanBlock}`;
-}
-
-function extractTokenUsageTotals(result: TextGenerationResult): TokenUsageTotals {
+function extractTokenUsageTotals(result: UsageCarrier): TokenUsageTotals {
   return {
     inputTokens: result.totalUsage?.inputTokens ?? result.usage?.inputTokens ?? null,
     outputTokens: result.totalUsage?.outputTokens ?? result.usage?.outputTokens ?? null,
@@ -833,6 +817,14 @@ function hasNonEmptyRuntimeWorkspacePlan(
       !extractedWorkspacePlan.error &&
       extractedWorkspacePlan.plan.operations.length > 0
   );
+}
+
+function normalizeGeneratedRuntimeWorkspacePlan(
+  value: unknown
+): RuntimeWorkspacePlan | null {
+  const parsed = runtimeWorkspacePlanSchema.safeParse(value);
+
+  return parsed.success ? parsed.data : null;
 }
 
 function resolveVisibleResponseText(
