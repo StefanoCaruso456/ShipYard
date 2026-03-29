@@ -233,7 +233,7 @@ test("createOpenAIExecutor uses a local file plan summary when the response is p
   assert.equal(result.summary, "Prepared a local file plan for the connected workspace.");
 });
 
-test("createOpenAIExecutor applies workspace plans for runtime-backed projects", async () => {
+test("createOpenAIExecutor applies workspace plans for runtime-backed Factory projects even when the project is live", async () => {
   let capturedPrompt = "";
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
@@ -272,7 +272,7 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed projects",
         project: {
           id: "project-runtime",
           name: "Runtime project",
-          kind: "local",
+          kind: "live",
           environment: "Factory workspace",
           description: "Connected runtime workspace",
           folder: {
@@ -355,7 +355,7 @@ test("createOpenAIExecutor appends the exact Factory completion outcome after ru
         project: {
           id: "project-runtime",
           name: "Runtime project",
-          kind: "local",
+          kind: "live",
           environment: "Factory workspace",
           description: "Connected runtime workspace",
           folder: {
@@ -425,7 +425,7 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
         project: {
           id: "project-runtime",
           name: "Runtime project",
-          kind: "local",
+          kind: "live",
           environment: "Factory workspace",
           description: "Connected runtime workspace",
           folder: {
@@ -494,7 +494,7 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
         project: {
           id: "project-runtime",
           name: "Runtime project",
-          kind: "local",
+          kind: "live",
           environment: "Factory workspace",
           description: "Connected runtime workspace",
           folder: {
@@ -529,7 +529,7 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
   }
 });
 
-test("createOpenAIExecutor rejects prose-only Factory implementation responses for runtime workspaces", async () => {
+test("createOpenAIExecutor rejects prose-only Factory implementation responses for live runtime workspaces", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -563,7 +563,7 @@ test("createOpenAIExecutor rejects prose-only Factory implementation responses f
           project: {
             id: "project-runtime",
             name: "Runtime project",
-            kind: "local",
+            kind: "live",
             environment: "Factory workspace",
             description: "Connected runtime workspace",
             folder: {

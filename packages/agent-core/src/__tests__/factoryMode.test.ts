@@ -128,6 +128,47 @@ test("compileFactoryTaskSubmission adds risk-driven Factory approval gates only 
   );
 });
 
+test("compileFactoryTaskSubmission does not block bootstrap when the repository owner is omitted", () => {
+  const compiled = compileFactoryTaskSubmission({
+    input: {
+      instruction: "Build a Jira-style project management app.",
+      factory: {
+        appName: "Jira",
+        stackTemplateId: "nextjs_supabase_vercel",
+        repository: {
+          provider: "github",
+          owner: null,
+          name: "jira",
+          visibility: "private",
+          baseBranch: "main"
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "jira",
+          environment: "production"
+        }
+      }
+    },
+    workspacePath: "/tmp/factory-workspaces/jira-20260328"
+  });
+
+  assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate ?? null, null);
+  assert.ok(
+    compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-autonomy-policy" &&
+        item.content.includes("Risk escalation rules:\n- none")
+    )
+  );
+  assert.ok(
+    !compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-autonomy-policy" &&
+        item.content.includes("ambiguous_repository_target")
+    )
+  );
+});
+
 test("createFactoryRunState stores a typed completion contract", () => {
   const factoryInput = normalizeFactoryRunInput({
     appName: "Ops Portal",
