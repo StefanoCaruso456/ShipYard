@@ -1048,6 +1048,188 @@ test("createOpenAIExecutor falls back to a bootstrap scaffold plan when the stru
   }
 });
 
+test("createOpenAIExecutor repairs placeholder implementation plans and rewrites incomplete implementation drafts", async () => {
+  let callCount = 0;
+  const structuredPlanPrompts: string[] = [];
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string; output?: unknown }) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text:
+            "The product flow is not complete yet. I still need to wire the interactive experience in the connected runtime workspace before I can claim completion.",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          },
+          totalUsage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          }
+        };
+      }
+
+      structuredPlanPrompts.push(input.prompt ?? "");
+
+      if (callCount === 2) {
+        return {
+          text: "",
+          output: input.output
+            ? {
+                operations: [
+                  {
+                    kind: "write_file",
+                    path: "TASK-NEEDS-IMPLEMENTATION.txt",
+                    content: "Interactive product flow still needs implementation.\n"
+                  }
+                ]
+              }
+            : undefined,
+          usage: {
+            inputTokens: 6,
+            outputTokens: 14,
+            totalTokens: 20
+          },
+          totalUsage: {
+            inputTokens: 6,
+            outputTokens: 14,
+            totalTokens: 20
+          }
+        };
+      }
+
+      return {
+        text: "",
+        output: input.output
+          ? {
+              operations: [
+                {
+                  kind: "write_file",
+                  path: "app/play/page.tsx",
+                  content:
+                    "export default function PlayPage() { return <main>Pong match ready.</main>; }\n"
+                },
+                {
+                  kind: "write_file",
+                  path: "lib/pong-fixtures.ts",
+                  content: "export const seededMatches = [{ id: 'match-1', score: '0-0' }];\n"
+                }
+              ]
+            }
+          : undefined,
+        usage: {
+          inputTokens: 5,
+          outputTokens: 16,
+          totalTokens: 21
+        },
+        totalUsage: {
+          inputTokens: 5,
+          outputTokens: 16,
+          totalTokens: 21
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const factoryState = createFactoryRunState({
+    input: {
+      appName: "Pong",
+      stackTemplateId: "nextjs_supabase_vercel",
+      repository: {
+        provider: "github",
+        owner: "acme",
+        name: "pong",
+        visibility: "private",
+        baseBranch: "main"
+      },
+      deployment: {
+        provider: "vercel",
+        projectName: "pong",
+        environment: "production"
+      }
+    },
+    productBrief: "Build a local-first pong game with an interactive play flow.",
+    workspacePath: runtimeRoot
+  });
+  factoryState.currentStage = "implementation";
+
+  try {
+    const result = await executor(
+      createRun("pong video build now", {
+        requestedOperatingMode: "factory",
+        operatingMode: "factory",
+        factory: factoryState,
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "live",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "pong",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-implementation",
+          phaseName: "Factory implementation",
+          storyId: "story-supabase-flow",
+          storyTitle: "Supabase flow",
+          taskId: "task-supabase-flow",
+          taskInstruction:
+            "Implement the first interactive product flow for Pong. Use local fixtures, seeded demo content, or clear adapter seams so the application works locally while leaving Supabase wiring, auth provider setup, and hosted deployment for a later follow-up. When complete, explicitly say \"Core product flow implemented.\"",
+          expectedOutcome: "Core product flow implemented."
+        })
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.equal(callCount, 3);
+    assert.match(structuredPlanPrompts[0] ?? "", /Implementation task guidance:/);
+    assert.match(
+      structuredPlanPrompts[0] ?? "",
+      /Do not write TASK-NEEDS-IMPLEMENTATION\.txt, blocker notes, TODO files, or documentation-only changes/
+    );
+    assert.match(structuredPlanPrompts[1] ?? "", /Rejected plan reason:/);
+    assert.match(
+      structuredPlanPrompts[1] ?? "",
+      /only changed placeholder, note, or non-implementation files/
+    );
+    assert.doesNotMatch(result.responseText ?? "", /not complete/i);
+    assert.match(
+      result.responseText ?? "",
+      /Implemented the first interactive product flow for Pong in the connected runtime workspace/
+    );
+    assert.match(result.responseText ?? "", /Core product flow implemented\./);
+    assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, [
+      "app/play/page.tsx",
+      "lib/pong-fixtures.ts"
+    ]);
+    assert.match(
+      await readFile(path.join(runtimeRoot, "app/play/page.tsx"), "utf8"),
+      /Pong match ready/
+    );
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
 test("createOpenAIExecutor rejects Factory implementation responses when both the visible response and structured plan pass miss the runtime workspace plan", async () => {
   let callCount = 0;
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
