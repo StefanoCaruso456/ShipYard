@@ -38,25 +38,6 @@ export function buildFactoryAutonomyPolicy(options: {
     options.appSpec.repository.name
   );
 
-  if (!options.appSpec.repository.owner) {
-    riskEscalationRules.push(
-      createRiskEscalationRule({
-        phaseId: "factory-bootstrap",
-        stageId: "bootstrap",
-        title: "Resolve repository destination",
-        summary: "Pause before bootstrap because the repository owner is not defined.",
-        rationale:
-          "Factory cannot safely publish or scaffold against an ambiguous repository destination.",
-        trigger: "repository_owner_missing",
-        pauseReason: "ambiguous_repository_target",
-        approvalGateKind: "architecture",
-        gateTitle: "Repository destination review",
-        gateInstructions:
-          "Confirm the repository owner or destination before bootstrap writes begin."
-      })
-    );
-  }
-
   if (options.appSpec.repository.visibility === "public") {
     riskEscalationRules.push(
       createRiskEscalationRule({

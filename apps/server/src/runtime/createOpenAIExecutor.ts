@@ -149,6 +149,15 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       const requiresRuntimeWorkspacePlan = shouldRequireRuntimeWorkspacePlan(run, currentTask);
       const extractedWorkspacePlan =
         runtimeWorkspaceRoot != null ? extractRuntimeWorkspacePlan(rawResponseText) : null;
+      const workspaceProvider = resolveWorkspaceFilePlanProvider(run);
+
+      modelSpan?.annotate({
+        workspaceProvider,
+        runtimeWorkspacePlanRequired: requiresRuntimeWorkspacePlan,
+        runtimeWorkspacePlanPresent: Boolean(extractedWorkspacePlan?.plan),
+        runtimeWorkspacePlanOperationCount:
+          extractedWorkspacePlan?.plan?.operations.length ?? 0
+      });
 
       if (runtimeWorkspaceRoot != null && extractedWorkspacePlan?.error) {
         throw new Error(extractedWorkspacePlan.error);
@@ -171,6 +180,10 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
               plan: extractedWorkspacePlan.plan
             })
           : null;
+      modelSpan?.annotate({
+        runtimeWorkspacePlanApplied: appliedWorkspacePlan != null,
+        runtimeWorkspacePlanChangedFiles: appliedWorkspacePlan?.changedFiles ?? []
+      });
       const responseText =
         runtimeWorkspaceRoot != null
           ? normalizeRuntimeWorkspaceResponse({
@@ -493,16 +506,9 @@ function renderRunContext(
 }
 
 function renderWorkspaceFilePlanInstructions(run: AgentRunRecord) {
-  if (run.project?.kind !== "local") {
-    return null;
-  }
+  const provider = resolveWorkspaceFilePlanProvider(run);
 
-  const provider = run.project.folder?.provider;
-
-  if (
-    provider !== "browser-file-system-access" &&
-    provider !== "runtime"
-  ) {
+  if (!provider) {
     return null;
   }
 
@@ -687,8 +693,7 @@ function shouldRequireRuntimeWorkspacePlan(
   task: ReturnType<typeof resolveCurrentPhaseTask>
 ) {
   return (
-    run.project?.kind === "local" &&
-    run.project.folder?.provider === "runtime" &&
+    resolveRuntimeWorkspaceRoot(run) != null &&
     (run.phaseExecution?.current.phaseId === "factory-bootstrap" ||
       run.phaseExecution?.current.phaseId === "factory-implementation") &&
     Boolean(task?.expectedOutcome?.trim())
@@ -710,14 +715,26 @@ function resolveCurrentPhaseTask(run: AgentRunRecord) {
 
 function resolveRuntimeWorkspaceRoot(run: AgentRunRecord) {
   if (
-    run.project?.kind !== "local" ||
-    run.project.folder?.provider !== "runtime" ||
+    run.project?.folder?.provider !== "runtime" ||
     !run.project.folder.displayPath?.trim()
   ) {
     return null;
   }
 
   return run.project.folder.displayPath.trim();
+}
+
+function resolveWorkspaceFilePlanProvider(run: AgentRunRecord) {
+  const provider = run.project?.folder?.provider;
+
+  if (
+    provider !== "browser-file-system-access" &&
+    provider !== "runtime"
+  ) {
+    return null;
+  }
+
+  return provider;
 }
 
 function responseIndicatesIncompleteTask(text: string) {
