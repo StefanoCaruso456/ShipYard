@@ -210,34 +210,71 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         });
 
         try {
-          const generatedWorkspacePlan = await generateTextImpl(
-            withOptionalMaxOutputTokens(
-              {
-                model: openai(options.config.modelId),
-                system: systemPrompt,
-                prompt: buildRuntimeWorkspacePlanPrompt({
-                  run,
-                  task: currentTask,
-                  rawResponseText
-                }),
-                output: Output.object({
-                  schema: runtimeWorkspaceStructuredOutputSchema
-                })
-              },
-              factoryExecution ? null : 900
-            )
-          );
+          let normalizedWorkspacePlan = await generateStructuredRuntimeWorkspacePlan({
+            generateTextImpl,
+            openai,
+            modelId: options.config.modelId,
+            systemPrompt,
+            prompt: buildRuntimeWorkspacePlanPrompt({
+              run,
+              task: currentTask,
+              rawResponseText
+            }),
+            factoryExecution,
+            onUsage: (generatedWorkspacePlan) => {
+              usageTotals = mergeTokenUsageTotals(
+                usageTotals,
+                extractTokenUsageTotals(generatedWorkspacePlan)
+              );
+            }
+          });
+          let rejectedPlanReason = describeRejectedFactoryRuntimeWorkspacePlan({
+            run,
+            task: currentTask,
+            plan: normalizedWorkspacePlan
+          });
 
-          usageTotals = mergeTokenUsageTotals(
-            usageTotals,
-            extractTokenUsageTotals(generatedWorkspacePlan)
-          );
+          if (rejectedPlanReason) {
+            modelSpan?.addEvent("runtime_workspace_plan_generation_rejected", {
+              message: rejectedPlanReason,
+              metadata: {
+                taskId: currentTask?.id ?? null,
+                workspaceProvider
+              }
+            });
 
-          const normalizedWorkspacePlan = normalizeGeneratedRuntimeWorkspacePlan(
-            generatedWorkspacePlan.output
-          );
+            normalizedWorkspacePlan = await generateStructuredRuntimeWorkspacePlan({
+              generateTextImpl,
+              openai,
+              modelId: options.config.modelId,
+              systemPrompt,
+              prompt: buildRuntimeWorkspacePlanRepairPrompt({
+                run,
+                task: currentTask,
+                rawResponseText,
+                rejectionReason: rejectedPlanReason,
+                rejectedPlan: normalizedWorkspacePlan
+              }),
+              factoryExecution,
+              onUsage: (generatedWorkspacePlan) => {
+                usageTotals = mergeTokenUsageTotals(
+                  usageTotals,
+                  extractTokenUsageTotals(generatedWorkspacePlan)
+                );
+              }
+            });
+            rejectedPlanReason = describeRejectedFactoryRuntimeWorkspacePlan({
+              run,
+              task: currentTask,
+              plan: normalizedWorkspacePlan
+            });
+          }
 
-          if (normalizedWorkspacePlan && normalizedWorkspacePlan.operations.length > 0) {
+          if (
+            normalizedWorkspacePlan &&
+            normalizedWorkspacePlan.operations.length > 0 &&
+            !rejectedPlanReason
+          ) {
             extractedWorkspacePlan = {
               strippedText: stripLocalFilePlanBlock(rawResponseText),
               plan: normalizedWorkspacePlan,
@@ -254,7 +291,9 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
             });
           } else {
             modelSpan?.addEvent("runtime_workspace_plan_generation_failed", {
-              message: "Structured workspace plan generation returned no operations.",
+              message:
+                rejectedPlanReason ??
+                "Structured workspace plan generation returned no operations.",
               metadata: {
                 taskId: currentTask?.id ?? null,
                 workspaceProvider
@@ -346,6 +385,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
                 extractedWorkspacePlan?.strippedText ?? stripLocalFilePlanBlock(rawResponseText),
               appliedWorkspacePlanSummary: appliedWorkspacePlan?.summary ?? null,
               appliedWorkspacePlanOperationCount: appliedWorkspacePlan?.operationCount ?? 0,
+              appliedWorkspacePlanChangedFiles: appliedWorkspacePlan?.changedFiles ?? [],
               runtimeWorkspacePlanSource
             })
           : rawResponseText;
@@ -776,10 +816,72 @@ function buildRuntimeWorkspacePlanPrompt(input: {
     `Task instruction:\n${currentInstruction}`,
     expectedOutcome ? `Expected outcome:\n${expectedOutcome}` : null,
     renderBootstrapRecoveryPlanGuidance(input.run),
+    renderImplementationRecoveryPlanGuidance(input.run, input.task),
     `Visible response draft:\n${input.rawResponseText}`
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function buildRuntimeWorkspacePlanRepairPrompt(input: {
+  run: AgentRunRecord;
+  task: ReturnType<typeof resolveCurrentPhaseTask>;
+  rawResponseText: string;
+  rejectionReason: string;
+  rejectedPlan: RuntimeWorkspacePlan | null;
+}) {
+  return [
+    buildRuntimeWorkspacePlanPrompt({
+      run: input.run,
+      task: input.task,
+      rawResponseText: input.rawResponseText
+    }),
+    "The previous structured workspace plan was rejected because it did not satisfy the current factory task intent.",
+    `Rejected plan reason: ${input.rejectionReason}`,
+    input.rejectedPlan ? `Rejected plan JSON:\n${JSON.stringify(input.rejectedPlan, null, 2)}` : null,
+    "Replace the rejected plan with a new one.",
+    "Do not write blocker notes, TODO files, TASK-NEEDS-IMPLEMENTATION files, README-only changes, or other placeholder artifacts unless they accompany real implementation files.",
+    "For factory implementation tasks, at least one write_file must target an application implementation file under app/, src/, components/, lib/, pages/, client/src/, server/src/, or app/api/."
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function renderImplementationRecoveryPlanGuidance(
+  run: AgentRunRecord,
+  task: ReturnType<typeof resolveCurrentPhaseTask>
+) {
+  if (
+    run.phaseExecution?.current.phaseId !== "factory-implementation" ||
+    !run.factory ||
+    !task?.id
+  ) {
+    return null;
+  }
+
+  switch (task.id) {
+    case "task-nextjs-shell":
+    case "task-frontend-shell":
+      return [
+        "Implementation task guidance:",
+        `- This is the application shell task for ${run.factory.appName}.`,
+        "- The plan must modify real application shell files, not placeholder notes or blocker docs.",
+        "- Prefer changes under app/, src/app/, components/, src/components/, pages/, or related shell styling files.",
+        "- Do not write TASK-NEEDS-IMPLEMENTATION.txt, TODO notes, or README-only changes as the primary result for this task."
+      ].join("\n");
+    case "task-supabase-flow":
+    case "task-railway-data-flow":
+    case "task-api-flow":
+      return [
+        "Implementation task guidance:",
+        `- This is the first interactive product flow task for ${run.factory.appName}.`,
+        "- The plan must implement actual product flow files, local data adapters, seeded fixtures, or interaction handlers that make the product work locally.",
+        "- Prefer changes under app/, src/app/, components/, src/components/, lib/, src/lib/, app/api/, client/src/, or server/src/.",
+        "- Do not write TASK-NEEDS-IMPLEMENTATION.txt, blocker notes, TODO files, or documentation-only changes as the primary result for this task."
+      ].join("\n");
+    default:
+      return null;
+  }
 }
 
 function createMissingKeyResult(
@@ -975,6 +1077,7 @@ function normalizeRuntimeWorkspaceResponse(input: {
   strippedResponseText: string;
   appliedWorkspacePlanSummary: string | null;
   appliedWorkspacePlanOperationCount: number;
+  appliedWorkspacePlanChangedFiles: string[];
   runtimeWorkspacePlanSource:
     | "embedded_response"
     | "structured_output"
@@ -987,18 +1090,19 @@ function normalizeRuntimeWorkspaceResponse(input: {
     input.appliedWorkspacePlanSummary
   );
   const expectedOutcome = input.task?.expectedOutcome?.trim();
-  const bootstrapRecoveredResponse = buildBootstrapRecoveredResponse({
+  const recoveredFactoryTaskResponse = buildRecoveredFactoryTaskResponse({
     run: input.run,
     task: input.task,
     visibleResponseText,
     appliedWorkspacePlanSummary: input.appliedWorkspacePlanSummary,
     appliedWorkspacePlanOperationCount: input.appliedWorkspacePlanOperationCount,
+    appliedWorkspacePlanChangedFiles: input.appliedWorkspacePlanChangedFiles,
     runtimeWorkspacePlanSource: input.runtimeWorkspacePlanSource,
     expectedOutcome: expectedOutcome ?? null
   });
 
-  if (bootstrapRecoveredResponse) {
-    return bootstrapRecoveredResponse;
+  if (recoveredFactoryTaskResponse) {
+    return recoveredFactoryTaskResponse;
   }
 
   if (
@@ -1018,12 +1122,161 @@ function normalizeRuntimeWorkspaceResponse(input: {
   return `${visibleResponseText.trim()}\n\n${expectedOutcome}`;
 }
 
-function buildBootstrapRecoveredResponse(input: {
+function canRecoverFactoryTaskResponse(input: {
+  run: AgentRunRecord;
+  task: ReturnType<typeof resolveCurrentPhaseTask>;
+  appliedWorkspacePlanChangedFiles: string[];
+  runtimeWorkspacePlanSource:
+    | "embedded_response"
+    | "structured_output"
+    | "bootstrap_fallback"
+    | "none";
+}) {
+  if (
+    input.runtimeWorkspacePlanSource !== "structured_output" &&
+    input.runtimeWorkspacePlanSource !== "bootstrap_fallback"
+  ) {
+    return false;
+  }
+
+  if (input.task?.id === "task-repository-bootstrap") {
+    return true;
+  }
+
+  if (input.run.phaseExecution?.current.phaseId !== "factory-implementation") {
+    return false;
+  }
+
+  return hasSubstantiveImplementationChanges(input.task, input.appliedWorkspacePlanChangedFiles);
+}
+
+function describeRejectedFactoryRuntimeWorkspacePlan(input: {
+  run: AgentRunRecord;
+  task: ReturnType<typeof resolveCurrentPhaseTask>;
+  plan: RuntimeWorkspacePlan | null;
+}) {
+  if (!input.plan || input.run.phaseExecution?.current.phaseId !== "factory-implementation") {
+    return null;
+  }
+
+  const changedFiles = collectRuntimeWorkspacePlanChangedFiles(input.plan);
+
+  if (changedFiles.length === 0) {
+    return "Structured workspace plan did not change any files for the current implementation task.";
+  }
+
+  if (!hasSubstantiveImplementationChanges(input.task, changedFiles)) {
+    return "Structured workspace plan only changed placeholder, note, or non-implementation files for the current implementation task.";
+  }
+
+  return null;
+}
+
+function collectRuntimeWorkspacePlanChangedFiles(plan: RuntimeWorkspacePlan) {
+  return uniqueNormalizedPaths(
+    plan.operations
+      .filter((operation) => operation.kind !== "mkdir")
+      .map((operation) => operation.path)
+  );
+}
+
+function hasSubstantiveImplementationChanges(
+  task: ReturnType<typeof resolveCurrentPhaseTask>,
+  changedFiles: string[]
+) {
+  const normalizedChangedFiles = uniqueNormalizedPaths(changedFiles);
+  const codeLikeFiles = normalizedChangedFiles.filter(isImplementationCodePath);
+
+  if (codeLikeFiles.length === 0) {
+    return false;
+  }
+
+  switch (task?.id) {
+    case "task-nextjs-shell":
+    case "task-frontend-shell":
+      return codeLikeFiles.some((path) => isShellImplementationPath(path));
+    case "task-supabase-flow":
+    case "task-railway-data-flow":
+    case "task-api-flow":
+      return codeLikeFiles.some((path) => isProductFlowImplementationPath(path));
+    default:
+      return true;
+  }
+}
+
+function isImplementationCodePath(path: string) {
+  const normalized = normalizePlanPath(path);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    normalized.endsWith(".md") ||
+    normalized.endsWith(".txt") ||
+    normalized === "readme.md" ||
+    normalized === "shipyard.factory.json" ||
+    normalized.startsWith("docs/") ||
+    normalized.includes("todo") ||
+    normalized.includes("task-needs-implementation")
+  ) {
+    return false;
+  }
+
+  return (
+    normalized.startsWith("app/") ||
+    normalized.startsWith("src/") ||
+    normalized.startsWith("components/") ||
+    normalized.startsWith("lib/") ||
+    normalized.startsWith("pages/") ||
+    normalized.startsWith("client/src/") ||
+    normalized.startsWith("server/src/") ||
+    normalized.startsWith("app/api/") ||
+    normalized === "middleware.ts" ||
+    normalized === "middleware.js"
+  );
+}
+
+function isShellImplementationPath(path: string) {
+  const normalized = normalizePlanPath(path);
+
+  return (
+    normalized.startsWith("app/") ||
+    normalized.startsWith("src/app/") ||
+    normalized.startsWith("components/") ||
+    normalized.startsWith("src/components/") ||
+    normalized.startsWith("pages/") ||
+    normalized.endsWith(".css")
+  );
+}
+
+function isProductFlowImplementationPath(path: string) {
+  const normalized = normalizePlanPath(path);
+
+  return (
+    normalized.startsWith("app/") ||
+    normalized.startsWith("src/app/") ||
+    normalized.startsWith("components/") ||
+    normalized.startsWith("src/components/") ||
+    normalized.startsWith("lib/") ||
+    normalized.startsWith("src/lib/") ||
+    normalized.startsWith("app/api/") ||
+    normalized.startsWith("server/src/") ||
+    normalized.startsWith("client/src/")
+  );
+}
+
+function normalizePlanPath(path: string) {
+  return path.trim().replaceAll("\\", "/").replace(/^\.\/+/, "").toLowerCase();
+}
+
+function buildRecoveredFactoryTaskResponse(input: {
   run: AgentRunRecord;
   task: ReturnType<typeof resolveCurrentPhaseTask>;
   visibleResponseText: string;
   appliedWorkspacePlanSummary: string | null;
   appliedWorkspacePlanOperationCount: number;
+  appliedWorkspacePlanChangedFiles: string[];
   runtimeWorkspacePlanSource:
     | "embedded_response"
     | "structured_output"
@@ -1032,12 +1285,10 @@ function buildBootstrapRecoveredResponse(input: {
   expectedOutcome: string | null;
 }) {
   if (
-    input.task?.id !== "task-repository-bootstrap" ||
     input.appliedWorkspacePlanOperationCount <= 0 ||
     !input.expectedOutcome ||
     !responseIndicatesIncompleteTask(input.visibleResponseText) ||
-    (input.runtimeWorkspacePlanSource !== "structured_output" &&
-      input.runtimeWorkspacePlanSource !== "bootstrap_fallback")
+    !canRecoverFactoryTaskResponse(input)
   ) {
     return null;
   }
@@ -1045,16 +1296,52 @@ function buildBootstrapRecoveredResponse(input: {
   const appName = input.run.factory?.appName?.trim() || "the application";
   const stackLabel = input.run.factory?.stack.label?.trim() || "the selected stack";
 
-  return [
-    `Scaffolded the initial repository foundation for ${appName} in the connected runtime workspace using ${stackLabel}.`,
-    input.appliedWorkspacePlanSummary
-      ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
-      : null,
-    "The repository bootstrap is now ready for the first implementation slice.",
-    input.expectedOutcome
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  switch (input.task?.id) {
+    case "task-repository-bootstrap":
+      return [
+        `Scaffolded the initial repository foundation for ${appName} in the connected runtime workspace using ${stackLabel}.`,
+        input.appliedWorkspacePlanSummary
+          ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
+          : null,
+        "The repository bootstrap is now ready for the first implementation slice.",
+        input.expectedOutcome
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    case "task-nextjs-shell":
+    case "task-frontend-shell":
+      return [
+        `Built the application shell for ${appName} in the connected runtime workspace using ${stackLabel}.`,
+        input.appliedWorkspacePlanSummary
+          ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
+          : null,
+        input.expectedOutcome
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    case "task-supabase-flow":
+    case "task-railway-data-flow":
+    case "task-api-flow":
+      return [
+        `Implemented the first interactive product flow for ${appName} in the connected runtime workspace using local-first application seams for ${stackLabel}.`,
+        input.appliedWorkspacePlanSummary
+          ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
+          : null,
+        input.expectedOutcome
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    default:
+      return [
+        `Completed the current factory task for ${appName} in the connected runtime workspace using ${stackLabel}.`,
+        input.appliedWorkspacePlanSummary
+          ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
+          : null,
+        input.expectedOutcome
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+  }
 }
 
 function hasLocalFilePlanBlock(text: string) {
@@ -1138,6 +1425,10 @@ function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function uniqueNormalizedPaths(values: string[]) {
+  return [...new Set(values.map(normalizePlanPath).filter(Boolean))];
+}
+
 function validateGeneratedRuntimeWorkspacePlanOperation(
   value: {
     kind: "mkdir" | "write_file" | "delete_file";
@@ -1169,6 +1460,34 @@ function validateGeneratedRuntimeWorkspacePlanOperation(
     kind: "delete_file",
     path: value.path
   };
+}
+
+async function generateStructuredRuntimeWorkspacePlan(input: {
+  generateTextImpl: typeof generateText;
+  openai: ReturnType<typeof createOpenAI>;
+  modelId: string;
+  systemPrompt: string;
+  prompt: string;
+  factoryExecution: boolean;
+  onUsage: (generatedWorkspacePlan: UsageCarrier & { output?: unknown }) => void;
+}) {
+  const generatedWorkspacePlan = await input.generateTextImpl(
+    withOptionalMaxOutputTokens(
+      {
+        model: input.openai(input.modelId),
+        system: input.systemPrompt,
+        prompt: input.prompt,
+        output: Output.object({
+          schema: runtimeWorkspaceStructuredOutputSchema
+        })
+      },
+      input.factoryExecution ? null : 900
+    )
+  );
+
+  input.onUsage(generatedWorkspacePlan);
+
+  return normalizeGeneratedRuntimeWorkspacePlan(generatedWorkspacePlan.output);
 }
 
 function summarizePrompt(run: AgentRunRecord) {
