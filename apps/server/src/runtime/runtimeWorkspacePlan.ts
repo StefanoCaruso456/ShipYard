@@ -39,10 +39,21 @@ const runtimeWorkspacePlanOperationSchema = z.object({
   path: z.string().trim().min(1),
   content: z.string().optional()
 });
+const runtimeWorkspaceStructuredOutputOperationSchema = z.object({
+  kind: z.enum(["mkdir", "write_file", "delete_file"]),
+  path: z.string().trim().min(1),
+  content: z.string()
+});
 
 export const runtimeWorkspacePlanSchema = z.object({
   operations: z
     .array(runtimeWorkspacePlanOperationSchema)
+    .min(1)
+});
+
+export const runtimeWorkspaceStructuredOutputSchema = z.object({
+  operations: z
+    .array(runtimeWorkspaceStructuredOutputOperationSchema)
     .min(1)
 });
 
