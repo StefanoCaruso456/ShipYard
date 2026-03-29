@@ -1,7 +1,8 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 
-type RuntimeWorkspacePlanOperation =
+export type RuntimeWorkspacePlanOperation =
   | {
       kind: "mkdir";
       path: string;
@@ -16,7 +17,7 @@ type RuntimeWorkspacePlanOperation =
       path: string;
     };
 
-type RuntimeWorkspacePlan = {
+export type RuntimeWorkspacePlan = {
   operations: RuntimeWorkspacePlanOperation[];
 };
 
@@ -33,6 +34,28 @@ export type AppliedRuntimeWorkspacePlan = {
 };
 
 const LOCAL_FILE_PLAN_PATTERN = /<local-file-plan>\s*([\s\S]*?)\s*<\/local-file-plan>/i;
+
+export const runtimeWorkspacePlanSchema = z.object({
+  operations: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.object({
+          kind: z.literal("mkdir"),
+          path: z.string().trim().min(1)
+        }),
+        z.object({
+          kind: z.literal("write_file"),
+          path: z.string().trim().min(1),
+          content: z.string()
+        }),
+        z.object({
+          kind: z.literal("delete_file"),
+          path: z.string().trim().min(1)
+        })
+      ])
+    )
+    .min(1)
+});
 
 export function extractRuntimeWorkspacePlan(
   text: string | null | undefined
@@ -148,18 +171,10 @@ function buildPlanPayloadCandidates(rawPayload: string) {
 }
 
 function validateRuntimeWorkspacePlan(value: unknown): RuntimeWorkspacePlan {
-  if (!value || typeof value !== "object") {
-    throw new Error("Expected an object payload.");
-  }
-
-  const candidate = value as { operations?: unknown };
-
-  if (!Array.isArray(candidate.operations)) {
-    throw new Error("Expected an operations array.");
-  }
+  const parsed = runtimeWorkspacePlanSchema.parse(value);
 
   return {
-    operations: candidate.operations.map((operation, index) =>
+    operations: parsed.operations.map((operation, index) =>
       validateOperation(operation, index)
     )
   };

@@ -297,8 +297,8 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed Factory pr
       }
     );
 
-    assert.match(capturedPrompt, /Workspace file action contract/);
-    assert.match(capturedPrompt, /runtime applies the plan during execution/);
+    assert.match(capturedPrompt, /Runtime workspace execution contract/);
+    assert.match(capturedPrompt, /Do not append a <local-file-plan> block to the visible response/);
     assert.match(capturedPrompt, /Completion contract:/);
     assert.match(
       capturedPrompt,
@@ -529,9 +529,9 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
   }
 });
 
-test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for live runtime workspaces", async () => {
+test("createOpenAIExecutor generates a structured runtime workspace plan for prose-only Factory bootstrap responses", async () => {
   let callCount = 0;
-  let repairPrompt = "";
+  let structuredPlanPrompt = "";
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -542,7 +542,7 @@ test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for li
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async (input: { prompt?: string }) => {
+    generateTextImpl: (async (input: { prompt?: string; output?: unknown }) => {
       callCount += 1;
 
       if (callCount === 1) {
@@ -562,11 +562,23 @@ test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for li
         };
       }
 
-      repairPrompt = input.prompt ?? "";
+      structuredPlanPrompt = input.prompt ?? "";
 
       return {
-        text:
-          "{\"operations\":[{\"kind\":\"write_file\",\"path\":\"README.md\",\"content\":\"# Jira\\n\"},{\"kind\":\"mkdir\",\"path\":\"src/app\"}]}",
+        text: "",
+        output: {
+          operations: [
+            {
+              kind: "write_file",
+              path: "README.md",
+              content: "# Jira\n"
+            },
+            {
+              kind: "mkdir",
+              path: "src/app"
+            }
+          ]
+        },
         usage: {
           inputTokens: 6,
           outputTokens: 14,
@@ -614,7 +626,7 @@ test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for li
     );
 
     assert.equal(callCount, 2);
-    assert.match(repairPrompt, /Return only the missing <local-file-plan>/);
+    assert.match(structuredPlanPrompt, /Generate only the machine-readable runtime workspace plan/);
     assert.equal(await readFile(path.join(runtimeRoot, "README.md"), "utf8"), "# Jira\n");
     assert.equal(
       result.responseText,
@@ -630,7 +642,7 @@ test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for li
   }
 });
 
-test("createOpenAIExecutor rejects Factory implementation responses when both the draft and repair pass miss the runtime workspace plan", async () => {
+test("createOpenAIExecutor rejects Factory implementation responses when both the visible response and structured plan pass miss the runtime workspace plan", async () => {
   let callCount = 0;
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
@@ -642,14 +654,16 @@ test("createOpenAIExecutor rejects Factory implementation responses when both th
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async () => {
+    generateTextImpl: (async (input: { output?: unknown }) => {
       callCount += 1;
 
       return {
-        text:
-          callCount === 1
-            ? "Built the Jira landing route and shared shell.\n\nApplication shell implemented."
-            : "Still summarizing the implementation without a workspace plan.",
+        text: callCount === 1 ? "Built the Jira landing route and shared shell.\n\nApplication shell implemented." : "",
+        output: input.output
+          ? {
+              operations: []
+            }
+          : undefined,
         usage: {
           inputTokens: 12,
           outputTokens: 18,
@@ -696,7 +710,7 @@ test("createOpenAIExecutor rejects Factory implementation responses when both th
           instructionRuntime
         }
       ),
-      /The initial draft and one repair pass both failed to produce a valid workspace plan/
+      /The visible response and structured plan pass both failed to produce a valid workspace plan/
     );
     assert.equal(callCount, 2);
   } finally {
