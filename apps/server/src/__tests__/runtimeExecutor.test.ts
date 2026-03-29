@@ -644,7 +644,9 @@ function extractFactoryAppName(prompt: string) {
 }
 
 function extractFactoryRepositoryName(prompt: string) {
-  const match = prompt.match(/Repository target: (?:[^/\n]+\/)?([^\n]+)/);
+  const match =
+    prompt.match(/Repository target: (?:[^/\n]+\/)?([^\n]+)/) ??
+    prompt.match(/Planned repository name: (?:[^/\n]+\/)?([^\n]+)/);
 
   return match?.[1]?.trim() || "factory-app";
 }

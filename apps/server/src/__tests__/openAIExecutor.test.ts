@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createAgentRuntime, type AgentRunRecord } from "@shipyard/agent-core";
+import {
+  createAgentRuntime,
+  createFactoryRunState,
+  type AgentRunRecord
+} from "@shipyard/agent-core";
 import { generateText } from "ai";
 
 import {
@@ -197,6 +201,73 @@ test("createOpenAIExecutor injects operating mode guidance into prompts", async 
   assert.match(capturedPrompt, /Requested: Review mode/);
   assert.match(capturedPrompt, /Resolved: Review mode/);
   assert.match(capturedPrompt, /Stay review-focused and read-only/);
+});
+
+test("createOpenAIExecutor keeps factory prompts focused on local bootstrap work", async () => {
+  let capturedPrompt = "";
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Repository foundation scaffolded.",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17
+        },
+        totalUsage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const factoryState = createFactoryRunState({
+    input: {
+      appName: "Pong",
+      stackTemplateId: "nextjs_supabase_vercel",
+      repository: {
+        provider: "github",
+        owner: "acme",
+        name: "pong",
+        visibility: "private",
+        baseBranch: "main"
+      },
+      deployment: {
+        provider: "vercel",
+        projectName: "pong",
+        environment: "production"
+      }
+    },
+    productBrief: "Build a simple ping game back and forth.",
+    workspacePath: "/tmp/factory-pong"
+  });
+  factoryState.currentStage = "bootstrap";
+
+  await executor(
+    createRun("Scaffold the runtime workspace foundation.", {
+      requestedOperatingMode: "factory",
+      operatingMode: "factory",
+      factory: factoryState
+    }),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Remote repository setup is deferred until an explicit later step\./);
+  assert.doesNotMatch(capturedPrompt, /Repository target:/);
 });
 
 test("createOpenAIExecutor uses a local file plan summary when the response is plan-only", async () => {

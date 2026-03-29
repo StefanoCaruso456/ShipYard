@@ -759,8 +759,8 @@ function buildFactoryRunContext(
       "Operate only inside the connected runtime folder for this factory run.",
       "Treat this as a greenfield application bootstrap, not an edit to the Shipyard control repository.",
       "Continue automatically by default in Factory Mode unless a defined risk escalation rule or failed quality gate requires a stop.",
+      "Do not create, connect, or publish a remote repository unless a later explicit task asks for it.",
       `Use the selected stack template: ${stack.label}.`,
-      `Repository target: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}.`,
       "Build the application locally first. Defer hosted deployment setup, cloud infrastructure wiring, and live database provisioning to a later operator-directed follow-up.",
       "For the first Factory slice, prefer local fixtures, seeded demo content, and adapter seams over provisioning real hosted data services."
     ]),
@@ -814,9 +814,8 @@ function buildFactoryRunContext(
         title: "Factory targets",
         content: [
           `App: ${factory.appName}`,
-          `Repository: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}`,
-          `Visibility: ${factory.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY}`,
-          `Base branch: ${factory.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH}`,
+          `Planned repository name: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}`,
+          "Remote repository setup: defer until an explicit later step.",
           "Deployment: manual follow-up after the application build is complete.",
           "Data setup: defer hosted database provisioning until the local product flow is working."
         ]
@@ -901,7 +900,7 @@ function buildFactoryPhaseExecution(
             tasks: [
               createFactoryTask({
                 id: "task-repository-bootstrap",
-                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed to run the application locally with ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. Do not wire hosted deployment targets or live database infrastructure in this bootstrap step. When complete, explicitly say "Repository foundation scaffolded."`,
+                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed to run the application locally with ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. Do not create, connect, or publish a GitHub repository or any remote during this task. Do not wire hosted deployment targets or live database infrastructure in this bootstrap step. When complete, explicitly say "Repository foundation scaffolded."`,
                 expectedOutcome: "Repository foundation scaffolded.",
                 requiredSpecialistAgentTypeId: "repo_tools_dev"
               })

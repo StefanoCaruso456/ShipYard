@@ -568,10 +568,10 @@ function renderFactoryContext(run: AgentRunRecord) {
     `App: ${run.factory.appName}`,
     `Current stage: ${run.factory.currentStage}`,
     `Stack: ${run.factory.stack.label}`,
-    `Repository target: ${run.factory.repository.owner ? `${run.factory.repository.owner}/` : ""}${run.factory.repository.name}`,
     run.factory.repository.localPath
       ? `Factory workspace: ${run.factory.repository.localPath}`
       : null,
+    "Remote repository setup is deferred until an explicit later step.",
     "Delivery policy: build and verify the application locally first. Deployment and live data-service setup are operator-managed follow-up work unless the current task explicitly requests them.",
     "Important: work only inside the connected runtime folder for this factory run. Do not modify the Shipyard control repository."
   ]
