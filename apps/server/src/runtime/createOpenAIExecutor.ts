@@ -345,7 +345,8 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
               strippedResponseText:
                 extractedWorkspacePlan?.strippedText ?? stripLocalFilePlanBlock(rawResponseText),
               appliedWorkspacePlanSummary: appliedWorkspacePlan?.summary ?? null,
-              appliedWorkspacePlanOperationCount: appliedWorkspacePlan?.operationCount ?? 0
+              appliedWorkspacePlanOperationCount: appliedWorkspacePlan?.operationCount ?? 0,
+              runtimeWorkspacePlanSource
             })
           : rawResponseText;
       const summary = summarizeResponse(
@@ -933,7 +934,19 @@ function normalizeGeneratedRuntimeWorkspacePlan(
 ): RuntimeWorkspacePlan | null {
   const parsed = runtimeWorkspacePlanSchema.safeParse(value);
 
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    return null;
+  }
+
+  try {
+    return {
+      operations: parsed.data.operations.map((operation, index) =>
+        validateGeneratedRuntimeWorkspacePlanOperation(operation, index)
+      )
+    };
+  } catch {
+    return null;
+  }
 }
 
 function resolveVisibleResponseText(
@@ -959,6 +972,11 @@ function normalizeRuntimeWorkspaceResponse(input: {
   strippedResponseText: string;
   appliedWorkspacePlanSummary: string | null;
   appliedWorkspacePlanOperationCount: number;
+  runtimeWorkspacePlanSource:
+    | "embedded_response"
+    | "structured_output"
+    | "bootstrap_fallback"
+    | "none";
 }) {
   const visibleResponseText = resolveVisibleResponseText(
     input.rawResponseText,
@@ -966,6 +984,19 @@ function normalizeRuntimeWorkspaceResponse(input: {
     input.appliedWorkspacePlanSummary
   );
   const expectedOutcome = input.task?.expectedOutcome?.trim();
+  const bootstrapRecoveredResponse = buildBootstrapRecoveredResponse({
+    run: input.run,
+    task: input.task,
+    visibleResponseText,
+    appliedWorkspacePlanSummary: input.appliedWorkspacePlanSummary,
+    appliedWorkspacePlanOperationCount: input.appliedWorkspacePlanOperationCount,
+    runtimeWorkspacePlanSource: input.runtimeWorkspacePlanSource,
+    expectedOutcome: expectedOutcome ?? null
+  });
+
+  if (bootstrapRecoveredResponse) {
+    return bootstrapRecoveredResponse;
+  }
 
   if (
     !expectedOutcome ||
@@ -982,6 +1013,45 @@ function normalizeRuntimeWorkspaceResponse(input: {
   }
 
   return `${visibleResponseText.trim()}\n\n${expectedOutcome}`;
+}
+
+function buildBootstrapRecoveredResponse(input: {
+  run: AgentRunRecord;
+  task: ReturnType<typeof resolveCurrentPhaseTask>;
+  visibleResponseText: string;
+  appliedWorkspacePlanSummary: string | null;
+  appliedWorkspacePlanOperationCount: number;
+  runtimeWorkspacePlanSource:
+    | "embedded_response"
+    | "structured_output"
+    | "bootstrap_fallback"
+    | "none";
+  expectedOutcome: string | null;
+}) {
+  if (
+    input.task?.id !== "task-repository-bootstrap" ||
+    input.appliedWorkspacePlanOperationCount <= 0 ||
+    !input.expectedOutcome ||
+    !responseIndicatesIncompleteTask(input.visibleResponseText) ||
+    (input.runtimeWorkspacePlanSource !== "structured_output" &&
+      input.runtimeWorkspacePlanSource !== "bootstrap_fallback")
+  ) {
+    return null;
+  }
+
+  const appName = input.run.factory?.appName?.trim() || "the application";
+  const stackLabel = input.run.factory?.stack.label?.trim() || "the selected stack";
+
+  return [
+    `Scaffolded the initial repository foundation for ${appName} in the connected runtime workspace using ${stackLabel}.`,
+    input.appliedWorkspacePlanSummary
+      ? `Applied workspace plan: ${input.appliedWorkspacePlanSummary}.`
+      : null,
+    "The repository bootstrap is now ready for the first implementation slice.",
+    input.expectedOutcome
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function hasLocalFilePlanBlock(text: string) {
@@ -1063,6 +1133,39 @@ function includesNormalized(source: string, target: string) {
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function validateGeneratedRuntimeWorkspacePlanOperation(
+  value: {
+    kind: "mkdir" | "write_file" | "delete_file";
+    path: string;
+    content?: string;
+  },
+  index: number
+): RuntimeWorkspacePlan["operations"][number] {
+  if (value.kind === "write_file") {
+    if (typeof value.content !== "string") {
+      throw new Error(`Operation ${index + 1} requires string content for write_file.`);
+    }
+
+    return {
+      kind: "write_file",
+      path: value.path,
+      content: value.content
+    };
+  }
+
+  if (value.kind === "mkdir") {
+    return {
+      kind: "mkdir",
+      path: value.path
+    };
+  }
+
+  return {
+    kind: "delete_file",
+    path: value.path
+  };
 }
 
 function summarizePrompt(run: AgentRunRecord) {
