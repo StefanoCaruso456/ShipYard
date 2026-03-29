@@ -529,7 +529,9 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
   }
 });
 
-test("createOpenAIExecutor rejects prose-only Factory implementation responses for live runtime workspaces", async () => {
+test("createOpenAIExecutor repairs prose-only Factory bootstrap responses for live runtime workspaces", async () => {
+  let callCount = 0;
+  let repairPrompt = "";
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -540,19 +542,126 @@ test("createOpenAIExecutor rejects prose-only Factory implementation responses f
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async () => ({
-      text: "Built the Jira landing route and shared shell.\n\nApplication shell implemented.",
-      usage: {
-        inputTokens: 12,
-        outputTokens: 18,
-        totalTokens: 30
-      },
-      totalUsage: {
-        inputTokens: 12,
-        outputTokens: 18,
-        totalTokens: 30
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text:
+            "Scaffolded the Jira repository foundation and setup notes.\n\nNext step: begin the first implementation slice.",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          },
+          totalUsage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          }
+        };
       }
-    })) as unknown as typeof generateText
+
+      repairPrompt = input.prompt ?? "";
+
+      return {
+        text:
+          "{\"operations\":[{\"kind\":\"write_file\",\"path\":\"README.md\",\"content\":\"# Jira\\n\"},{\"kind\":\"mkdir\",\"path\":\"src/app\"}]}",
+        usage: {
+          inputTokens: 6,
+          outputTokens: 14,
+          totalTokens: 20
+        },
+        totalUsage: {
+          inputTokens: 6,
+          outputTokens: 14,
+          totalTokens: 20
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  try {
+    const result = await executor(
+      createRun("Scaffold the Jira repository", {
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "live",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "jira",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-bootstrap",
+          phaseName: "Factory bootstrap",
+          storyId: "story-repository-bootstrap",
+          storyTitle: "Repository bootstrap",
+          taskId: "task-repository-bootstrap",
+          taskInstruction: "Scaffold the initial repository foundation.",
+          expectedOutcome: "Repository foundation scaffolded."
+        })
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.equal(callCount, 2);
+    assert.match(repairPrompt, /Return only the missing <local-file-plan>/);
+    assert.equal(await readFile(path.join(runtimeRoot, "README.md"), "utf8"), "# Jira\n");
+    assert.equal(
+      result.responseText,
+      "Scaffolded the Jira repository foundation and setup notes.\n\nNext step: begin the first implementation slice.\n\nRepository foundation scaffolded."
+    );
+    assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["README.md"]);
+    assert.equal(result.appliedWorkspacePlan?.operationCount, 2);
+    assert.equal(result.usage?.inputTokens, 18);
+    assert.equal(result.usage?.outputTokens, 32);
+    assert.equal(result.usage?.totalTokens, 50);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("createOpenAIExecutor rejects Factory implementation responses when both the draft and repair pass miss the runtime workspace plan", async () => {
+  let callCount = 0;
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async () => {
+      callCount += 1;
+
+      return {
+        text:
+          callCount === 1
+            ? "Built the Jira landing route and shared shell.\n\nApplication shell implemented."
+            : "Still summarizing the implementation without a workspace plan.",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        },
+        totalUsage: {
+          inputTokens: 12,
+          outputTokens: 18,
+          totalTokens: 30
+        }
+      };
+    }) as unknown as typeof generateText
   });
   const instructionRuntime = await createInstructionRuntimeForTests();
 
@@ -587,8 +696,9 @@ test("createOpenAIExecutor rejects prose-only Factory implementation responses f
           instructionRuntime
         }
       ),
-      /must include a non-empty <local-file-plan> block/
+      /The initial draft and one repair pass both failed to produce a valid workspace plan/
     );
+    assert.equal(callCount, 2);
   } finally {
     await rm(runtimeRoot, { recursive: true, force: true });
   }
