@@ -251,6 +251,7 @@ export type {
   ApprovalGateKind,
   ApprovalGateState,
   ApprovalGateStatus,
+  AppliedWorkspacePlanSummary,
   AgentRunRecord,
   AgentRunResult,
   AgentRunStatus,

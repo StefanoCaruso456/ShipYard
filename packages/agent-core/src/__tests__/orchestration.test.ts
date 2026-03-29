@@ -159,6 +159,89 @@ test("verifier decision output requests a retry when execution misses the planne
   assert.ok(verifierResult.validationGateResults?.some((gate) => gate.success === false));
 });
 
+test("verifier treats runtime workspace changes as execution evidence", async () => {
+  const { assembler } = await createHarness();
+  const task = createTask({
+    id: "task-runtime-workspace",
+    instruction: "Implement the core product flow.",
+    expectedOutcome: "Core product flow implemented."
+  });
+  const run = createRunRecord({
+    context: {
+      objective: "Implement the core product flow.",
+      constraints: [],
+      relevantFiles: [],
+      externalContext: [],
+      validationTargets: []
+    }
+  });
+  const plannerResult: PlannerStepResult = {
+    role: "planner",
+    at: "2026-03-27T23:08:00.000Z",
+    summary: "Update the runtime workspace.",
+    step: {
+      id: "task-runtime-workspace-step-1",
+      title: "Implement the product flow",
+      kind: "model_response",
+      rationale: "The executor must create the first application screen.",
+      summary: "Implement the first app route in the runtime workspace.",
+      successCriteria: ["src/app/page.tsx", "Core product flow implemented."],
+      requiredInputs: ["src/app/page.tsx"],
+      requiredTool: null,
+      toolRequest: null,
+      validationTargets: []
+    },
+    consumedContextSectionIds: ["task-objective"]
+  };
+  const executionResult = {
+    mode: "ai-sdk-openai" as const,
+    summary: "Implemented the first VendorFlow product flow.",
+    responseText: "Implemented the first VendorFlow product flow.\n\nCore product flow implemented.",
+    instructionEcho: task.instruction,
+    skillId: "coding-agent",
+    completedAt: "2026-03-27T23:08:05.000Z",
+    appliedWorkspacePlan: {
+      provider: "runtime" as const,
+      summary: "Applied the runtime workspace plan: wrote 1 file.",
+      changedFiles: ["src/app/page.tsx"],
+      operationCount: 1
+    }
+  };
+  const verifierResult = verifyStepResult({
+    run: {
+      ...run,
+      result: executionResult
+    },
+    task,
+    plannerResult,
+    executorResult: {
+      role: "executor",
+      at: "2026-03-27T23:08:05.000Z",
+      stepId: plannerResult.step.id,
+      success: true,
+      mode: executionResult.mode,
+      summary: executionResult.summary,
+      responseText: executionResult.responseText,
+      toolResult: null,
+      changedFiles: ["src/app/page.tsx"],
+      validationTargets: [],
+      consumedContextSectionIds: ["task-objective"],
+      error: null
+    },
+    executionResult,
+    payload: assembler.buildRolePayload("verifier", {
+      run: {
+        ...run,
+        result: executionResult
+      },
+      runtimeStatus: createRuntimeStatus()
+    })
+  });
+
+  assert.equal(verifierResult.intentMatched, true);
+  assert.equal(verifierResult.decision, "continue");
+});
+
 test("live orchestration consumes assembler payloads and records planner/executor/verifier state", async () => {
   const { instructionRuntime, assembler } = await createHarness();
   const seen = {

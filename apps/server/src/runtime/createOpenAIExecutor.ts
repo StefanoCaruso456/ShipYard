@@ -16,6 +16,11 @@ import {
 } from "@shipyard/agent-core";
 import { generateText } from "ai";
 
+import {
+  applyRuntimeWorkspacePlan,
+  extractRuntimeWorkspacePlan
+} from "./runtimeWorkspacePlan";
+
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
 
 export type OpenAIExecutorConfig = {
@@ -138,7 +143,34 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         prompt,
         maxOutputTokens
       });
-      const responseText = generated.text.trim();
+      const rawResponseText = generated.text.trim();
+      const runtimeWorkspaceRoot = resolveRuntimeWorkspaceRoot(run);
+      const extractedWorkspacePlan =
+        runtimeWorkspaceRoot != null ? extractRuntimeWorkspacePlan(rawResponseText) : null;
+
+      if (runtimeWorkspaceRoot != null && extractedWorkspacePlan?.error) {
+        throw new Error(extractedWorkspacePlan.error);
+      }
+
+      const appliedWorkspacePlan =
+        runtimeWorkspaceRoot != null && extractedWorkspacePlan?.plan
+          ? await applyRuntimeWorkspacePlan({
+              rootDir: runtimeWorkspaceRoot,
+              plan: extractedWorkspacePlan.plan
+            })
+          : null;
+      const responseText =
+        runtimeWorkspaceRoot != null
+          ? resolveVisibleResponseText(
+              rawResponseText,
+              extractedWorkspacePlan?.strippedText ?? stripLocalFilePlanBlock(rawResponseText),
+              appliedWorkspacePlan?.summary ?? null
+            )
+          : rawResponseText;
+      const summary = summarizeResponse(
+        runtimeWorkspaceRoot != null ? responseText : rawResponseText,
+        appliedWorkspacePlan?.summary ?? null
+      );
       const completedAt = new Date().toISOString();
       const usage = {
         inputTokens: generated.totalUsage?.inputTokens ?? generated.usage?.inputTokens ?? null,
@@ -173,7 +205,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
       }
       await modelSpan?.end({
         status: "completed",
-        outputSummary: summarizeResponse(responseText),
+        outputSummary: summary,
         metadata: {
           finishReason: generated.finishReason,
           maxOutputTokens,
@@ -189,7 +221,7 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
 
       return {
         mode: "ai-sdk-openai",
-        summary: summarizeResponse(responseText),
+        summary,
         responseText,
         instructionEcho: run.instruction,
         skillId: context.instructionRuntime.skill.meta.id,
@@ -198,7 +230,13 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         operatingMode,
         provider: "openai",
         modelId: options.config.modelId,
-        usage
+        usage,
+        appliedWorkspacePlan: appliedWorkspacePlan
+          ? {
+              provider: "runtime",
+              ...appliedWorkspacePlan
+            }
+          : null
       };
     } catch (error) {
       await modelSpan?.end({
@@ -282,7 +320,8 @@ function buildTaskPrompt(
     renderAttachmentContext(run),
     renderRunContext(run, input.relevantFiles),
     input.roleContextPrompt ? `Executor context payload:\n${input.roleContextPrompt}` : null,
-    renderLocalFilePlanInstructions(run),
+    renderWorkspaceFilePlanInstructions(run),
+    renderCompletionContract(run),
     [
       "Response style:",
       `- ${operatingModePolicy.defaultResponseLead}`,
@@ -437,17 +476,23 @@ function renderRunContext(
   return contextParts.length > 0 ? contextParts.join("\n\n") : null;
 }
 
-function renderLocalFilePlanInstructions(run: AgentRunRecord) {
+function renderWorkspaceFilePlanInstructions(run: AgentRunRecord) {
+  if (run.project?.kind !== "local") {
+    return null;
+  }
+
+  const provider = run.project.folder?.provider;
+
   if (
-    run.project?.kind !== "local" ||
-    run.project.folder?.provider !== "browser-file-system-access"
+    provider !== "browser-file-system-access" &&
+    provider !== "runtime"
   ) {
     return null;
   }
 
   return [
-    "Local workspace file action contract:",
-    "When the request requires creating, updating, or deleting files in the connected local folder, append a <local-file-plan>...</local-file-plan> block to the end of your response.",
+    "Workspace file action contract:",
+    "When the request requires creating, updating, or deleting files in the connected workspace, append a <local-file-plan>...</local-file-plan> block to the end of your response.",
     "Inside that block emit valid JSON with exactly this shape: {\"operations\":[...]}",
     "Inside the tags output raw JSON only. Do not wrap it in ``` fences. Do not prefix it with json. Do not add commentary inside the tags.",
     "Supported operations:",
@@ -462,7 +507,36 @@ function renderLocalFilePlanInstructions(run: AgentRunRecord) {
     "- For scaffold requests, prefer short placeholder file contents unless the operator explicitly asks for a full implementation.",
     "- Include every file or directory you want created in the operations array. A description in prose will not touch the local workspace.",
     "- Omit the block when no local filesystem change is needed.",
-    "- Do not claim files were already written unless they are represented in the local file plan block. The client applies the plan after your response."
+    provider === "runtime"
+      ? "- Do not claim files were already written unless they are represented in the local file plan block. The runtime applies the plan during execution."
+      : "- Do not claim files were already written unless they are represented in the local file plan block. The client applies the plan after your response.",
+    provider === "runtime"
+      ? "- For Factory mode implementation, scaffold, and build tasks, filesystem changes normally belong in this block so the verifier can inspect the actual workspace changes."
+      : null
+  ].join("\n");
+}
+
+function renderCompletionContract(run: AgentRunRecord) {
+  const phaseExecution = run.phaseExecution;
+
+  if (!phaseExecution) {
+    return null;
+  }
+
+  const phase = phaseExecution.phases.find((candidate) => candidate.id === phaseExecution.current.phaseId);
+  const story = phase?.userStories.find((candidate) => candidate.id === phaseExecution.current.storyId);
+  const task = story?.tasks.find((candidate) => candidate.id === phaseExecution.current.taskId);
+  const expectedOutcome = task?.expectedOutcome?.trim();
+
+  if (!expectedOutcome) {
+    return null;
+  }
+
+  return [
+    "Completion contract:",
+    `- Only when the current task is actually complete, include this exact final standalone line: ${expectedOutcome}`,
+    `- If the task is not complete yet, do not output "${expectedOutcome}". Explain what remains instead.`,
+    "- Make sure the visible response matches the actual workspace changes and execution evidence."
   ].join("\n");
 }
 
@@ -514,14 +588,15 @@ function formatOperatingModeLabel(mode: ReturnType<typeof normalizeRequestedOper
   }
 }
 
-function summarizeResponse(text: string) {
+function summarizeResponse(text: string, fallbackSummary: string | null = null) {
   const stripped = stripLocalFilePlanBlock(text);
   const compact = stripped.replace(/\s+/g, " ").trim();
 
   if (!compact) {
-    return hasLocalFilePlanBlock(text)
-      ? "Prepared a local file plan for the connected workspace."
-      : "OpenAI returned an empty response.";
+    return fallbackSummary ??
+      (hasLocalFilePlanBlock(text)
+        ? "Prepared a local file plan for the connected workspace."
+        : "OpenAI returned an empty response.");
   }
 
   if (compact.length <= 180) {
@@ -535,8 +610,36 @@ function stripLocalFilePlanBlock(text: string) {
   return text.replace(/<local-file-plan>\s*[\s\S]*?\s*<\/local-file-plan>/gi, "").trim();
 }
 
+function resolveVisibleResponseText(
+  rawResponseText: string,
+  strippedResponseText: string,
+  fallbackSummary: string | null
+) {
+  if (strippedResponseText.trim()) {
+    return strippedResponseText.trim();
+  }
+
+  if (hasLocalFilePlanBlock(rawResponseText) && fallbackSummary) {
+    return fallbackSummary;
+  }
+
+  return strippedResponseText.trim();
+}
+
 function hasLocalFilePlanBlock(text: string) {
   return /<local-file-plan>\s*[\s\S]*?\s*<\/local-file-plan>/i.test(text);
+}
+
+function resolveRuntimeWorkspaceRoot(run: AgentRunRecord) {
+  if (
+    run.project?.kind !== "local" ||
+    run.project.folder?.provider !== "runtime" ||
+    !run.project.folder.displayPath?.trim()
+  ) {
+    return null;
+  }
+
+  return run.project.folder.displayPath.trim();
 }
 
 function summarizePrompt(run: AgentRunRecord) {
