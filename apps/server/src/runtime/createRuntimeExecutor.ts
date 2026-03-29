@@ -21,6 +21,7 @@ import {
   type OpenAIExecutorConfig
 } from "./createOpenAIExecutor";
 import { executeTerminalTool } from "./createTerminalToolExecutor";
+import { applyWorkspaceFilePlan } from "./workspaceFilePlan";
 
 type CreateRuntimeExecutorOptions = {
   openAI: OpenAIExecutorConfig;
@@ -39,9 +40,33 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
   return async (run, context) => {
     const operatingMode = resolveRunOperatingMode(run);
     const requestedOperatingMode = normalizeRequestedOperatingMode(run.requestedOperatingMode);
+    const repoToolset = resolveRepoToolsetForRun(
+      options.repoToolset,
+      repoToolsetsByRoot,
+      run
+    );
 
     if (!run.toolRequest) {
-      return openAIExecutor(run, context);
+      const result = await openAIExecutor(run, context);
+
+      if (run.project?.folder?.provider !== "runtime") {
+        return result;
+      }
+
+      const workspacePlan = await applyWorkspaceFilePlan({
+        rootDir: repoToolset.rootDir,
+        responseText: result.responseText ?? null
+      });
+
+      if (!workspacePlan) {
+        return result;
+      }
+
+      return {
+        ...result,
+        summary: summarizeWorkspacePlanResult(result.summary, workspacePlan.summary),
+        workspacePlan
+      };
     }
 
     const toolRequest = run.toolRequest;
@@ -64,11 +89,6 @@ export function createRuntimeExecutor(options: CreateRuntimeExecutorOptions): Ex
       }
     });
 
-    const repoToolset = resolveRepoToolsetForRun(
-      options.repoToolset,
-      repoToolsetsByRoot,
-      run
-    );
     const toolResult = await executeToolRequest(repoToolset, toolRequest, {
       run,
       rootDir: repoToolset.rootDir,
@@ -375,4 +395,16 @@ function extractChangedFiles(toolResult: Extract<RepoToolResult, { ok: true }>) 
   }
 
   return [];
+}
+
+function summarizeWorkspacePlanResult(baseSummary: string, workspacePlanSummary: string) {
+  if (!baseSummary.trim()) {
+    return workspacePlanSummary;
+  }
+
+  if (baseSummary === "Prepared a local file plan for the connected workspace.") {
+    return workspacePlanSummary;
+  }
+
+  return `${baseSummary} ${workspacePlanSummary}`.trim();
 }
