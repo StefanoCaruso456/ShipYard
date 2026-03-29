@@ -230,6 +230,23 @@ export function buildInitialFactoryStagePlans(options: {
       status: "planned",
       backlog: [
         createSeedBacklogItem({
+          id: "factory-backlog:delivery:production-readiness",
+          stageId: "delivery",
+          title: "Run the production readiness gate",
+          description: `Verify ${options.appSpec.appName} is strong enough for deployment handoff.`,
+          instruction: `Run the production readiness gate for ${options.appSpec.appName}. Require a build script plus at least one of typecheck, lint, or test. If any required checks are missing or failing, fail clearly. When complete, explicitly say "Production readiness gate passed."`,
+          expectedOutcome: "Production readiness gate passed.",
+          storyId: "story-delivery-handoff",
+          taskId: "task-production-readiness",
+          acceptanceCriteria: ["Production readiness gate passed."],
+          completionCriterionIds: ["factory-delivery:production-readiness"],
+          verificationCriterionIds: ["factory-delivery:production-readiness-evidence"],
+          preferredSpecialistAgentTypeId: "repo_tools_dev",
+          requiredSpecialistAgentTypeId: "repo_tools_dev",
+          rationale: "Seed item from the fixed delivery backlog.",
+          createdAt: options.createdAt
+        }),
+        createSeedBacklogItem({
           id: "factory-backlog:delivery:deployment-handoff",
           stageId: "delivery",
           title: "Prepare deployment handoff",

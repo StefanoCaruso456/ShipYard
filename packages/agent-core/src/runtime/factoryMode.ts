@@ -24,6 +24,7 @@ import type {
   RunProjectInput,
   RunProjectLinkInput,
   RunContextInput,
+  RepoToolRequest,
   SubmitTaskInput,
   ValidationGate
 } from "./types";
@@ -942,11 +943,19 @@ function buildFactoryPhaseExecution(
             title: "Prepare the handoff",
             description: `Summarize the delivery state for ${factory.appName}.`,
             acceptanceCriteria: [
+              "Production readiness gate passed.",
               "Deployment handoff prepared.",
               "Delivery summary prepared."
             ],
             preferredSpecialistAgentTypeId: "repo_tools_dev",
             tasks: [
+              createFactoryTask({
+                id: "task-production-readiness",
+                instruction: `Run the production readiness gate for ${factory.appName}. Verify the connected runtime workspace by executing the declared verification scripts for ${stack.label}. Require a build script and at least one additional verification script among typecheck, lint, or test. If any check fails, stop and report the failing command instead of claiming success. When complete, explicitly say "Production readiness gate passed."`,
+                expectedOutcome: "Production readiness gate passed.",
+                requiredSpecialistAgentTypeId: "repo_tools_dev",
+                toolRequest: buildFactoryProductionReadinessToolRequest()
+              }),
               createFactoryTask({
                 id: "task-deployment-handoff",
                 instruction: `Prepare the deploy handoff for ${factory.appName} targeting ${factory.deployment.provider}. Summarize environment variables, manual setup steps, release risks, and the next operator review needed. When complete, explicitly say "Deployment handoff prepared."`,
@@ -1105,7 +1114,7 @@ function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitio
   const repositoryLabel = formatRepositoryLabel(appSpec.repository.owner, appSpec.repository.name);
 
   return {
-    summary: `${appSpec.appName} is complete when ${repositoryLabel} contains a verified first delivery slice on ${appSpec.stack.label} and the ${appSpec.deployment.provider} handoff is ready for operator review.`,
+    summary: `${appSpec.appName} is complete when ${repositoryLabel} contains a verified first delivery slice on ${appSpec.stack.label}, the production readiness gate passes, and the ${appSpec.deployment.provider} handoff is ready for operator review.`,
     completionCriteria: [
       {
         id: "definition-of-done:intake",
@@ -1121,7 +1130,7 @@ function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitio
       },
       {
         id: "definition-of-done:delivery",
-        description: "Deployment handoff and delivery summary are prepared for operator review."
+        description: "Production readiness is verified, and the deployment handoff plus delivery summary are prepared for operator review."
       }
     ],
     verificationCriteria: [
@@ -1152,6 +1161,13 @@ function buildFactoryDefinitionOfDone(appSpec: FactoryAppSpec): FactoryDefinitio
         evidenceKind: "phase_status",
         target: "factory-delivery",
         expectedValue: "completed"
+      },
+      {
+        id: "definition-of-done:production-readiness",
+        description: 'Execution evidence includes "Production readiness gate passed."',
+        evidenceKind: "task_evidence",
+        target: "task-production-readiness",
+        expectedValue: "Production readiness gate passed."
       },
       {
         id: "definition-of-done:delivery-summary",
@@ -1299,6 +1315,10 @@ function buildFactoryPhaseContracts(
       name: "Delivery",
       completionCriteria: [
         {
+          id: "factory-delivery:production-readiness",
+          description: "Production readiness gate passed."
+        },
+        {
           id: "factory-delivery:deployment-handoff",
           description: "Deployment handoff prepared."
         },
@@ -1314,6 +1334,13 @@ function buildFactoryPhaseContracts(
           evidenceKind: "phase_status",
           target: "factory-delivery",
           expectedValue: "completed"
+        },
+        {
+          id: "factory-delivery:production-readiness-evidence",
+          description: 'Execution evidence includes "Production readiness gate passed."',
+          evidenceKind: "task_evidence",
+          target: "task-production-readiness",
+          expectedValue: "Production readiness gate passed."
         },
         {
           id: "factory-delivery:handoff-evidence",
@@ -1395,6 +1422,7 @@ function createFactoryTask(options: {
   instruction: string;
   expectedOutcome: string;
   requiredSpecialistAgentTypeId?: "frontend_dev" | "backend_dev" | "repo_tools_dev" | null;
+  toolRequest?: RepoToolRequest | null;
 }) {
   const validationGates: ValidationGate[] = [
     {
@@ -1409,8 +1437,35 @@ function createFactoryTask(options: {
     id: options.id,
     instruction: options.instruction,
     expectedOutcome: options.expectedOutcome,
+    toolRequest: options.toolRequest ?? null,
     requiredSpecialistAgentTypeId: options.requiredSpecialistAgentTypeId ?? null,
     validationGates
+  };
+}
+
+function buildFactoryProductionReadinessToolRequest(): RepoToolRequest {
+  const script = [
+    "const fs=require('node:fs');",
+    "const cp=require('node:child_process');",
+    "const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));",
+    "const scripts=pkg.scripts??{};",
+    "const pm=fs.existsSync('pnpm-lock.yaml')?'pnpm':fs.existsSync('yarn.lock')?'yarn':'npm';",
+    "const run=(name)=>{const args=pm==='npm'?['run',name]:[name];const result=cp.spawnSync(pm,args,{stdio:'inherit'});if((result.status??1)!==0)process.exit(result.status??1);};",
+    "if(!scripts.build){console.error('Missing required build script for production readiness gate.');process.exit(1);}",
+    "const checks=['typecheck','lint','test','build'].filter((name)=>Boolean(scripts[name]));",
+    "const extraChecks=checks.filter((name)=>name!=='build');",
+    "if(extraChecks.length===0){console.error('Production readiness gate requires at least one verification script among typecheck, lint, or test.');process.exit(1);}",
+    "for(const name of checks)run(name);",
+    "console.log('Production readiness gate passed.');"
+  ].join("");
+
+  return {
+    toolName: "run_terminal_command",
+    input: {
+      commandLine: `node -e ${JSON.stringify(script)}`,
+      category: "ci",
+      timeoutMs: 300000
+    }
   };
 }
 
