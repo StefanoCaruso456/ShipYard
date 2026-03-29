@@ -140,12 +140,67 @@ test("createOpenAIExecutor adds local file plan instructions for browser-backed 
     }
   );
 
-  assert.match(capturedPrompt, /Local workspace file action contract/);
+  assert.match(capturedPrompt, /Workspace file action contract/);
   assert.match(capturedPrompt, /<local-file-plan>/);
   assert.match(capturedPrompt, /Response style:/);
   assert.match(capturedPrompt, /Avoid internal runtime labels such as "Runtime result"/);
   assert.equal(capturedMaxOutputTokens, 1400);
   assert.equal(result.summary, "Scaffold plan ready.");
+});
+
+test("createOpenAIExecutor adds local file plan instructions for runtime-backed projects", async () => {
+  let capturedPrompt = "";
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Repository foundation scaffolded.",
+        usage: {
+          inputTokens: 8,
+          outputTokens: 6,
+          totalTokens: 14
+        },
+        totalUsage: {
+          inputTokens: 8,
+          outputTokens: 6,
+          totalTokens: 14
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  await executor(
+    createRun("Scaffold the runtime workspace", {
+      project: {
+        id: "project-runtime",
+        name: "Runtime project",
+        kind: "live",
+        folder: {
+          name: "runtime-project",
+          displayPath: "/tmp/runtime-project",
+          status: "connected",
+          provider: "runtime"
+        }
+      }
+    }),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Workspace file action contract/);
+  assert.match(capturedPrompt, /connected runtime folder/);
+  assert.match(capturedPrompt, /<local-file-plan>/);
 });
 
 test("createOpenAIExecutor injects operating mode guidance into prompts", async () => {
@@ -195,6 +250,85 @@ test("createOpenAIExecutor injects operating mode guidance into prompts", async 
   assert.match(capturedPrompt, /Requested: Review mode/);
   assert.match(capturedPrompt, /Resolved: Review mode/);
   assert.match(capturedPrompt, /Stay review-focused and read-only/);
+});
+
+test("createOpenAIExecutor keeps factory prompts focused on local bootstrap work", async () => {
+  let capturedPrompt = "";
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string }) => {
+      capturedPrompt = input.prompt ?? "";
+
+      return {
+        text: "Repository foundation scaffolded.",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17
+        },
+        totalUsage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  await executor(
+    createRun("Scaffold the runtime workspace foundation.", {
+      requestedOperatingMode: "factory",
+      operatingMode: "factory",
+      factory: {
+        version: 1,
+        mode: "factory",
+        appName: "Pong",
+        currentStage: "bootstrap",
+        stack: {
+          templateId: "nextjs_supabase_vercel",
+          label: "Next.js + Supabase + Vercel",
+          frontend: "Next.js",
+          backend: "Supabase",
+          data: "Supabase Postgres",
+          deployment: "Vercel"
+        },
+        repository: {
+          provider: "github",
+          owner: "acme",
+          name: "pong",
+          visibility: "private",
+          baseBranch: "main",
+          localPath: "/tmp/factory-pong",
+          url: null
+        },
+        deployment: {
+          provider: "vercel",
+          projectName: "pong",
+          environment: "production",
+          url: null
+        },
+        productBrief: "Build a simple ping game back and forth.",
+        artifacts: [],
+        deliverySummary: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    }),
+    {
+      instructionRuntime
+    }
+  );
+
+  assert.match(capturedPrompt, /Remote repository setup is deferred until an explicit later step\./);
+  assert.doesNotMatch(capturedPrompt, /Repository target:/);
 });
 
 test("createOpenAIExecutor uses a local file plan summary when the response is plan-only", async () => {

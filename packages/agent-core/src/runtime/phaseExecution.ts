@@ -1143,7 +1143,8 @@ function buildTaskEvidence(task: Task, result: AgentRunResult) {
   return [
     result.summary,
     result.responseText ?? null,
-    result.mode === "repo-tool" ? JSON.stringify(result.toolResult) : null
+    result.mode === "repo-tool" ? JSON.stringify(result.toolResult) : null,
+    result.workspacePlan ? JSON.stringify(result.workspacePlan) : null
   ]
     .filter(Boolean)
     .join("\n\n");

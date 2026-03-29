@@ -442,8 +442,8 @@ function buildFactoryRunContext(
       ...existing.constraints,
       "Operate only inside the connected runtime folder for this factory run.",
       "Treat this as a greenfield application bootstrap, not an edit to the Shipyard control repository.",
+      "Do not create, connect, or publish a remote repository unless a later explicit task asks for it.",
       `Use the selected stack template: ${stack.label}.`,
-      `Repository target: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}.`,
       `Deployment target: ${factory.deployment.provider}.`
     ]),
     relevantFiles: mergeRelevantFiles(existing.relevantFiles, [
@@ -480,9 +480,8 @@ function buildFactoryRunContext(
         title: "Factory targets",
         content: [
           `App: ${factory.appName}`,
-          `Repository: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}`,
-          `Visibility: ${factory.repository.visibility ?? DEFAULT_REPOSITORY_VISIBILITY}`,
-          `Base branch: ${factory.repository.baseBranch ?? DEFAULT_REPOSITORY_BASE_BRANCH}`,
+          `Planned repository name: ${formatRepositoryLabel(factory.repository.owner ?? null, factory.repository.name)}`,
+          "Remote repository setup: defer until an explicit later step.",
           `Deployment provider: ${factory.deployment.provider}`,
           factory.deployment.projectName?.trim()
             ? `Deployment project: ${factory.deployment.projectName.trim()}`
@@ -558,7 +557,7 @@ function buildFactoryPhaseExecution(factory: FactoryRunInput): PhaseExecutionInp
             tasks: [
               createFactoryTask({
                 id: "task-repository-bootstrap",
-                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed for ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. When complete, explicitly say "Repository foundation scaffolded."`,
+                instruction: `Inside the connected runtime folder, scaffold the initial repository foundation for ${factory.appName}. Create the top-level files, configuration, starter structure, and setup docs needed for ${stack.label}. Reuse README.md and shipyard.factory.json when helpful. Do not create, connect, or publish a GitHub repository or any remote during this task. When complete, explicitly say "Repository foundation scaffolded."`,
                 expectedOutcome: "Repository foundation scaffolded.",
                 requiredSpecialistAgentTypeId: "repo_tools_dev"
               })
