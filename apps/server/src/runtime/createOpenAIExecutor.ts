@@ -723,12 +723,10 @@ function resolveRuntimeWorkspaceRoot(run: AgentRunRecord) {
 function responseIndicatesIncompleteTask(text: string) {
   const normalized = normalizeText(text);
   const incompleteSignals = [
-    "remaining work",
-    "still need",
-    "todo",
-    "to do",
+    "incomplete",
     "not complete",
     "blocked",
+    "unable to complete",
     "cannot complete",
     "could not complete",
     "is not complete",
