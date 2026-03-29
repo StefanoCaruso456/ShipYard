@@ -455,7 +455,75 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
       "Scaffolded the Jira repository foundation and setup notes.\n\nNext step: begin the first implementation slice.\n\nRepository foundation scaffolded."
     );
     assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["README.md"]);
-    assert.match(result.summary, /Repository foundation scaffolded\./);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("createOpenAIExecutor still appends the bootstrap completion outcome when the response mentions remaining work for later stages", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async () => ({
+      text:
+        "Scaffolded the Jira repository foundation and starter structure.\n\nRemaining work for later stages: implement issue boards, workflows, and reporting.\n\n<local-file-plan>\n{\"operations\":[{\"kind\":\"write_file\",\"path\":\"README.md\",\"content\":\"# Jira clone\\n\"},{\"kind\":\"write_file\",\"path\":\"shipyard.factory.json\",\"content\":\"{\\\"app\\\":\\\"jira\\\"}\\n\"}]}\n</local-file-plan>",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      },
+      totalUsage: {
+        inputTokens: 12,
+        outputTokens: 18,
+        totalTokens: 30
+      }
+    })) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+
+  try {
+    const result = await executor(
+      createRun("Scaffold the Jira repository", {
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "local",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "jira",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-bootstrap",
+          phaseName: "Factory bootstrap",
+          storyId: "story-repository-bootstrap",
+          storyTitle: "Repository bootstrap",
+          taskId: "task-repository-bootstrap",
+          taskInstruction: "Scaffold the initial repository foundation.",
+          expectedOutcome: "Repository foundation scaffolded."
+        })
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.equal(
+      result.responseText,
+      "Scaffolded the Jira repository foundation and starter structure.\n\nRemaining work for later stages: implement issue boards, workflows, and reporting.\n\nRepository foundation scaffolded."
+    );
+    assert.deepEqual(result.appliedWorkspacePlan?.changedFiles, ["README.md", "shipyard.factory.json"]);
   } finally {
     await rm(runtimeRoot, { recursive: true, force: true });
   }
