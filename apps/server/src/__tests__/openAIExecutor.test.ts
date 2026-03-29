@@ -203,7 +203,7 @@ test("createOpenAIExecutor injects operating mode guidance into prompts", async 
   assert.match(capturedPrompt, /Stay review-focused and read-only/);
 });
 
-test("createOpenAIExecutor keeps factory prompts focused on local bootstrap work", async () => {
+test("createOpenAIExecutor keeps factory prompts focused on the active local bootstrap task", async () => {
   let capturedPrompt = "";
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -256,16 +256,32 @@ test("createOpenAIExecutor keeps factory prompts focused on local bootstrap work
   factoryState.currentStage = "bootstrap";
 
   await executor(
-    createRun("Scaffold the runtime workspace foundation.", {
+    createRun("build a pong video game research how", {
       requestedOperatingMode: "factory",
       operatingMode: "factory",
-      factory: factoryState
+      factory: factoryState,
+      phaseExecution: createPhaseExecutionState({
+        phaseId: "factory-bootstrap",
+        phaseName: "Factory bootstrap",
+        storyId: "story-repository-bootstrap",
+        storyTitle: "Repository bootstrap",
+        taskId: "task-repository-bootstrap",
+        taskInstruction:
+          "Inside the connected runtime folder, scaffold the initial repository foundation for Pong. Create the top-level files, configuration, starter structure, and setup docs needed to run the application locally with Next.js + Supabase + Vercel. When complete, explicitly say \"Repository foundation scaffolded.\"",
+        expectedOutcome: "Repository foundation scaffolded."
+      })
     }),
     {
       instructionRuntime
     }
   );
 
+  assert.match(capturedPrompt, /Current phase task id: task-repository-bootstrap/);
+  assert.match(
+    capturedPrompt,
+    /Task instruction:\nInside the connected runtime folder, scaffold the initial repository foundation for Pong/
+  );
+  assert.match(capturedPrompt, /Original operator request:\nbuild a pong video game research how/);
   assert.match(capturedPrompt, /Remote repository setup is deferred until an explicit later step\./);
   assert.doesNotMatch(capturedPrompt, /Repository target:/);
 });
@@ -718,6 +734,132 @@ test("createOpenAIExecutor generates a structured runtime workspace plan for pro
     assert.equal(result.usage?.inputTokens, 18);
     assert.equal(result.usage?.outputTokens, 32);
     assert.equal(result.usage?.totalTokens, 50);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("createOpenAIExecutor falls back to a bootstrap scaffold plan when the structured runtime workspace plan is empty", async () => {
+  let callCount = 0;
+  let structuredPlanPrompt = "";
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
+  const config: OpenAIExecutorConfig = {
+    provider: "openai",
+    configured: true,
+    apiKey: "test-key",
+    apiKeySource: "OPENAI_KEY",
+    modelId: "gpt-4o-mini"
+  };
+  const executor = createOpenAIExecutor({
+    config,
+    generateTextImpl: (async (input: { prompt?: string; output?: unknown }) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return {
+          text:
+            "Scaffolded the Pong repository foundation with local starter files and setup notes.",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          },
+          totalUsage: {
+            inputTokens: 12,
+            outputTokens: 18,
+            totalTokens: 30
+          }
+        };
+      }
+
+      structuredPlanPrompt = input.prompt ?? "";
+
+      return {
+        text: "",
+        output: input.output
+          ? {
+              operations: []
+            }
+          : undefined,
+        usage: {
+          inputTokens: 6,
+          outputTokens: 14,
+          totalTokens: 20
+        },
+        totalUsage: {
+          inputTokens: 6,
+          outputTokens: 14,
+          totalTokens: 20
+        }
+      };
+    }) as unknown as typeof generateText
+  });
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const factoryState = createFactoryRunState({
+    input: {
+      appName: "Pong",
+      stackTemplateId: "nextjs_supabase_vercel",
+      repository: {
+        provider: "github",
+        owner: "acme",
+        name: "pong",
+        visibility: "private",
+        baseBranch: "main"
+      },
+      deployment: {
+        provider: "vercel",
+        projectName: "pong",
+        environment: "production"
+      }
+    },
+    productBrief: "Build a fast arcade pong experience with a playful landing page.",
+    workspacePath: runtimeRoot
+  });
+  factoryState.currentStage = "bootstrap";
+
+  try {
+    const result = await executor(
+      createRun("build a pong video game research how", {
+        requestedOperatingMode: "factory",
+        operatingMode: "factory",
+        factory: factoryState,
+        project: {
+          id: "project-runtime",
+          name: "Runtime project",
+          kind: "live",
+          environment: "Factory workspace",
+          description: "Connected runtime workspace",
+          folder: {
+            name: "pong",
+            displayPath: runtimeRoot,
+            status: "connected",
+            provider: "runtime"
+          }
+        },
+        phaseExecution: createPhaseExecutionState({
+          phaseId: "factory-bootstrap",
+          phaseName: "Factory bootstrap",
+          storyId: "story-repository-bootstrap",
+          storyTitle: "Repository bootstrap",
+          taskId: "task-repository-bootstrap",
+          taskInstruction:
+            "Inside the connected runtime folder, scaffold the initial repository foundation for Pong. Create the top-level files, configuration, starter structure, and setup docs needed to run the application locally with Next.js + Supabase + Vercel. When complete, explicitly say \"Repository foundation scaffolded.\"",
+          expectedOutcome: "Repository foundation scaffolded."
+        })
+      }),
+      {
+        instructionRuntime
+      }
+    );
+
+    assert.equal(callCount, 2);
+    assert.match(structuredPlanPrompt, /Bootstrap scaffold guidance:/);
+    assert.match(structuredPlanPrompt, /At minimum include package\.json/);
+    assert.match(result.responseText ?? "", /Repository foundation scaffolded\./);
+    assert.equal(result.appliedWorkspacePlan?.changedFiles.includes("package.json"), true);
+    assert.equal(result.appliedWorkspacePlan?.changedFiles.includes("app/page.tsx"), true);
+    assert.match(await readFile(path.join(runtimeRoot, "package.json"), "utf8"), /"next"/);
+    assert.match(await readFile(path.join(runtimeRoot, "app/page.tsx"), "utf8"), /Bootstrap scaffold for Pong/);
   } finally {
     await rm(runtimeRoot, { recursive: true, force: true });
   }

@@ -23,6 +23,10 @@ import {
   type ExtractedRuntimeWorkspacePlan,
   type RuntimeWorkspacePlan
 } from "./runtimeWorkspacePlan";
+import {
+  buildFactoryBootstrapFallbackPlan,
+  renderBootstrapRecoveryPlanGuidance
+} from "./factoryBootstrapFallbackPlan";
 
 type OpenAIApiKeySource = "OPENAI_KEY" | "OPENAI_API_KEY" | null;
 
@@ -185,8 +189,13 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
         runtimeWorkspaceRoot != null && requiresRuntimeWorkspacePlan;
       let runtimeWorkspacePlanGenerationAttempted = false;
       let runtimeWorkspacePlanGenerationSucceeded = false;
-      let runtimeWorkspacePlanSource: "embedded_response" | "structured_output" | "none" =
-        hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan) ? "embedded_response" : "none";
+      let runtimeWorkspacePlanSource:
+        | "embedded_response"
+        | "structured_output"
+        | "bootstrap_fallback"
+        | "none" = hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan)
+        ? "embedded_response"
+        : "none";
 
       if (usesStructuredRuntimeWorkspacePlan && !hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan)) {
         runtimeWorkspacePlanGenerationAttempted = true;
@@ -261,6 +270,31 @@ export function createOpenAIExecutor(options: CreateOpenAIExecutorOptions): Exec
             metadata: {
               taskId: currentTask?.id ?? null,
               workspaceProvider
+            }
+          });
+        }
+      }
+
+      if (usesStructuredRuntimeWorkspacePlan && !hasNonEmptyRuntimeWorkspacePlan(extractedWorkspacePlan)) {
+        const bootstrapFallbackPlan = buildFactoryBootstrapFallbackPlan({
+          run,
+          task: currentTask
+        });
+
+        if (bootstrapFallbackPlan && bootstrapFallbackPlan.operations.length > 0) {
+          extractedWorkspacePlan = {
+            strippedText: stripLocalFilePlanBlock(rawResponseText),
+            plan: bootstrapFallbackPlan,
+            error: null
+          };
+          runtimeWorkspacePlanGenerationSucceeded = true;
+          runtimeWorkspacePlanSource = "bootstrap_fallback";
+          modelSpan?.addEvent("runtime_workspace_plan_bootstrap_fallback_applied", {
+            message:
+              "Structured workspace plan generation returned no usable operations. Applied the bootstrap scaffold fallback plan.",
+            metadata: {
+              taskId: currentTask?.id ?? null,
+              operationCount: bootstrapFallbackPlan.operations.length
             }
           });
         }
@@ -437,12 +471,13 @@ function buildTaskPrompt(
   }
 ) {
   const operatingModePolicy = getOperatingModePolicy(input.operatingMode);
+  const currentTask = resolveCurrentPhaseTask(run);
 
   return [
     "Produce the next execution response for the operator.",
     run.title ? `Thread title: ${run.title}` : null,
     renderOperatingModeContext(input.requestedOperatingMode, input.operatingMode),
-    `Task instruction:\n${run.instruction}`,
+    renderTaskInstructionContext(run, currentTask),
     input.plannedStep
       ? [
           "Planned step:",
@@ -512,6 +547,26 @@ function renderOperatingModeContext(
   ].join("\n");
 }
 
+function renderTaskInstructionContext(
+  run: AgentRunRecord,
+  task: ReturnType<typeof resolveCurrentPhaseTask>
+) {
+  const taskInstruction = task?.instruction?.trim() || run.instruction.trim();
+  const originalInstruction = run.instruction.trim();
+
+  return [
+    task?.id ? `Current phase task id: ${task.id}` : null,
+    `Task instruction:\n${taskInstruction}`,
+    taskInstruction &&
+    originalInstruction &&
+    normalizeText(taskInstruction) !== normalizeText(originalInstruction)
+      ? `Original operator request:\n${originalInstruction}`
+      : null
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function renderPhaseExecutionContext(run: AgentRunRecord) {
   const phaseExecution = run.phaseExecution;
 
@@ -528,6 +583,7 @@ function renderPhaseExecutionContext(run: AgentRunRecord) {
     `Progress: ${phaseExecution.progress.completedPhases}/${phaseExecution.progress.totalPhases} phases, ${phaseExecution.progress.completedStories}/${phaseExecution.progress.totalStories} stories, ${phaseExecution.progress.completedTasks}/${phaseExecution.progress.totalTasks} tasks completed.`,
     phase ? `Current phase: ${phase.name}` : null,
     story ? `Current story: ${story.title}` : null,
+    task?.instruction ? `Current task detail: ${task.instruction}` : null,
     task ? `Current task expected outcome: ${task.expectedOutcome}` : null,
     story && story.acceptanceCriteria.length > 0
       ? `Story acceptance criteria:\n${story.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")}`
@@ -715,6 +771,7 @@ function buildRuntimeWorkspacePlanPrompt(input: {
     input.task?.id ? `Task id: ${input.task.id}` : null,
     `Task instruction:\n${currentInstruction}`,
     expectedOutcome ? `Expected outcome:\n${expectedOutcome}` : null,
+    renderBootstrapRecoveryPlanGuidance(input.run),
     `Visible response draft:\n${input.rawResponseText}`
   ]
     .filter(Boolean)
