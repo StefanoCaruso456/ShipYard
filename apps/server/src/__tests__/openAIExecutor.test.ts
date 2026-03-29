@@ -31,7 +31,7 @@ test("resolveOpenAIExecutorConfig prefers OPENAI_KEY and falls back to OPENAI_AP
 
   assert.equal(fallbackConfig.apiKey, "compat-key");
   assert.equal(fallbackConfig.apiKeySource, "OPENAI_API_KEY");
-  assert.equal(fallbackConfig.modelId, "gpt-4o-mini");
+  assert.equal(fallbackConfig.modelId, "gpt-5.4");
 });
 
 test("createOpenAIExecutor returns a placeholder result when no key is configured", async () => {

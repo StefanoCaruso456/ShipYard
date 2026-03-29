@@ -46,6 +46,8 @@ type TokenUsageTotals = {
   totalTokens: number | null;
 };
 
+const DEFAULT_OPENAI_EXECUTOR_MODEL_ID = "gpt-5.4";
+
 export function resolveOpenAIExecutorConfig(
   env: NodeJS.ProcessEnv = process.env
 ): OpenAIExecutorConfig {
@@ -57,7 +59,7 @@ export function resolveOpenAIExecutorConfig(
     configured: Boolean(openAIKey || openAIApiKey),
     apiKey: openAIKey || openAIApiKey || null,
     apiKeySource: openAIKey ? "OPENAI_KEY" : openAIApiKey ? "OPENAI_API_KEY" : null,
-    modelId: env.OPENAI_MODEL?.trim() || "gpt-4o-mini"
+    modelId: env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_EXECUTOR_MODEL_ID
   };
 }
 
