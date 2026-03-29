@@ -867,6 +867,8 @@ function renderImplementationRecoveryPlanGuidance(
         `- This is the application shell task for ${run.factory.appName}.`,
         "- The plan must modify real application shell files, not placeholder notes or blocker docs.",
         "- Prefer changes under app/, src/app/, components/, src/components/, pages/, or related shell styling files.",
+        '- Keep generated TypeScript config compatible with current TypeScript releases. Do not add compilerOptions.baseUrl to tsconfig unless you also include compilerOptions.ignoreDeprecations set to "6.0".',
+        "- Prefer relative imports over new path-alias setup when scaffolding the first local slice.",
         "- Do not write TASK-NEEDS-IMPLEMENTATION.txt, TODO notes, or README-only changes as the primary result for this task."
       ].join("\n");
     case "task-product-flow":
