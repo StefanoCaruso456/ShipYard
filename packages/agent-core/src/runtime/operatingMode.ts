@@ -122,7 +122,7 @@ const operatingModePolicies: Record<OperatingMode, OperatingModePolicy> = {
     traceTag: "mode:factory",
     description: "Advance the factory delivery pipeline with stage-aware execution.",
     plannerDirective:
-      "Keep the work aligned to the current factory stage, repository target, and delivery milestones.",
+      "Keep the work aligned to the current factory stage, the connected runtime workspace, and delivery milestones.",
     executorDirective:
       "Treat the request as part of a staged factory build. Keep execution aligned to the current factory milestone and delivery path.",
     verifierDirective:
