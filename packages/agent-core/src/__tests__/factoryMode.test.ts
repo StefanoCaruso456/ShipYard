@@ -553,7 +553,7 @@ test("syncFactoryRunState records Factory merge decisions, blockers, and reassig
   assert.ok(
     synced?.integrationBlockers.some(
       (blocker) =>
-        blocker.packetId === "factory-work-packet:story-supabase-flow" &&
+        blocker.packetId === "factory-work-packet:story-product-flow" &&
         blocker.kind === "scope_overlap" &&
         blocker.status === "open"
     )
@@ -561,7 +561,7 @@ test("syncFactoryRunState records Factory merge decisions, blockers, and reassig
   assert.ok(
     synced?.reassignmentDecisions.some(
       (decision) =>
-        decision.packetId === "factory-work-packet:story-supabase-flow" &&
+        decision.packetId === "factory-work-packet:story-product-flow" &&
         decision.toAgentTypeId !== null
     )
   );

@@ -116,7 +116,11 @@ export async function applyRuntimeWorkspacePlan(input: {
         const relativePath = normalizeRelativePath(operation.path);
         const absolutePath = path.join(input.rootDir, relativePath);
         await mkdir(path.dirname(absolutePath), { recursive: true });
-        await writeFile(absolutePath, operation.content, "utf8");
+        await writeFile(
+          absolutePath,
+          normalizeGeneratedWorkspaceFileContent(relativePath, operation.content),
+          "utf8"
+        );
         writtenFileCount += 1;
         changedFiles.add(relativePath);
         break;
@@ -246,6 +250,52 @@ function normalizeRelativePath(input: string) {
   }
 
   return parts.join("/");
+}
+
+function normalizeGeneratedWorkspaceFileContent(relativePath: string, content: string) {
+  if (!isTypeScriptConfigPath(relativePath)) {
+    return content;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as {
+      compilerOptions?: Record<string, unknown>;
+    };
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return content;
+    }
+
+    const compilerOptions = parsed.compilerOptions;
+
+    if (!compilerOptions || typeof compilerOptions !== "object" || Array.isArray(compilerOptions)) {
+      return content;
+    }
+
+    if (typeof compilerOptions.baseUrl !== "string" || "ignoreDeprecations" in compilerOptions) {
+      return content;
+    }
+
+    return `${JSON.stringify(
+      {
+        ...parsed,
+        compilerOptions: {
+          ...compilerOptions,
+          ignoreDeprecations: "6.0"
+        }
+      },
+      null,
+      2
+    )}\n`;
+  } catch {
+    return content;
+  }
+}
+
+function isTypeScriptConfigPath(relativePath: string) {
+  const basename = path.posix.basename(relativePath);
+
+  return basename === "tsconfig.json" || /^tsconfig\..+\.json$/i.test(basename);
 }
 
 function buildAppliedSummary(
