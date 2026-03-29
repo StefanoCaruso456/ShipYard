@@ -117,12 +117,18 @@ test("compileFactoryTaskSubmission adds risk-driven Factory approval gates only 
 
   assert.equal(compiled.phaseExecution?.phases[1]?.approvalGate?.kind, "architecture");
   assert.equal(compiled.phaseExecution?.phases[2]?.approvalGate ?? null, null);
-  assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate?.kind, "deployment");
+  assert.equal(compiled.phaseExecution?.phases[3]?.approvalGate ?? null, null);
   assert.ok(
     compiled.context?.externalContext?.some(
       (item) =>
         item.id === "factory-autonomy-policy" &&
-        item.content.includes("high_risk_repository_target") &&
+        item.content.includes("high_risk_repository_target")
+    )
+  );
+  assert.ok(
+    !compiled.context?.externalContext?.some(
+      (item) =>
+        item.id === "factory-autonomy-policy" &&
         item.content.includes("high_risk_deployment_target")
     )
   );
@@ -141,11 +147,6 @@ test("compileFactoryTaskSubmission does not block bootstrap when the repository 
           name: "jira",
           visibility: "private",
           baseBranch: "main"
-        },
-        deployment: {
-          provider: "vercel",
-          projectName: "jira",
-          environment: "production"
         }
       }
     },
@@ -266,6 +267,11 @@ test("createFactoryRunState stores a typed completion contract", () => {
     state.completionContract.phases.find((phase) => phase.phaseId === "factory-delivery")
       ?.completionCriteria[0]?.description,
     "Production readiness gate passed."
+  );
+  assert.deepEqual(
+    state.completionContract.phases.find((phase) => phase.phaseId === "factory-delivery")
+      ?.completionCriteria.map((criterion) => criterion.description),
+    ["Production readiness gate passed.", "Delivery summary prepared."]
   );
 });
 

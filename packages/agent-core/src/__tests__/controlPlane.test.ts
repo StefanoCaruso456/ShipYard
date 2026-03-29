@@ -288,7 +288,7 @@ test("factory handoffs attach delegation targets, dependencies, and artifact pay
   const controlPlane = createControlPlaneState(phaseExecution);
   const deliveryPhase = phaseExecution.phases.find((phase) => phase.id === "factory-delivery");
   const deliveryStory = deliveryPhase?.userStories[0];
-  const deliveryTask = deliveryStory?.tasks[2];
+  const deliveryTask = deliveryStory?.tasks[1];
 
   assert.ok(deliveryPhase);
   assert.ok(deliveryStory);
@@ -310,7 +310,6 @@ test("factory handoffs attach delegation targets, dependencies, and artifact pay
 
   assert.deepEqual(storyHandoff?.acceptanceTargetIds, [
     "factory-delivery:production-readiness",
-    "factory-delivery:deployment-handoff",
     "factory-delivery:delivery-summary"
   ]);
   assert.deepEqual(taskHandoff?.acceptanceTargetIds, [
@@ -320,7 +319,7 @@ test("factory handoffs attach delegation targets, dependencies, and artifact pay
     "factory-delivery:summary-evidence",
     "factory-delivery:summary-artifact"
   ]);
-  assert.deepEqual(taskHandoff?.dependencyIds, ["task-deployment-handoff"]);
+  assert.deepEqual(taskHandoff?.dependencyIds, ["task-production-readiness"]);
   assert.equal(taskHandoff?.status, "accepted");
   assert.equal(taskDelegationArtifact?.payload?.kind, "delegation_brief");
   assert.equal(taskDelegationArtifact?.payload?.delegationPath, "specialist_to_execution");

@@ -235,6 +235,7 @@ test("createOpenAIExecutor uses a local file plan summary when the response is p
 
 test("createOpenAIExecutor applies workspace plans for runtime-backed Factory projects even when the project is live", async () => {
   let capturedPrompt = "";
+  let capturedMaxOutputTokens: number | undefined;
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -245,8 +246,9 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed Factory pr
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async (input: { prompt?: string }) => {
+    generateTextImpl: (async (input: { prompt?: string; maxOutputTokens?: number }) => {
       capturedPrompt = input.prompt ?? "";
+      capturedMaxOutputTokens = input.maxOutputTokens;
 
       return {
         text:
@@ -308,6 +310,7 @@ test("createOpenAIExecutor applies workspace plans for runtime-backed Factory pr
       await readFile(path.join(runtimeRoot, "src/app/page.tsx"), "utf8"),
       'export default function Page() { return "VendorFlow"; }\n'
     );
+    assert.equal(capturedMaxOutputTokens, undefined);
     assert.equal(
       result.responseText,
       "Implemented the first VendorFlow product flow.\n\nCore product flow implemented."
@@ -532,6 +535,7 @@ test("createOpenAIExecutor still appends the bootstrap completion outcome when t
 test("createOpenAIExecutor generates a structured runtime workspace plan for prose-only Factory bootstrap responses", async () => {
   let callCount = 0;
   let structuredPlanPrompt = "";
+  const recordedMaxOutputTokens: Array<number | undefined> = [];
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-plan-"));
   const config: OpenAIExecutorConfig = {
     provider: "openai",
@@ -542,8 +546,13 @@ test("createOpenAIExecutor generates a structured runtime workspace plan for pro
   };
   const executor = createOpenAIExecutor({
     config,
-    generateTextImpl: (async (input: { prompt?: string; output?: unknown }) => {
+    generateTextImpl: (async (input: {
+      prompt?: string;
+      output?: unknown;
+      maxOutputTokens?: number;
+    }) => {
       callCount += 1;
+      recordedMaxOutputTokens.push(input.maxOutputTokens);
 
       if (callCount === 1) {
         return {
@@ -626,6 +635,7 @@ test("createOpenAIExecutor generates a structured runtime workspace plan for pro
     );
 
     assert.equal(callCount, 2);
+    assert.deepEqual(recordedMaxOutputTokens, [undefined, undefined]);
     assert.match(structuredPlanPrompt, /Generate only the machine-readable runtime workspace plan/);
     assert.equal(await readFile(path.join(runtimeRoot, "README.md"), "utf8"), "# Jira\n");
     assert.equal(

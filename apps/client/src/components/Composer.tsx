@@ -514,52 +514,7 @@ export function Composer({
                       <option value="react_express_railway">React + Express + Railway</option>
                     </select>
                   </label>
-                  <label className="composer__factory-field">
-                    <span>Deploy target</span>
-                    <select
-                      value={factoryDraft.deploymentProvider}
-                      onChange={(event) =>
-                        onFactoryDraftChange({
-                          ...factoryDraft,
-                          deploymentProvider: event.target.value as RuntimeFactoryComposerDraft["deploymentProvider"]
-                        })
-                      }
-                    >
-                      <option value="vercel">Vercel</option>
-                      <option value="railway">Railway</option>
-                      <option value="manual">Manual</option>
-                    </select>
-                  </label>
-                  <label className="composer__factory-field">
-                    <span>Deploy project</span>
-                    <input
-                      type="text"
-                      value={factoryDraft.deploymentProjectName}
-                      onChange={(event) =>
-                        onFactoryDraftChange({
-                          ...factoryDraft,
-                          deploymentProjectName: event.target.value
-                        })
-                      }
-                      placeholder="Optional"
-                    />
-                  </label>
                 </div>
-
-                <label className="composer__factory-field">
-                  <span>Environment</span>
-                  <input
-                    type="text"
-                    value={factoryDraft.deploymentEnvironment}
-                    onChange={(event) =>
-                      onFactoryDraftChange({
-                        ...factoryDraft,
-                        deploymentEnvironment: event.target.value
-                      })
-                    }
-                    placeholder="production"
-                  />
-                </label>
 
                 {!backendConnected ? (
                   <p className="composer__factory-note">
@@ -567,11 +522,11 @@ export function Composer({
                   </p>
                 ) : project?.kind === "live" ? (
                   <p className="composer__factory-note">
-                    Shipyard will create a fresh isolated workspace for this app before the run starts.
+                    Shipyard will create a fresh isolated workspace for this app before the run starts. Factory will build the application locally first and leave deployment or hosted data setup for manual follow-up.
                   </p>
                 ) : (
                   <p className="composer__factory-note">
-                    Factory Mode launches a fresh Shipyard Runtime thread, even when you start from a connected local project.
+                    Factory Mode launches a fresh Shipyard Runtime thread, even when you start from a connected local project. It focuses on the application build and defers deployment or hosted data setup.
                   </p>
                 )}
               </div>

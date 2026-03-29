@@ -749,7 +749,6 @@ function buildFocusedRunSummary(
           appName: run.factory.appName,
           stackLabel: run.factory.stack.label,
           repositoryName: run.factory.repository.name,
-          deploymentProvider: run.factory.deployment.provider,
           currentStage: run.factory.currentStage,
           workspacePath: run.factory.repository.localPath
         }

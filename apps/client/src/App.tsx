@@ -1793,10 +1793,7 @@ function createDefaultFactoryDraft(): RuntimeFactoryComposerDraft {
     stackTemplateId: "nextjs_supabase_vercel",
     repositoryOwner: "",
     repositoryName: "",
-    repositoryVisibility: "private",
-    deploymentProvider: "vercel",
-    deploymentProjectName: "",
-    deploymentEnvironment: "production"
+    repositoryVisibility: "private"
   };
 }
 
@@ -1821,9 +1818,7 @@ function buildFactorySubmission(
       baseBranch: "main"
     },
     deployment: {
-      provider: draft.deploymentProvider,
-      projectName: draft.deploymentProjectName.trim() || null,
-      environment: draft.deploymentEnvironment.trim() || null
+      provider: "manual"
     }
   };
 }
