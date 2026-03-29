@@ -34,26 +34,15 @@ export type AppliedRuntimeWorkspacePlan = {
 };
 
 const LOCAL_FILE_PLAN_PATTERN = /<local-file-plan>\s*([\s\S]*?)\s*<\/local-file-plan>/i;
+const runtimeWorkspacePlanOperationSchema = z.object({
+  kind: z.enum(["mkdir", "write_file", "delete_file"]),
+  path: z.string().trim().min(1),
+  content: z.string().optional()
+});
 
 export const runtimeWorkspacePlanSchema = z.object({
   operations: z
-    .array(
-      z.discriminatedUnion("kind", [
-        z.object({
-          kind: z.literal("mkdir"),
-          path: z.string().trim().min(1)
-        }),
-        z.object({
-          kind: z.literal("write_file"),
-          path: z.string().trim().min(1),
-          content: z.string()
-        }),
-        z.object({
-          kind: z.literal("delete_file"),
-          path: z.string().trim().min(1)
-        })
-      ])
-    )
+    .array(runtimeWorkspacePlanOperationSchema)
     .min(1)
 });
 
