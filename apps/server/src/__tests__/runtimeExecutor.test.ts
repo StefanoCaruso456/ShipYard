@@ -10,8 +10,10 @@ import {
   createRepoToolset,
   type AgentRunRecord
 } from "@shipyard/agent-core";
+import { generateText } from "ai";
 
 import { resolveOpenAIExecutorConfig } from "../runtime/createOpenAIExecutor";
+import { prepareFactoryTaskSubmission } from "../runtime/prepareFactoryTaskSubmission";
 import { createRuntimeExecutor } from "../runtime/createRuntimeExecutor";
 
 test("runtime executor can process an edit task through the persistent runtime service", async () => {
@@ -423,6 +425,152 @@ test("runtime executor can process a phase execution plan that uses repo tools",
   }
 });
 
+test("runtime executor can complete a prepared Factory submission and apply runtime workspace plans", async () => {
+  const defaultDir = await mkdtemp(path.join(os.tmpdir(), "shipyard-runtime-default-"));
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "shipyard-factory-e2e-"));
+  const instructionRuntime = await createInstructionRuntimeForTests();
+  const repoToolset = createRepoToolset({ rootDir: defaultDir });
+  const structuredPlanTaskIds = new Set<string>();
+  const runtimeService = await createPersistentRuntimeService({
+    instructionRuntime,
+    executeRun: createRuntimeExecutor({
+      openAI: resolveOpenAIExecutorConfig({
+        OPENAI_KEY: "test-key"
+      }),
+      repoToolset,
+      generateTextImpl: (async (input: {
+        prompt?: string;
+        output?: unknown;
+      }) => {
+        const prompt = input.prompt ?? "";
+        const expectedOutcome = extractExpectedOutcome(prompt);
+
+        if (input.output) {
+          const taskId = extractTaskId(prompt);
+
+          structuredPlanTaskIds.add(taskId);
+
+          return {
+            text: "",
+            output: {
+              operations: buildFactoryWorkspaceOperations({
+                taskId,
+                expectedOutcome,
+                appName: extractFactoryAppName(prompt),
+                repositoryName: extractFactoryRepositoryName(prompt)
+              })
+            },
+            usage: {
+              inputTokens: 20,
+              outputTokens: 30,
+              totalTokens: 50
+            },
+            totalUsage: {
+              inputTokens: 20,
+              outputTokens: 30,
+              totalTokens: 50
+            }
+          };
+        }
+
+        return {
+          text: [
+            `Completed ${extractCurrentTaskLabel(prompt)} for the current Factory stage.`,
+            expectedOutcome
+          ].join("\n\n"),
+          usage: {
+            inputTokens: 40,
+            outputTokens: 60,
+            totalTokens: 100
+          },
+          totalUsage: {
+            inputTokens: 40,
+            outputTokens: 60,
+            totalTokens: 100
+          }
+        };
+      }) as unknown as typeof generateText
+    })
+  });
+
+  try {
+    const submission = await prepareFactoryTaskSubmission(
+      {
+        instruction: [
+          "Build a Jira-style project management application in Factory Mode.",
+          "",
+          "Initial slice:",
+          "- application shell",
+          "- backlog view",
+          "- issue detail surface"
+        ].join("\n"),
+        project: {
+          id: "shipyard-runtime",
+          kind: "live"
+        },
+        operatingMode: "factory",
+        factory: {
+          appName: "Jira",
+          stackTemplateId: "nextjs_supabase_vercel",
+          repository: {
+            provider: "github",
+            owner: "acme",
+            name: "jira",
+            visibility: "private",
+            baseBranch: "main"
+          }
+        }
+      },
+      {
+        workspaceRoot
+      }
+    );
+
+    const runtimeWorkspace = submission.project?.folder?.displayPath;
+
+    assert.ok(runtimeWorkspace);
+
+    const run = await runtimeService.submitTask(submission);
+    const completedRun = await waitForRunStatus(runtimeService, run.id, "completed", {
+      attempts: 800,
+      delayMs: 5
+    });
+
+    assert.equal(completedRun.status, "completed");
+    assert.equal(completedRun.result?.mode, "phase-execution");
+    assert.equal(completedRun.phaseExecution?.status, "completed");
+    assert.equal(completedRun.validationStatus, "passed");
+    assert.ok(structuredPlanTaskIds.has("task-repository-bootstrap"));
+    assert.ok(
+      structuredPlanTaskIds.size >= 2,
+      "expected structured workspace plans for at least bootstrap and one implementation task"
+    );
+    assert.ok(completedRun.events.some((event) => event.type === "validation_gate_passed"));
+    assert.ok(
+      completedRun.factory?.phaseVerificationResults.every((result) => result.status === "passed")
+    );
+    const packageManifest = await readFile(path.join(runtimeWorkspace, "package.json"), "utf8");
+
+    assert.match(packageManifest, /"private": true/);
+    assert.match(packageManifest, /"build": "node -e/);
+    assert.match(packageManifest, /"typecheck": "node -e/);
+    assert.match(
+      await readFile(path.join(runtimeWorkspace, "src/app/page.tsx"), "utf8"),
+      /export default function Page/
+    );
+    assert.match(
+      await readFile(
+        path.join(runtimeWorkspace, "factory-output/task-nextjs-shell.md"),
+        "utf8"
+      ),
+      /Application shell implemented\./
+    );
+  } finally {
+    await rm(defaultDir, { recursive: true, force: true });
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 async function createInstructionRuntimeForTests() {
   const skillPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -435,18 +583,128 @@ async function createInstructionRuntimeForTests() {
 async function waitForRunStatus(
   runtimeService: Awaited<ReturnType<typeof createPersistentRuntimeService>>,
   runId: string,
-  expectedStatus: AgentRunRecord["status"]
+  expectedStatus: AgentRunRecord["status"],
+  options: {
+    attempts?: number;
+    delayMs?: number;
+  } = {}
 ) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const maxAttempts = options.attempts ?? 50;
+  const delayMs = options.delayMs ?? 0;
+  let lastSeenRun: AgentRunRecord | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const run = runtimeService.getRun(runId);
+
+    if (run) {
+      lastSeenRun = run;
+    }
 
     if (run?.status === expectedStatus) {
       return run;
     }
 
+    if (
+      expectedStatus !== "failed" &&
+      expectedStatus !== "paused" &&
+      (run?.status === "failed" || run?.status === "paused")
+    ) {
+      assert.fail(
+        `Run ${runId} reached ${run.status} before ${expectedStatus}: ${run.error?.message ?? "no error"}`
+      );
+    }
+
     await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
-  assert.fail(`Timed out waiting for run ${runId} to reach ${expectedStatus}.`);
+  assert.fail(
+    `Timed out waiting for run ${runId} to reach ${expectedStatus}. Last status: ${lastSeenRun?.status ?? "missing"}${lastSeenRun?.error?.message ? ` (${lastSeenRun.error.message})` : ""}.`
+  );
+}
+
+function extractExpectedOutcome(prompt: string) {
+  const match =
+    prompt.match(/include this exact final standalone line: ([^\n]+)/) ??
+    prompt.match(/Expected outcome:\n([^\n]+)/);
+
+  return match?.[1]?.trim() || "Completed the current Factory task.";
+}
+
+function extractTaskId(prompt: string) {
+  const match = prompt.match(/Task id: ([^\n]+)/);
+
+  return match?.[1]?.trim() || "task-runtime-workspace";
+}
+
+function extractFactoryAppName(prompt: string) {
+  const match = prompt.match(/App: ([^\n]+)/);
+
+  return match?.[1]?.trim() || "Factory App";
+}
+
+function extractFactoryRepositoryName(prompt: string) {
+  const match = prompt.match(/Repository target: (?:[^/\n]+\/)?([^\n]+)/);
+
+  return match?.[1]?.trim() || "factory-app";
+}
+
+function extractCurrentTaskLabel(prompt: string) {
+  const taskId = extractTaskId(prompt);
+
+  if (taskId !== "task-runtime-workspace") {
+    return taskId;
+  }
+
+  const phaseMatch = prompt.match(/Current phase: ([^\n]+)/);
+
+  return phaseMatch?.[1]?.trim() || "the current task";
+}
+
+function buildFactoryWorkspaceOperations(input: {
+  taskId: string;
+  expectedOutcome: string;
+  appName: string;
+  repositoryName: string;
+}) {
+  const safeTaskId = sanitizeTaskPathSegment(input.taskId);
+
+  if (input.taskId === "task-repository-bootstrap") {
+    return [
+      {
+        kind: "write_file" as const,
+        path: "package.json",
+        content: JSON.stringify(
+          {
+            name: input.repositoryName,
+            private: true,
+            scripts: {
+              dev: "node -e \"console.log('dev ready')\"",
+              build: "node -e \"console.log('build ready')\"",
+              typecheck: "node -e \"console.log('typecheck ready')\""
+            }
+          },
+          null,
+          2
+        ) + "\n"
+      },
+      {
+        kind: "write_file" as const,
+        path: "src/app/page.tsx",
+        content: `export default function Page() {\n  return "${input.appName}";\n}\n`
+      }
+    ];
+  }
+
+  return [
+    {
+      kind: "write_file" as const,
+      path: `factory-output/${safeTaskId}.md`,
+      content: `# ${input.taskId}\n\n${input.expectedOutcome}\n`
+    }
+  ];
+}
+
+function sanitizeTaskPathSegment(value: string) {
+  return value.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
